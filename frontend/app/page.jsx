@@ -228,8 +228,8 @@ export default function Dashboard() {
         />
         <Metric
           icon={ShieldCheck}
-          label="High confidence"
-          value={opportunities.filter((item) => item.confidence === "high").length}
+          label="Scan depth"
+          value={meta?.live_scan_depth || "testing"}
         />
       </section>
 

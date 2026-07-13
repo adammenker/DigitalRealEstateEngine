@@ -80,10 +80,21 @@ STATE_NAMES = {
     "wy": "wyoming",
 }
 
+CITY_COORDINATES = {
+    "st louis mo": (38.627003, -90.199404),
+    "st louis missouri": (38.627003, -90.199404),
+    "st. louis mo": (38.627003, -90.199404),
+    "st. louis missouri": (38.627003, -90.199404),
+    "stamford ct": (41.05343, -73.538734),
+    "stamford connecticut": (41.05343, -73.538734),
+}
+
 
 class DataForSEOLiveProvider:
     provider_name = "dataforseo-live"
     api_version = "v3"
+    us_labs_location_code = 2840
+    us_labs_location_name = "United States"
 
     def __init__(self, settings: Settings | None = None, timeout_seconds: float = 45.0) -> None:
         self.settings = settings or get_settings()
@@ -153,14 +164,14 @@ class DataForSEOLiveProvider:
         self, service: ServiceFamily, market: Market
     ) -> list[KeywordCandidate]:
         candidates: list[KeywordCandidate] = []
-        seeds = (service.seed_queries or [service.display_name])[:3]
+        seeds = self._keyword_seeds(service)[: self.keyword_seed_limit]
         for seed in seeds:
             task = {
                 "keyword": seed,
                 "language_code": "en",
-                "limit": 20,
+                "limit": self.keyword_suggestion_limit,
                 "include_seed_keyword": True,
-                **self._location_payload(market),
+                **self._labs_location_payload(market),
             }
             payload = await self._post("/v3/dataforseo_labs/google/keyword_suggestions/live", [task])
             items = self._extract_items(payload)
@@ -173,15 +184,15 @@ class DataForSEOLiveProvider:
 
         if not candidates:
             candidates = [KeywordCandidate(keyword=seed, source="seed") for seed in seeds]
-        return candidates
+        return self._rank_keyword_candidates(candidates, service)
 
     async def get_keyword_metrics(self, keywords: list[str], market: Market) -> list[KeywordMetric]:
         if not keywords:
             return []
         task = {
-            "keywords": keywords[:50],
+            "keywords": keywords[: self.keyword_metrics_limit],
             "language_code": "en",
-            **self._location_payload(market),
+            **self._labs_location_payload(market),
         }
         payload = await self._post(
             "/v3/dataforseo_labs/google/historical_search_volume/live",
@@ -206,7 +217,7 @@ class DataForSEOLiveProvider:
                     ),
                     monthly_history=self._monthly_history(monthly),
                     source="dataforseo:historical_search_volume",
-                    market_granularity=market.type.value,
+                    market_granularity=self._labs_granularity(market),
                 )
             )
         return metrics
@@ -216,7 +227,7 @@ class DataForSEOLiveProvider:
             "keyword": keyword,
             "language_code": "en",
             "device": "desktop",
-            "depth": 10,
+            "depth": self.serp_depth,
             **self._location_payload(market),
         }
         payload = await self._post("/v3/serp/google/organic/live/advanced", [task])
@@ -283,13 +294,17 @@ class DataForSEOLiveProvider:
     ) -> list[ProviderCandidate]:
         task: dict[str, Any] = {
             "language_code": "en",
-            "limit": 10,
-            **self._location_payload(market),
+            "limit": self.business_listings_limit,
+            "filters": ["address_info.country_code", "=", market.country_code.upper()],
         }
+        coordinate = self._location_coordinate(market)
+        if coordinate:
+            task["location_coordinate"] = coordinate
         if service.provider_categories:
             task["categories"] = service.provider_categories[:10]
+            task["description"] = f"{service.display_name} {market.display_name}"
         else:
-            task["description"] = service.display_name
+            task["description"] = f"{service.display_name} {market.display_name}"
 
         payload = await self._post("/v3/business_data/business_listings/search/live", [task])
         providers: list[ProviderCandidate] = []
@@ -299,6 +314,7 @@ class DataForSEOLiveProvider:
                 continue
             rating = self._as_dict(item.get("rating"))
             address = self._format_address(item.get("address_info") or item.get("address"))
+            work_time = self._as_dict(item.get("work_time"))
             providers.append(
                 ProviderCandidate(
                     name=name,
@@ -309,7 +325,9 @@ class DataForSEOLiveProvider:
                     category=self._clean_optional_str(item.get("category")),
                     rating=self._to_float(rating.get("value") or item.get("rating")),
                     review_count=self._to_int(rating.get("votes_count") or item.get("review_count")),
-                    business_status=str(item.get("status") or "unknown"),
+                    business_status=str(
+                        work_time.get("current_status") or item.get("current_status") or "unknown"
+                    ),
                     contact_confidence=0.65 if item.get("url") or item.get("phone") else 0.35,
                     source="dataforseo:business_listings",
                 )
@@ -319,6 +337,30 @@ class DataForSEOLiveProvider:
     @property
     def settings_country_code(self) -> str:
         return "US"
+
+    @property
+    def scan_depth(self) -> str:
+        return self.settings.live_scan_depth.lower().strip()
+
+    @property
+    def keyword_seed_limit(self) -> int:
+        return 1 if self.scan_depth == "testing" else 3
+
+    @property
+    def keyword_suggestion_limit(self) -> int:
+        return 10 if self.scan_depth == "testing" else 20
+
+    @property
+    def keyword_metrics_limit(self) -> int:
+        return 10 if self.scan_depth == "testing" else 50
+
+    @property
+    def serp_depth(self) -> int:
+        return 10
+
+    @property
+    def business_listings_limit(self) -> int:
+        return 5 if self.scan_depth == "testing" else 10
 
     async def _get(self, path: str) -> dict[str, Any]:
         async with self._client() as client:
@@ -344,6 +386,10 @@ class DataForSEOLiveProvider:
             raise DataForSEOError(f"DataForSEO returned non-JSON response: HTTP {response.status_code}") from exc
         if response.status_code >= 400:
             message = payload.get("status_message") or response.text
+            if response.status_code == 402:
+                message = (
+                    f"{message} DataForSEO returned HTTP 402; check the account balance or billing limits."
+                )
             raise DataForSEOError(f"DataForSEO HTTP {response.status_code}: {message}")
         status_code = self._to_int(payload.get("status_code"))
         if status_code is not None and status_code >= 40000:
@@ -380,6 +426,75 @@ class DataForSEOLiveProvider:
         if market.provider_location_name:
             return {"location_name": market.provider_location_name}
         return {"location_name": market.display_name}
+
+    def _labs_location_payload(self, market: Market) -> dict[str, Any]:
+        if market.country_code.upper() == "US":
+            return {"location_code": self.us_labs_location_code}
+        return {"location_name": market.country_code.upper()}
+
+    def _labs_granularity(self, market: Market) -> str:
+        if market.country_code.upper() == "US":
+            return "country"
+        return market.type.value
+
+    def _location_coordinate(self, market: Market, radius_km: int = 50) -> str | None:
+        if market.latitude is not None and market.longitude is not None:
+            return f"{market.latitude:.6f},{market.longitude:.6f},{radius_km}"
+        key = self._normalize_location(market.display_name)
+        coordinates = CITY_COORDINATES.get(key)
+        if coordinates is None and market.cities:
+            city_key = self._normalize_location(f"{market.cities[0]} {market.state or ''}")
+            coordinates = CITY_COORDINATES.get(city_key)
+        if coordinates is None:
+            return None
+        return f"{coordinates[0]:.6f},{coordinates[1]:.6f},{radius_km}"
+
+    def _keyword_seeds(self, service: ServiceFamily) -> list[str]:
+        base = service.display_name.lower()
+        seeds = list(service.seed_queries or [])
+        seeds.extend(
+            [
+                f"{base} contractor",
+                f"{base} repair",
+                f"{base} installation",
+                base,
+            ]
+        )
+        deduped: list[str] = []
+        for seed in seeds:
+            normalized = " ".join(seed.lower().split())
+            if normalized and normalized not in deduped:
+                deduped.append(normalized)
+        return deduped
+
+    def _rank_keyword_candidates(
+        self,
+        candidates: list[KeywordCandidate],
+        service: ServiceFamily,
+    ) -> list[KeywordCandidate]:
+        service_terms = set(slugify(service.display_name).split("-"))
+        buyer_terms = {
+            "contractor",
+            "company",
+            "companies",
+            "repair",
+            "installation",
+            "installer",
+            "service",
+            "services",
+            "near",
+            "me",
+        }
+
+        def score(candidate: KeywordCandidate) -> tuple[int, str]:
+            tokens = set(slugify(candidate.keyword).split("-"))
+            relevance = len(tokens.intersection(service_terms)) * 10
+            relevance += len(tokens.intersection(buyer_terms)) * 4
+            if any(word in tokens for word in {"anchor", "screw", "sheet", "panel", "lowes", "home"}):
+                relevance -= 6
+            return (-relevance, candidate.keyword)
+
+        return sorted(candidates, key=score)
 
     def _best_location_match(
         self,

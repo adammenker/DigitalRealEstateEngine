@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     cloudflare_pages_project: str = ""
     max_scan_cost_usd: float = Field(default=10.0, ge=0)
     allow_live_api_calls: bool = False
+    live_scan_depth: str = "testing"
     project_root: Path = Path.cwd()
 
 

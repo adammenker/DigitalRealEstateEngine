@@ -15,13 +15,12 @@ from sqlalchemy.orm import Session
 from rank_rent.db.base import get_session, init_db
 from rank_rent.db.orm import JsonArtifactORM, OpportunityORM
 from rank_rent.domain.models import Market, ServiceFamily
+from rank_rent.integrations.dataforseo.live import DataForSEOError
 from rank_rent.runtime import resolve_data_mode, validate_runtime_mode
 from rank_rent.services.scanner import ScanPipeline
 from rank_rent.settings import get_settings
 
 init_db()
-settings = get_settings()
-data_mode = validate_runtime_mode(settings)
 app = FastAPI(title="Digital Real Estate Engine")
 app.add_middleware(
     CORSMiddleware,
@@ -61,7 +60,7 @@ def _artifact_data_mode(artifacts: Sequence[JsonArtifactORM]) -> str:
             mode = artifact.payload.get("data_mode")
             if isinstance(mode, str):
                 return mode
-    return data_mode.value
+    return validate_runtime_mode(get_settings()).value
 
 
 @app.get("/healthz")
@@ -71,19 +70,25 @@ def healthz() -> dict[str, str]:
 
 @app.get("/api/meta")
 def api_meta() -> dict[str, Any]:
+    settings = get_settings()
+    data_mode = validate_runtime_mode(settings)
     return {
         "data_mode": data_mode.value,
         "synthetic_fixture_data": data_mode.value == "fixture",
         "live_api_calls_allowed": settings.allow_live_api_calls,
+        "live_scan_depth": settings.live_scan_depth,
     }
 
 
 @app.get("/api/opportunities")
 def api_opportunities(session: Session = Depends(get_session)) -> dict[str, Any]:
+    settings = get_settings()
+    data_mode = validate_runtime_mode(settings)
     opportunities = session.scalars(select(OpportunityORM).order_by(OpportunityORM.id.desc())).all()
     return {
         "data_mode": data_mode.value,
         "synthetic_fixture_data": data_mode.value == "fixture",
+        "live_scan_depth": settings.live_scan_depth,
         "opportunities": [_opportunity_summary(row) for row in opportunities],
     }
 
@@ -117,6 +122,8 @@ def api_opportunity_detail(
 
 @app.post("/api/scans")
 async def api_scan(payload: ScanRequest, session: Session = Depends(get_session)) -> dict[str, Any]:
+    settings = get_settings()
+    data_mode = validate_runtime_mode(settings)
     requested_mode = resolve_data_mode(payload.data_mode or data_mode)
     validate_runtime_mode(settings, requested_mode)
     service = ServiceFamily(
@@ -141,11 +148,14 @@ async def api_scan(payload: ScanRequest, session: Session = Depends(get_session)
             ),
             "resolved": {"service": service.display_name, "market": market.display_name},
         }
-    result = await ScanPipeline(session, data_mode=requested_mode).run(
-        service,
-        market,
-        source="manual",
-    )
+    try:
+        result = await ScanPipeline(session, data_mode=requested_mode).run(
+            service,
+            market,
+            source="manual",
+        )
+    except DataForSEOError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {
         "dry_run": False,
         "data_mode": result["data_mode"],

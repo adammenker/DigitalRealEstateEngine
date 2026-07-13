@@ -4,6 +4,7 @@ from sqlalchemy.orm import sessionmaker
 
 from rank_rent.db.base import Base, make_engine
 from rank_rent.db.orm import JsonArtifactORM  # noqa: F401
+from rank_rent.runtime import DataMode
 from rank_rent.services.scanner import ScanPipeline
 from rank_rent.services.seeds import load_markets, load_services
 
@@ -42,10 +43,11 @@ thresholds:
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     with Session() as session:
-        result = asyncio.run(ScanPipeline(session).run(service, market, source="fixture"))
+        result = asyncio.run(
+            ScanPipeline(session, data_mode=DataMode.fixture).run(service, market, source="fixture")
+        )
     assert result["score"].total_score > 0
     assert result["site_path"].exists()
     html = (result["site_path"] / "index.html").read_text()
     assert "independent referral website" in html.lower()
     assert "Home Service Co" not in html
-

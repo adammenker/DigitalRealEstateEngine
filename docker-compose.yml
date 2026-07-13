@@ -12,6 +12,7 @@ services:
       DATA_MODE: ${DATA_MODE:-fixture}
       DATABASE_URL: sqlite:////data/rank_rent.db
       ALLOW_LIVE_API_CALLS: ${ALLOW_LIVE_API_CALLS:-false}
+      LIVE_SCAN_DEPTH: ${LIVE_SCAN_DEPTH:-testing}
       MAX_SCAN_COST_USD: ${MAX_SCAN_COST_USD:-10.00}
       DATAFORSEO_LOGIN: ${DATAFORSEO_LOGIN:-}
       DATAFORSEO_PASSWORD: ${DATAFORSEO_PASSWORD:-}

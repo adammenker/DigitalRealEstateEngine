@@ -48,6 +48,7 @@ class ScanPipeline:
             self.settings,
             self.data_mode,
         )
+        self.live_scan_depth = self.settings.live_scan_depth.lower().strip()
         self.scorer = OpportunityScorer()
 
     async def run(
@@ -81,11 +82,13 @@ class ScanPipeline:
                     type(self.research_provider).__name__,
                 ),
                 "domain_provider": type(self.domain_provider).__name__,
+                "live_scan_depth": self.live_scan_depth if self.data_mode == DataMode.live else None,
             },
             request_parameters={
                 "service": service.slug,
                 "market": market.slug,
                 "data_mode": self.data_mode.value,
+                "live_scan_depth": self.live_scan_depth if self.data_mode == DataMode.live else None,
             },
         )
         self.session.add(scan)
@@ -96,14 +99,20 @@ class ScanPipeline:
             keywords = dedupe_and_filter_keywords(candidates, service.negative_terms)
             included_keywords = [k.keyword for k in keywords if k.included]
             metrics = await self.research_provider.get_keyword_metrics(included_keywords, market)
-            representative = included_keywords[:3]
+            representative = included_keywords[: self.serp_keyword_limit]
             serp_snapshots = []
             for keyword in representative:
                 snapshot = await self.research_provider.get_serp_snapshot(keyword, market)
                 snapshot.results = [classify_result(result) for result in snapshot.results]
                 serp_snapshots.append(snapshot)
-            competitor_urls = [r.url for s in serp_snapshots for r in s.results if r.result_type == "organic"][:5]
-            competitors = await self.research_provider.get_competitor_metrics(competitor_urls)
+            competitor_urls = [
+                r.url for s in serp_snapshots for r in s.results if r.result_type == "organic"
+            ][: self.backlink_competitor_limit]
+            competitors = (
+                await self.research_provider.get_competitor_metrics(competitor_urls)
+                if competitor_urls
+                else []
+            )
             providers = await self.research_provider.find_providers(service, market)
             score = self.scorer.score(metrics, serp_snapshots, competitors, providers)
             domains = await generate_domain_candidates(service, market, self.domain_provider)
@@ -120,6 +129,8 @@ class ScanPipeline:
                 "scan_result",
                 {
                     "data_mode": self.data_mode.value,
+                    "live_scan_depth": self.live_scan_depth if self.data_mode == DataMode.live else None,
+                    "estimated_paid_api_calls": self.estimated_paid_api_calls,
                     "keywords": [k.model_dump(mode="json") for k in keywords],
                     "metrics": [m.model_dump(mode="json") for m in metrics],
                     "serp_snapshots": [s.model_dump(mode="json") for s in serp_snapshots],
@@ -168,6 +179,35 @@ class ScanPipeline:
             opportunity.status = "review_required"
             self.session.commit()
             raise
+
+    @property
+    def serp_keyword_limit(self) -> int:
+        if self.data_mode != DataMode.live:
+            return 3
+        return 1 if self.live_scan_depth == "testing" else 3
+
+    @property
+    def backlink_competitor_limit(self) -> int:
+        if self.data_mode != DataMode.live:
+            return 5
+        return 0 if self.live_scan_depth == "testing" else 5
+
+    @property
+    def estimated_paid_api_calls(self) -> int:
+        if self.data_mode != DataMode.live:
+            return 0
+        keyword_suggestion_calls = 1 if self.live_scan_depth == "testing" else 3
+        keyword_metrics_calls = 1
+        serp_calls = self.serp_keyword_limit
+        backlink_calls = self.backlink_competitor_limit
+        business_listing_calls = 1
+        return (
+            keyword_suggestion_calls
+            + keyword_metrics_calls
+            + serp_calls
+            + backlink_calls
+            + business_listing_calls
+        )
 
 
 def score_summary(score: OpportunityScore) -> str:

@@ -77,7 +77,8 @@ class OpportunityScorer:
         credible = [
             p
             for p in providers
-            if p.business_status == "open" and (p.website or p.phone or p.contact_form_url)
+            if p.business_status not in {"closed", "closed_forever", "temporarily_closed"}
+            and (p.website or p.phone or p.contact_form_url)
         ]
         provider_supply = _bounded(
             min(len(credible), 8) / 8 * self.weights["provider_supply"],
@@ -112,8 +113,15 @@ class OpportunityScorer:
             "credible_provider_count": len(credible),
             "serp_result_count": len(serp_results),
         }
+        live_sources = [m for m in metrics if not m.source.startswith("fixture") and "fixture" not in m.source]
+        volume_label = "live monthly searches" if live_sources else "fixture monthly searches"
+        assumption = (
+            "Live provider data can mix country-level keyword metrics with city-level SERP/provider data."
+            if live_sources
+            else "Fixture adapter uses representative sample data."
+        )
         explanation = (
-            f"Score {round(total, 1)} reflects {total_volume} fixture monthly searches, "
+            f"Score {round(total, 1)} reflects {total_volume} {volume_label}, "
             f"{len(high_intent)} high-intent terms, average CPC ${avg_cpc:.2f}, "
             f"and {len(credible)} contactable providers. It is not a ranking or profit guarantee."
         )
@@ -126,6 +134,5 @@ class OpportunityScorer:
             explanation=explanation,
             confidence=confidence,
             missing_fields=missing,
-            assumptions=["Fixture adapter uses representative sample data."],
+            assumptions=[assumption],
         )
-
