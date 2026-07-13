@@ -9,19 +9,23 @@ from sqlalchemy.orm import Session
 from rank_rent.db.orm import ScanRunORM
 from rank_rent.domain.interfaces import DomainAvailabilityProvider, MarketResearchProvider
 from rank_rent.domain.models import Market, OpportunityScore, ServiceFamily
-from rank_rent.integrations.dataforseo.mock import FixtureMarketResearchProvider
-from rank_rent.integrations.domain_availability.mock import MockDomainAvailabilityProvider
+from rank_rent.integrations.factory import (
+    build_domain_availability_provider,
+    build_market_research_provider,
+)
 from rank_rent.repositories import (
     get_or_create_opportunity,
     save_artifact,
     upsert_market,
     upsert_service,
 )
+from rank_rent.runtime import DataMode, resolve_data_mode
 from rank_rent.scoring.score import OpportunityScorer
 from rank_rent.scoring.serp import classify_result
 from rank_rent.services.domains import generate_domain_candidates
 from rank_rent.services.keywords import dedupe_and_filter_keywords
 from rank_rent.services.outreach import generate_initial_email
+from rank_rent.settings import get_settings
 from rank_rent.site_generator.generator import build_site_config, generate_static_site
 
 
@@ -31,10 +35,19 @@ class ScanPipeline:
         session: Session,
         research_provider: MarketResearchProvider | None = None,
         domain_provider: DomainAvailabilityProvider | None = None,
+        data_mode: DataMode | str | None = None,
     ) -> None:
         self.session = session
-        self.research_provider = research_provider or FixtureMarketResearchProvider()
-        self.domain_provider = domain_provider or MockDomainAvailabilityProvider()
+        self.settings = get_settings()
+        self.data_mode = resolve_data_mode(data_mode or self.settings.data_mode)
+        self.research_provider = research_provider or build_market_research_provider(
+            self.settings,
+            self.data_mode,
+        )
+        self.domain_provider = domain_provider or build_domain_availability_provider(
+            self.settings,
+            self.data_mode,
+        )
         self.scorer = OpportunityScorer()
 
     async def run(
@@ -45,6 +58,12 @@ class ScanPipeline:
         source: str = "manual",
         build_site: bool = True,
     ) -> dict[str, Any]:
+        if (
+            self.data_mode == DataMode.live
+            and not market.provider_location_code
+            and not market.provider_location_name
+        ):
+            market = (await self.research_provider.resolve_location(market.display_name)).market
         service_row = upsert_service(self.session, service)
         market_row = upsert_market(self.session, market)
         opportunity = get_or_create_opportunity(self.session, service_row, market_row)
@@ -54,7 +73,20 @@ class ScanPipeline:
             status="running",
             estimated_cost_usd=0 if source == "fixture" else 2.5,
             started_at=datetime.now(UTC),
-            request_parameters={"service": service.slug, "market": market.slug},
+            integration_versions={
+                "data_mode": self.data_mode.value,
+                "market_research_provider": getattr(
+                    self.research_provider,
+                    "provider_name",
+                    type(self.research_provider).__name__,
+                ),
+                "domain_provider": type(self.domain_provider).__name__,
+            },
+            request_parameters={
+                "service": service.slug,
+                "market": market.slug,
+                "data_mode": self.data_mode.value,
+            },
         )
         self.session.add(scan)
         self.session.flush()
@@ -87,6 +119,7 @@ class ScanPipeline:
                 opportunity.id,
                 "scan_result",
                 {
+                    "data_mode": self.data_mode.value,
                     "keywords": [k.model_dump(mode="json") for k in keywords],
                     "metrics": [m.model_dump(mode="json") for m in metrics],
                     "serp_snapshots": [s.model_dump(mode="json") for s in serp_snapshots],
@@ -122,6 +155,7 @@ class ScanPipeline:
             return {
                 "opportunity_id": opportunity.id,
                 "scan_id": scan.id,
+                "data_mode": self.data_mode.value,
                 "score": score,
                 "domains": domains,
                 "providers": providers,
@@ -138,4 +172,3 @@ class ScanPipeline:
 
 def score_summary(score: OpportunityScore) -> str:
     return f"{score.total_score} ({score.confidence.value}) - {score.explanation}"
-

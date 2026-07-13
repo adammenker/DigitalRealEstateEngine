@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     app_env: str = "development"
+    data_mode: str = "fixture"
     database_url: str = "sqlite:///./rank_rent.db"
     dataforseo_login: str = ""
     dataforseo_password: str = ""
@@ -27,4 +28,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

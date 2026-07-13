@@ -209,6 +209,33 @@ h1 {
   color: var(--red);
 }
 
+.fixtureBanner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  border: 1px solid rgba(185, 129, 22, 0.4);
+  border-radius: 10px;
+  background: #fff7e5;
+  color: #704b08;
+  box-shadow: var(--shadow);
+}
+
+.fixtureBanner strong {
+  white-space: nowrap;
+}
+
+.syntheticNote {
+  display: inline-flex;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fff7e5;
+  color: #704b08 !important;
+  font-weight: 750;
+}
+
 .statsGrid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -590,7 +617,8 @@ th {
 
   .topbar,
   .draftList,
-  .listControls {
+  .listControls,
+  .fixtureBanner {
     display: grid;
   }
 

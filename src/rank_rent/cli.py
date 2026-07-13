@@ -14,15 +14,26 @@ from sqlalchemy import select
 from rank_rent.db.base import SessionLocal, init_db
 from rank_rent.db.orm import JsonArtifactORM, OpportunityORM
 from rank_rent.domain.models import Market, ServiceFamily
+from rank_rent.integrations.dataforseo.live import DataForSEOError, DataForSEOLiveProvider
 from rank_rent.qualification.report import fixture_capability_report
 from rank_rent.repositories import market_from_orm, service_from_orm, upsert_market, upsert_service
+from rank_rent.runtime import ConfigurationError, DataMode, validate_runtime_mode
 from rank_rent.services.scanner import ScanPipeline, score_summary
 from rank_rent.services.seeds import load_markets, load_services
+from rank_rent.settings import get_settings
 from rank_rent.site_generator.generator import build_site_config, generate_static_site
 
 app = typer.Typer(no_args_is_help=True)
 site_app = typer.Typer(no_args_is_help=True)
 app.add_typer(site_app, name="site")
+
+
+def require_runtime_mode(mode: DataMode) -> None:
+    try:
+        validate_runtime_mode(get_settings(), mode)
+    except ConfigurationError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED)
+        raise typer.Exit(2) from exc
 
 
 @app.command("init-db")
@@ -54,10 +65,29 @@ def qualify(
     locations: str = "lower_fairfield_county",
 ) -> None:
     if live:
-        typer.echo("Live qualification is configured but guarded; set ALLOW_LIVE_API_CALLS=true and add a live adapter.")
-        raise typer.Exit(1)
+        require_runtime_mode(DataMode.live)
+        try:
+            provider = DataForSEOLiveProvider(settings=get_settings())
+            account = asyncio.run(provider.check_account())
+            location = asyncio.run(provider.resolve_location("Stamford, CT"))
+        except DataForSEOError as exc:
+            typer.secho(str(exc), fg=typer.colors.RED)
+            raise typer.Exit(2) from exc
+        typer.echo(
+            json.dumps(
+                {
+                    "data_mode": DataMode.live.value,
+                    "account_status": account["status_message"],
+                    "test_location": location.model_dump(mode="json"),
+                    "paid_scan_calls_enabled": get_settings().allow_live_api_calls,
+                },
+                indent=2,
+            )
+        )
+        return
     if not fixtures:
         fixtures = True
+    require_runtime_mode(DataMode.fixture)
     init_db()
     services = {item.id: item for item in load_services()}
     markets = {item.id: item for item in load_markets()}
@@ -65,7 +95,11 @@ def qualify(
     selected_market = markets[locations]
     with SessionLocal() as session:
         result = asyncio.run(
-            ScanPipeline(session).run(selected_service, selected_market, source="fixture")
+            ScanPipeline(session, data_mode=DataMode.fixture).run(
+                selected_service,
+                selected_market,
+                source="fixture",
+            )
         )
         report = fixture_capability_report(result)
         Path("fixtures/expected/capability_report.json").write_text(json.dumps(report, indent=2))
@@ -77,8 +111,10 @@ def qualify(
 def scan(
     service: Annotated[str, typer.Option("--service")],
     market: Annotated[str, typer.Option("--market")],
+    data_mode: Annotated[DataMode, typer.Option("--data-mode")] = DataMode.fixture,
 ) -> None:
     init_db()
+    require_runtime_mode(data_mode)
     services = {item.id: item for item in load_services()}
     markets = {item.id: item for item in load_markets()}
     selected_service = services.get(service) or ServiceFamily(
@@ -88,7 +124,9 @@ def scan(
     )
     selected_market = markets.get(market) or Market(id=market, display_name=market)
     with SessionLocal() as session:
-        result = asyncio.run(ScanPipeline(session).run(selected_service, selected_market))
+        result = asyncio.run(
+            ScanPipeline(session, data_mode=data_mode).run(selected_service, selected_market)
+        )
         typer.echo(f"Opportunity {result['opportunity_id']}: {score_summary(result['score'])}")
         typer.echo(f"Generated site: {result['site_path']}")
 

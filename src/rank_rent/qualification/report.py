@@ -64,5 +64,8 @@ def fixture_capability_report(scan_result: dict[str, Any]) -> dict[str, Any]:
             blocking=False,
         ),
     ]
-    return {"capabilities": [check.to_dict() for check in checks]}
-
+    return {
+        "data_mode": scan_result.get("data_mode", "fixture"),
+        "synthetic_fixture_data": scan_result.get("data_mode", "fixture") == "fixture",
+        "capabilities": [check.to_dict() for check in checks],
+    }

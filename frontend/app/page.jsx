@@ -23,6 +23,11 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 const api = {
+  async getMeta() {
+    const response = await fetch("/api/backend/api/meta", { cache: "no-store" });
+    if (!response.ok) throw new Error("Could not load runtime metadata");
+    return response.json();
+  },
   async listOpportunities() {
     const response = await fetch("/api/backend/api/opportunities", { cache: "no-store" });
     if (!response.ok) throw new Error("Could not load opportunities");
@@ -55,6 +60,7 @@ function artifactByKind(artifacts, kind) {
 
 export default function Dashboard() {
   const [opportunities, setOpportunities] = useState([]);
+  const [meta, setMeta] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -73,7 +79,8 @@ export default function Dashboard() {
   async function refresh(selectFirst = false) {
     setLoading(true);
     try {
-      const data = await api.listOpportunities();
+      const [metaData, data] = await Promise.all([api.getMeta(), api.listOpportunities()]);
+      setMeta(metaData);
       setOpportunities(data.opportunities);
       if (selectFirst && data.opportunities[0]) setSelectedId(data.opportunities[0].id);
     } finally {
@@ -156,6 +163,17 @@ export default function Dashboard() {
         </div>
       </section>
 
+      {meta?.synthetic_fixture_data && (
+        <section className="fixtureBanner">
+          <AlertTriangle size={18} />
+          <strong>Synthetic fixture data</strong>
+          <span>
+            Fixture mode uses deterministic test data for scores, SERPs, providers, domains, and
+            outreach. Do not treat it as live market evidence.
+          </span>
+        </section>
+      )}
+
       <section className="scanBand">
         <form onSubmit={submitScan} className="scanForm">
           <label>
@@ -202,6 +220,7 @@ export default function Dashboard() {
 
       <section className="statsGrid">
         <Metric icon={Database} label="Opportunities" value={opportunities.length} />
+        <Metric icon={ShieldCheck} label="Data mode" value={meta?.data_mode || "fixture"} />
         <Metric
           icon={Gauge}
           label="Best score"
@@ -212,7 +231,6 @@ export default function Dashboard() {
           label="High confidence"
           value={opportunities.filter((item) => item.confidence === "high").length}
         />
-        <Metric icon={Globe2} label="Generated sites" value={opportunities.length} />
       </section>
 
       <section className="workspace">
@@ -286,6 +304,11 @@ export default function Dashboard() {
                     {detail.opportunity.service} in {detail.opportunity.market}
                   </h2>
                   <p>{scan?.score?.explanation || "No score explanation has been saved yet."}</p>
+                  {detail.data_mode === "fixture" && (
+                    <p className="syntheticNote">
+                      Synthetic fixture data. Do not use as live market evidence.
+                    </p>
+                  )}
                 </div>
                 <ScoreDial score={detail.opportunity.score} confidence={detail.opportunity.confidence} />
               </div>
@@ -452,4 +475,3 @@ function Table({ columns, rows }) {
     </div>
   );
 }
-

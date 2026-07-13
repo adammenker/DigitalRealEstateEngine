@@ -62,7 +62,7 @@ def get_or_create_opportunity(
 
 
 def save_artifact(
-    session: Session, opportunity_id: int | None, kind: str, payload: dict
+    session: Session, opportunity_id: int | None, kind: str, payload: dict[str, object]
 ) -> JsonArtifactORM:
     row = JsonArtifactORM(opportunity_id=opportunity_id, kind=kind, payload=payload)
     session.add(row)

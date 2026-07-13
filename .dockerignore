@@ -7,9 +7,11 @@ __pycache__
 .git
 .gitignore
 rank_rent.db
+frontend/node_modules
+frontend/.next
+frontend/out
 generated_sites/*
 !generated_sites/.gitkeep
 src/rank_rent.egg-info
 tests
 specs
-
