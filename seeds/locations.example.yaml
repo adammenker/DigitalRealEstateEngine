@@ -1,0 +1,45 @@
+locations:
+  - id: lower_fairfield_county
+    display_name: Lower Fairfield County, CT
+    type: market
+    country_code: US
+    state: CT
+    cities:
+      - Stamford
+      - Greenwich
+      - Norwalk
+    postal_codes:
+      - "06901"
+      - "06830"
+      - "06850"
+    center:
+      latitude: 41.0534
+      longitude: -73.5387
+    enabled: true
+  - id: stamford_ct
+    display_name: Stamford, CT
+    type: city
+    country_code: US
+    state: CT
+    cities:
+      - Stamford
+    postal_codes:
+      - "06901"
+    center:
+      latitude: 41.0534
+      longitude: -73.5387
+    enabled: true
+  - id: jersey_city_07302
+    display_name: Jersey City, NJ 07302
+    type: postal_code
+    country_code: US
+    state: NJ
+    cities:
+      - Jersey City
+    postal_codes:
+      - "07302"
+    center:
+      latitude: 40.7218
+      longitude: -74.0447
+    enabled: true
+

@@ -1,0 +1,12 @@
+version: "v1"
+weights:
+  demand: 25
+  commercial_intent: 15
+  organic_accessibility: 30
+  serp_accessibility: 15
+  provider_supply: 15
+missing_data_penalty_max: 30
+thresholds:
+  high_confidence_missing_fields: 1
+  medium_confidence_missing_fields: 4
+

@@ -1,0 +1,628 @@
+:root {
+  --bg: #eef3f1;
+  --surface: #ffffff;
+  --surface-soft: #f8fbfa;
+  --ink: #121a17;
+  --muted: #65746d;
+  --line: #d8e2de;
+  --brand: #0d6b5c;
+  --brand-strong: #094c42;
+  --amber: #b98116;
+  --red: #b5413b;
+  --shadow: 0 18px 60px rgba(18, 26, 23, 0.09);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background:
+    linear-gradient(135deg, rgba(13, 107, 92, 0.12), transparent 28rem),
+    linear-gradient(225deg, rgba(185, 129, 22, 0.1), transparent 24rem),
+    var(--bg);
+  color: var(--ink);
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.shell {
+  width: min(1480px, 100%);
+  margin: 0 auto;
+  padding: 28px;
+}
+
+.topbar,
+.scanBand,
+.workspace,
+.statsGrid {
+  width: 100%;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  color: var(--brand);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 0;
+  font-size: clamp(2rem, 4vw, 3.6rem);
+  line-height: 1;
+}
+
+.topActions,
+.scanForm,
+.listControls,
+.paneHeader,
+.panel header {
+  display: flex;
+  align-items: center;
+}
+
+.topActions {
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ghostButton,
+.primaryButton {
+  min-height: 40px;
+  border-radius: 8px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.ghostButton {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--ink);
+}
+
+.primaryButton {
+  border: 0;
+  background: var(--brand);
+  color: white;
+  font-weight: 750;
+}
+
+.primaryButton:disabled {
+  opacity: 0.72;
+  cursor: wait;
+}
+
+.scanBand,
+.opportunityPane,
+.detailPane,
+.metric,
+.panel {
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(216, 226, 222, 0.88);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+}
+
+.scanBand {
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.scanForm {
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.scanForm label {
+  display: grid;
+  gap: 6px;
+  min-width: min(260px, 100%);
+  flex: 1;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.scanForm input,
+.scanForm select,
+.listControls input,
+.listControls select {
+  border: 1px solid var(--line);
+  background: white;
+  color: var(--ink);
+  border-radius: 8px;
+  min-height: 42px;
+  padding: 0 12px;
+  outline: none;
+}
+
+.scanForm input:focus,
+.listControls input:focus,
+.listControls select:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(13, 107, 92, 0.14);
+}
+
+.scanForm .countryField {
+  max-width: 110px;
+}
+
+.toggle {
+  max-width: 110px;
+  min-width: 110px;
+  grid-template-columns: 18px auto;
+  align-items: center;
+  align-self: end;
+  min-height: 42px;
+}
+
+.toggle input {
+  min-height: auto;
+}
+
+.notice {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 8px;
+  padding: 11px 12px;
+  background: #eef8f5;
+  color: var(--brand-strong);
+}
+
+.notice.error {
+  background: #fff1ef;
+  color: var(--red);
+}
+
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.metric {
+  border-radius: 10px;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 5px 10px;
+  align-items: center;
+}
+
+.metric svg {
+  color: var(--brand);
+}
+
+.metric span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.metric strong {
+  grid-column: 1 / -1;
+  font-size: 1.8rem;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: 380px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.workspace > *,
+.opportunityPane,
+.detailPane,
+.panel,
+.scanBand,
+.metric {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.opportunityPane,
+.detailPane {
+  border-radius: 10px;
+  min-height: 620px;
+}
+
+.opportunityPane {
+  padding: 14px;
+  position: sticky;
+  top: 18px;
+}
+
+.paneHeader {
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.paneHeader h2 {
+  margin-bottom: 2px;
+  font-size: 1.2rem;
+}
+
+.paneHeader p,
+.muted {
+  margin-bottom: 0;
+  color: var(--muted);
+}
+
+.listControls {
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.searchBox {
+  flex: 1;
+  position: relative;
+}
+
+.searchBox svg {
+  position: absolute;
+  left: 10px;
+  top: 13px;
+  color: var(--muted);
+}
+
+.searchBox input {
+  width: 100%;
+  padding-left: 34px;
+}
+
+.listControls select {
+  width: 110px;
+}
+
+.opportunityList {
+  display: grid;
+  gap: 8px;
+}
+
+.opportunityRow {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  text-align: left;
+  padding: 12px;
+}
+
+.opportunityRow.active {
+  border-color: var(--brand);
+  background: #eef8f5;
+}
+
+.opportunityRow strong {
+  display: block;
+  margin-bottom: 5px;
+}
+
+.opportunityRow small {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  color: var(--muted);
+}
+
+.scorePill {
+  min-width: 68px;
+  border-radius: 8px;
+  background: var(--surface-soft);
+  padding: 8px;
+  text-align: center;
+}
+
+.scorePill strong,
+.scorePill small {
+  display: block;
+}
+
+.scorePill small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.detailPane {
+  padding: 18px;
+}
+
+.blankDetail {
+  min-height: 580px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  text-align: center;
+  color: var(--muted);
+}
+
+.blankDetail h2 {
+  color: var(--ink);
+  margin: 12px 0 6px;
+}
+
+.detailHero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 148px;
+  gap: 20px;
+  align-items: center;
+  padding: 8px 4px 18px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 16px;
+}
+
+.detailHero h2 {
+  font-size: clamp(1.6rem, 3vw, 2.4rem);
+  margin-bottom: 10px;
+}
+
+.detailHero p {
+  color: var(--muted);
+  max-width: 850px;
+}
+
+.scoreDial {
+  width: 132px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background:
+    radial-gradient(closest-side, white 72%, transparent 73%),
+    conic-gradient(var(--brand) var(--score), #e2eae6 0);
+  display: grid;
+  place-items: center;
+}
+
+.scoreDial div {
+  text-align: center;
+}
+
+.scoreDial strong {
+  display: block;
+  font-size: 1.8rem;
+}
+
+.scoreDial span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.componentGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.component {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  padding: 12px;
+}
+
+.component span {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.component strong {
+  color: var(--ink);
+}
+
+.bar {
+  height: 8px;
+  border-radius: 999px;
+  background: #dfe8e4;
+  overflow: hidden;
+}
+
+.bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--brand), #43a28f);
+}
+
+.detailGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.panel {
+  border-radius: 10px;
+  padding: 14px;
+  box-shadow: none;
+  background: white;
+}
+
+.panel.wide {
+  grid-column: 1 / -1;
+}
+
+.panel header {
+  gap: 8px;
+  margin-bottom: 12px;
+  color: var(--brand);
+}
+
+.panel h3 {
+  color: var(--ink);
+  margin-bottom: 0;
+  font-size: 1rem;
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+th,
+td {
+  padding: 9px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  color: var(--muted);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+}
+
+.draftList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.draft {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--surface-soft);
+}
+
+.draft p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  white-space: pre-line;
+}
+
+.emptyState {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 18px;
+  color: var(--muted);
+  background: var(--surface-soft);
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 1120px) {
+  .workspace,
+  .detailGrid,
+  .detailHero {
+    grid-template-columns: 1fr;
+  }
+
+  .opportunityPane {
+    position: static;
+  }
+
+  .componentGrid,
+  .statsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .shell {
+    padding: 16px;
+    overflow-x: hidden;
+  }
+
+  .topbar,
+  .draftList,
+  .listControls {
+    display: grid;
+  }
+
+  .topActions,
+  .listControls,
+  .searchBox,
+  .listControls select {
+    width: 100%;
+  }
+
+  .statsGrid,
+  .componentGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .scanForm label,
+  .scanForm .countryField,
+  .toggle {
+    max-width: none;
+    width: 100%;
+  }
+
+  .opportunityRow {
+    align-items: flex-start;
+  }
+
+  .detailPane {
+    padding: 14px;
+  }
+
+  .detailHero {
+    padding-left: 0;
+    padding-right: 0;
+  }
+}

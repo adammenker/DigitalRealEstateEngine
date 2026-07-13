@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.DS_Store
+*.pyc
+*.egg-info/
+rank_rent.db
+generated_sites/*
+!generated_sites/.gitkeep
+frontend/node_modules/
+frontend/.next/
+frontend/out/

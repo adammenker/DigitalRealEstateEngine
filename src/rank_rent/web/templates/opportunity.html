@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/app.css">
+  <title>Opportunity {{ opportunity.id }}</title>
+</head>
+<body>
+  <main>
+    <a href="/">Dashboard</a>
+    <h1>{{ opportunity.service_family.display_name }} in {{ opportunity.market.display_name }}</h1>
+    <p><strong>Score:</strong> {{ opportunity.latest_score }} · <strong>Confidence:</strong> {{ opportunity.confidence }} · <strong>Status:</strong> {{ opportunity.status }}</p>
+    <h2>Artifacts</h2>
+    {% for artifact in artifacts %}
+      <details>
+        <summary>{{ artifact.kind }} · {{ artifact.created_at }}</summary>
+        <pre>{{ artifact.payload | tojson(indent=2) }}</pre>
+      </details>
+    {% endfor %}
+  </main>
+</body>
+</html>
+

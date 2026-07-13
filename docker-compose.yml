@@ -1,0 +1,56 @@
+services:
+  rank-rent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: digital-realestate-engine
+    restart: unless-stopped
+    ports:
+      - "${RANK_RENT_BACKEND_PORT:-8011}:8000"
+    environment:
+      APP_ENV: development
+      DATABASE_URL: sqlite:////data/rank_rent.db
+      ALLOW_LIVE_API_CALLS: "false"
+      MAX_SCAN_COST_USD: "10.00"
+      DATAFORSEO_LOGIN: ${DATAFORSEO_LOGIN:-}
+      DATAFORSEO_PASSWORD: ${DATAFORSEO_PASSWORD:-}
+      WHOISXML_API_KEY: ${WHOISXML_API_KEY:-}
+      PEXELS_API_KEY: ${PEXELS_API_KEY:-}
+      HUNTER_API_KEY: ${HUNTER_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+      CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
+      CLOUDFLARE_PAGES_PROJECT: ${CLOUDFLARE_PAGES_PROJECT:-}
+    volumes:
+      - rank_rent_data:/data
+      - ./generated_sites:/app/generated_sites
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: digital-realestate-engine-ui
+    restart: unless-stopped
+    depends_on:
+      rank-rent:
+        condition: service_healthy
+    ports:
+      - "${RANK_RENT_PORT:-8010}:3000"
+    environment:
+      BACKEND_INTERNAL_URL: http://rank-rent:8000
+      NEXT_TELEMETRY_DISABLED: "1"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  rank_rent_data:

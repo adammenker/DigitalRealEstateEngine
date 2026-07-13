@@ -1,0 +1,15 @@
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.git
+.gitignore
+rank_rent.db
+generated_sites/*
+!generated_sites/.gitkeep
+src/rank_rent.egg-info
+tests
+specs
+

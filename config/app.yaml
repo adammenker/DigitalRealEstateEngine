@@ -1,0 +1,8 @@
+scan_limits:
+  representative_keywords: 3
+  competitor_urls: 5
+  provider_candidates: 10
+cache_ttl_seconds:
+  default: 604800
+  serp: 86400
+

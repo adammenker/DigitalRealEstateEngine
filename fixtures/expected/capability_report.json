@@ -1,0 +1,65 @@
+{
+  "capabilities": [
+    {
+      "integration": "DataForSEO fixture",
+      "capability": "location, keywords, metrics, SERP, competitors, providers",
+      "passed": true,
+      "required_fields_found": [
+        "location",
+        "keywords",
+        "metrics",
+        "serp",
+        "providers"
+      ],
+      "missing_fields": [],
+      "sample_counts": {
+        "providers": 2,
+        "domains": 6
+      },
+      "estimated_cost": 0,
+      "actual_cost": 0,
+      "storage_restrictions_noted": "Raw paid payloads must be cached and retained as historical snapshots.",
+      "manual_intervention_required": false,
+      "blocking": true
+    },
+    {
+      "integration": "Domain availability fixture",
+      "capability": "likely availability check",
+      "passed": true,
+      "required_fields_found": [
+        "status",
+        "checked_at",
+        "provider_raw_status"
+      ],
+      "missing_fields": [],
+      "sample_counts": {
+        "domains": 6
+      },
+      "estimated_cost": 0,
+      "actual_cost": 0,
+      "storage_restrictions_noted": "Availability is not trademark clearance and does not purchase domains.",
+      "manual_intervention_required": true,
+      "blocking": false
+    },
+    {
+      "integration": "Static site generator",
+      "capability": "provider-independent sample site build",
+      "passed": true,
+      "required_fields_found": [
+        "home",
+        "disclosure",
+        "privacy",
+        "terms"
+      ],
+      "missing_fields": [],
+      "sample_counts": {
+        "sites": 1
+      },
+      "estimated_cost": 0,
+      "actual_cost": 0,
+      "storage_restrictions_noted": "Generated copy requires manual review before deployment.",
+      "manual_intervention_required": true,
+      "blocking": false
+    }
+  ]
+}

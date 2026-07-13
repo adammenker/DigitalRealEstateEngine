@@ -1,0 +1,36 @@
+services:
+  - id: water_heater_services
+    display_name: Water Heater Services
+    description: Repair, replacement, installation, and emergency service
+    seed_queries:
+      - water heater repair
+      - water heater replacement
+      - emergency water heater repair
+      - tankless water heater installation
+    negative_terms:
+      - diy
+      - jobs
+      - salary
+      - parts
+      - manual
+    provider_categories:
+      - plumber
+      - water heater installation service
+    regulated: false
+    enabled: true
+  - id: epoxy_flooring
+    display_name: Epoxy Flooring
+    description: Residential and light commercial epoxy floor coatings
+    seed_queries:
+      - epoxy flooring
+      - garage epoxy floor
+      - epoxy floor installers
+    negative_terms:
+      - diy
+      - kit
+      - jobs
+    provider_categories:
+      - flooring contractor
+    regulated: false
+    enabled: true
+
