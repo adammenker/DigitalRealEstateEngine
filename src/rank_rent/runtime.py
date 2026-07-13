@@ -8,6 +8,7 @@ from rank_rent.settings import Settings
 class DataMode(StrEnum):
     fixture = "fixture"
     live = "live"
+    replay = "replay"
 
 
 class ConfigurationError(RuntimeError):
@@ -41,4 +42,3 @@ def validate_runtime_mode(settings: Settings, mode: DataMode | None = None) -> D
                 + ", ".join(missing)
             )
     return data_mode
-

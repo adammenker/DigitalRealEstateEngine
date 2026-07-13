@@ -9,7 +9,7 @@ from rank_rent.services.scanner import ScanPipeline
 from rank_rent.services.seeds import load_markets, load_services
 
 
-def test_fixture_pipeline_builds_site(tmp_path, monkeypatch) -> None:
+def test_fixture_pipeline_records_scan_without_site_side_effects(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / "config/outreach_templates").mkdir(parents=True)
     (tmp_path / "config/scoring.yaml").write_text(
@@ -47,7 +47,5 @@ thresholds:
             ScanPipeline(session, data_mode=DataMode.fixture).run(service, market, source="fixture")
         )
     assert result["score"].total_score > 0
-    assert result["site_path"].exists()
-    html = (result["site_path"] / "index.html").read_text()
-    assert "independent referral website" in html.lower()
-    assert "Home Service Co" not in html
+    assert result["site_path"] is None
+    assert result["assessment_type"] == "full"

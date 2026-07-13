@@ -38,13 +38,32 @@ const api = {
     if (!response.ok) throw new Error("Could not load opportunity detail");
     return response.json();
   },
+  async getAudit() {
+    const response = await fetch("/api/backend/api/data/audit", { cache: "no-store" });
+    if (!response.ok) throw new Error("Could not load data audit");
+    return response.json();
+  },
+  async listScans() {
+    const response = await fetch("/api/backend/api/scans", { cache: "no-store" });
+    if (!response.ok) throw new Error("Could not load scans");
+    return response.json();
+  },
   async runScan(payload) {
     const response = await fetch("/api/backend/api/scans", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
-    if (!response.ok) throw new Error("Scan failed");
+    if (!response.ok) {
+      let message = "Scan failed";
+      try {
+        const error = await response.json();
+        message = error.detail || message;
+      } catch {
+        // Keep the generic fallback when the backend returns non-JSON.
+      }
+      throw new Error(message);
+    }
     return response.json();
   }
 };
@@ -54,12 +73,19 @@ function number(value, fallback = "n/a") {
   return Number(value).toFixed(1);
 }
 
+function money(value) {
+  if (value === null || value === undefined) return "$0.000";
+  return `$${Number(value).toFixed(3)}`;
+}
+
 function artifactByKind(artifacts, kind) {
   return artifacts.find((artifact) => artifact.kind === kind)?.payload;
 }
 
 export default function Dashboard() {
   const [opportunities, setOpportunities] = useState([]);
+  const [scans, setScans] = useState([]);
+  const [audit, setAudit] = useState(null);
   const [meta, setMeta] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -67,21 +93,31 @@ export default function Dashboard() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [scanLoading, setScanLoading] = useState(false);
   const [notice, setNotice] = useState(null);
+  const [lastPlan, setLastPlan] = useState(null);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("score");
   const [form, setForm] = useState({
     service_text: "water heater repair",
     location_text: "Stamford, CT",
     country: "US",
-    dry_run: false
+    dry_run: true,
+    async_run: true,
+    confirm_live_cost: false
   });
 
   async function refresh(selectFirst = false) {
     setLoading(true);
     try {
-      const [metaData, data] = await Promise.all([api.getMeta(), api.listOpportunities()]);
+      const [metaData, data, auditData, scanData] = await Promise.all([
+        api.getMeta(),
+        api.listOpportunities(),
+        api.getAudit(),
+        api.listScans()
+      ]);
       setMeta(metaData);
       setOpportunities(data.opportunities);
+      setAudit(auditData);
+      setScans(scanData.scans || []);
       if (selectFirst && data.opportunities[0]) setSelectedId(data.opportunities[0].id);
     } finally {
       setLoading(false);
@@ -91,6 +127,13 @@ export default function Dashboard() {
   useEffect(() => {
     refresh(true);
   }, []);
+
+  useEffect(() => {
+    const active = scans.some((scanRow) => ["queued", "running"].includes(scanRow.status));
+    if (!active) return undefined;
+    const timer = setInterval(() => refresh(false), 4000);
+    return () => clearInterval(timer);
+  }, [scans]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -110,6 +153,7 @@ export default function Dashboard() {
     setNotice(null);
     try {
       const result = await api.runScan(form);
+      setLastPlan(result.scan_plan || null);
       setNotice({ type: result.dry_run ? "dry-run" : "success", message: result.message });
       await refresh(false);
       if (result.opportunity_id) setSelectedId(result.opportunity_id);
@@ -134,7 +178,7 @@ export default function Dashboard() {
   }, [opportunities, query, sort]);
 
   const artifacts = detail?.artifacts || [];
-  const scan = artifactByKind(artifacts, "scan_result");
+  const scan = artifactByKind(artifacts, "scan_result") || artifactByKind(artifacts, "preliminary_assessment");
   const domains = artifactByKind(artifacts, "domain_candidates")?.domains || [];
   const outreach = artifactByKind(artifacts, "outreach_drafts")?.drafts || [];
   const site = artifactByKind(artifacts, "site_config");
@@ -142,6 +186,7 @@ export default function Dashboard() {
   const providers = scan?.providers || [];
   const competitors = scan?.competitors || [];
   const keywords = scan?.metrics || [];
+  const activeScanCount = scans.filter((item) => ["queued", "running"].includes(item.status)).length;
 
   return (
     <main className="shell">
@@ -205,11 +250,49 @@ export default function Dashboard() {
             />
             <span>Dry run</span>
           </label>
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={form.async_run}
+              disabled={form.dry_run}
+              onChange={(event) => setForm({ ...form, async_run: event.target.checked })}
+            />
+            <span>Background</span>
+          </label>
+          {meta?.data_mode === "live" && !form.dry_run && (
+            <label className="toggle costToggle">
+              <input
+                type="checkbox"
+                checked={form.confirm_live_cost}
+                onChange={(event) =>
+                  setForm({ ...form, confirm_live_cost: event.target.checked })
+                }
+              />
+              <span>Confirm cost</span>
+            </label>
+          )}
           <button className="primaryButton" disabled={scanLoading}>
             {scanLoading ? <Loader2 className="spin" size={17} /> : <Play size={17} />}
-            {form.dry_run ? "Interpret" : "Run Scan"}
+            {form.dry_run ? "Dry Run" : form.async_run ? "Queue Scan" : "Run Scan"}
           </button>
         </form>
+        {lastPlan && (
+          <div className="planStrip">
+            <span>{lastPlan.planned_calls?.length || 0} calls</span>
+            <span>{money(lastPlan.estimated_uncached_cost_usd)} uncached</span>
+            <span>{money(lastPlan.cached_cost_usd)} cached</span>
+            <span>{lastPlan.blocked ? "blocked" : lastPlan.scan_profile}</span>
+          </div>
+        )}
+        {scans.length > 0 && (
+          <div className="scanTimeline">
+            {scans.slice(0, 4).map((item) => (
+              <span key={item.id} className={`scanChip ${item.status}`}>
+                #{item.id} {item.status} {money(item.actual_cost_usd || item.estimated_cost_usd)}
+              </span>
+            ))}
+          </div>
+        )}
         {notice && (
           <div className={`notice ${notice.type}`}>
             {notice.type === "error" ? <AlertTriangle size={18} /> : <CheckCircle2 size={18} />}
@@ -220,6 +303,7 @@ export default function Dashboard() {
 
       <section className="statsGrid">
         <Metric icon={Database} label="Opportunities" value={opportunities.length} />
+        <Metric icon={Activity} label="Active scans" value={activeScanCount} />
         <Metric icon={ShieldCheck} label="Data mode" value={meta?.data_mode || "fixture"} />
         <Metric
           icon={Gauge}
@@ -231,6 +315,7 @@ export default function Dashboard() {
           label="Scan depth"
           value={meta?.live_scan_depth || "testing"}
         />
+        <Metric icon={Database} label="Raw responses" value={audit?.raw_response_count || 0} />
       </section>
 
       <section className="workspace">
@@ -307,6 +392,11 @@ export default function Dashboard() {
                   {detail.data_mode === "fixture" && (
                     <p className="syntheticNote">
                       Synthetic fixture data. Do not use as live market evidence.
+                    </p>
+                  )}
+                  {scan?.assessment_type === "preliminary" && (
+                    <p className="syntheticNote">
+                      Preliminary testing assessment. It is not comparable to a full opportunity score.
                     </p>
                   )}
                 </div>

@@ -26,6 +26,13 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
 
 
+def reset_db() -> None:
+    from rank_rent.db import orm  # noqa: F401
+
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+
 def get_session() -> Generator[Session]:
     session = SessionLocal()
     try:

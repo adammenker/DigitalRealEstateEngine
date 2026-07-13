@@ -4,15 +4,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from rank_rent.db.orm import ScanRunORM
+from rank_rent.db.orm import RawApiResponseORM, ScanRunORM
 from rank_rent.domain.interfaces import DomainAvailabilityProvider, MarketResearchProvider
 from rank_rent.domain.models import Market, OpportunityScore, ServiceFamily
 from rank_rent.integrations.factory import (
     build_domain_availability_provider,
     build_market_research_provider,
 )
+from rank_rent.planning import build_scan_plan
+from rank_rent.replay import DatabaseReplayTransport
 from rank_rent.repositories import (
     get_or_create_opportunity,
     save_artifact,
@@ -25,6 +28,7 @@ from rank_rent.scoring.serp import classify_result
 from rank_rent.services.domains import generate_domain_candidates
 from rank_rent.services.keywords import dedupe_and_filter_keywords
 from rank_rent.services.outreach import generate_initial_email
+from rank_rent.services.records import save_scan_plan_calls, save_scan_records
 from rank_rent.settings import get_settings
 from rank_rent.site_generator.generator import build_site_config, generate_static_site
 
@@ -40,9 +44,16 @@ class ScanPipeline:
         self.session = session
         self.settings = get_settings()
         self.data_mode = resolve_data_mode(data_mode or self.settings.data_mode)
+        replay_transport = (
+            DatabaseReplayTransport(session)
+            if self.data_mode == DataMode.replay and research_provider is None
+            else None
+        )
         self.research_provider = research_provider or build_market_research_provider(
             self.settings,
             self.data_mode,
+            replay_transport=replay_transport,
+            session=session,
         )
         self.domain_provider = domain_provider or build_domain_availability_provider(
             self.settings,
@@ -57,44 +68,46 @@ class ScanPipeline:
         market: Market,
         *,
         source: str = "manual",
-        build_site: bool = True,
+        build_site: bool = False,
+        existing_scan_id: int | None = None,
     ) -> dict[str, Any]:
-        if (
-            self.data_mode == DataMode.live
-            and not market.provider_location_code
-            and not market.provider_location_name
-        ):
-            market = (await self.research_provider.resolve_location(market.display_name)).market
+        plan = build_scan_plan(self.settings, self.data_mode, service, market, session=self.session)
+        if plan.blocked:
+            raise RuntimeError(plan.block_reason or "Scan blocked by cost policy.")
         service_row = upsert_service(self.session, service)
         market_row = upsert_market(self.session, market)
         opportunity = get_or_create_opportunity(self.session, service_row, market_row)
-        scan = ScanRunORM(
+        scan = self._prepare_scan_run(
+            existing_scan_id=existing_scan_id,
             opportunity_id=opportunity.id,
             source=source,
-            status="running",
-            estimated_cost_usd=0 if source == "fixture" else 2.5,
-            started_at=datetime.now(UTC),
-            integration_versions={
-                "data_mode": self.data_mode.value,
-                "market_research_provider": getattr(
-                    self.research_provider,
-                    "provider_name",
-                    type(self.research_provider).__name__,
-                ),
-                "domain_provider": type(self.domain_provider).__name__,
-                "live_scan_depth": self.live_scan_depth if self.data_mode == DataMode.live else None,
-            },
-            request_parameters={
-                "service": service.slug,
-                "market": market.slug,
-                "data_mode": self.data_mode.value,
-                "live_scan_depth": self.live_scan_depth if self.data_mode == DataMode.live else None,
-            },
+            service=service,
+            market=market,
+            plan=plan,
         )
-        self.session.add(scan)
         self.session.flush()
+        save_scan_plan_calls(self.session, scan.id, plan)
 
         try:
+            if (
+                self.data_mode == DataMode.live
+                and not market.provider_location_code
+                and not market.provider_location_name
+            ):
+                market = (await self.research_provider.resolve_location(market.display_name)).market
+                market_row = upsert_market(self.session, market)
+                opportunity = get_or_create_opportunity(self.session, service_row, market_row)
+                scan.opportunity_id = opportunity.id
+                scan.request_parameters = {
+                    **scan.request_parameters,
+                    "market": market.slug,
+                    "resolved_market": {
+                        "display_name": market.display_name,
+                        "provider_location_code": market.provider_location_code,
+                        "provider_location_name": market.provider_location_name,
+                        "granularity": market.type.value,
+                    },
+                }
             candidates = await self.research_provider.discover_keywords(service, market)
             keywords = dedupe_and_filter_keywords(candidates, service.negative_terms)
             included_keywords = [k.keyword for k in keywords if k.included]
@@ -115,22 +128,44 @@ class ScanPipeline:
             )
             providers = await self.research_provider.find_providers(service, market)
             score = self.scorer.score(metrics, serp_snapshots, competitors, providers)
-            domains = await generate_domain_candidates(service, market, self.domain_provider)
-            outreach = [
-                generate_initial_email(provider, service, market).model_dump(mode="json")
-                for provider in providers[:2]
-            ]
-            site_config = build_site_config(service, market, domains[0].domain if domains else None)
-            site_path: Path | None = generate_static_site(site_config) if build_site else None
+            is_preliminary = self.is_preliminary_assessment
+            save_scan_records(
+                self.session,
+                scan_run_id=scan.id,
+                opportunity_id=opportunity.id,
+                metrics=metrics,
+                serp_snapshots=serp_snapshots,
+                competitors=competitors,
+                providers=providers,
+            )
+            domains = (
+                await generate_domain_candidates(service, market, self.domain_provider)
+                if build_site
+                else []
+            )
+            outreach = (
+                [
+                    generate_initial_email(provider, service, market).model_dump(mode="json")
+                    for provider in providers[:2]
+                ]
+                if build_site
+                else []
+            )
+            site_config = build_site_config(service, market, domains[0].domain if domains else None) if build_site else None
+            site_path: Path | None = generate_static_site(site_config) if build_site and site_config else None
 
             save_artifact(
                 self.session,
                 opportunity.id,
-                "scan_result",
+                "preliminary_assessment" if is_preliminary else "scan_result",
                 {
                     "data_mode": self.data_mode.value,
                     "live_scan_depth": self.live_scan_depth if self.data_mode == DataMode.live else None,
                     "estimated_paid_api_calls": self.estimated_paid_api_calls,
+                    "assessment_type": "preliminary" if is_preliminary else "full",
+                    "unavailable_components": self.unavailable_components,
+                    "additional_calls_required_for_full_scan": self.additional_calls_required_for_full_scan,
+                    "scan_plan": plan.model_dump(mode="json"),
                     "keywords": [k.model_dump(mode="json") for k in keywords],
                     "metrics": [m.model_dump(mode="json") for m in metrics],
                     "serp_snapshots": [s.model_dump(mode="json") for s in serp_snapshots],
@@ -139,35 +174,44 @@ class ScanPipeline:
                     "score": score.model_dump(mode="json"),
                 },
             )
-            save_artifact(
-                self.session,
-                opportunity.id,
-                "domain_candidates",
-                {"domains": [d.model_dump(mode="json") for d in domains]},
-            )
-            save_artifact(self.session, opportunity.id, "outreach_drafts", {"drafts": outreach})
-            save_artifact(
-                self.session,
-                opportunity.id,
-                "site_config",
-                {
-                    "config": site_config.model_dump(mode="json"),
-                    "generated_path": str(site_path) if site_path else None,
-                },
-            )
-            opportunity.status = "review_required"
-            opportunity.latest_score = score.total_score
-            opportunity.score_version = score.scoring_version
-            opportunity.confidence = score.confidence.value
+            if build_site and site_config:
+                save_artifact(
+                    self.session,
+                    opportunity.id,
+                    "domain_candidates",
+                    {"domains": [d.model_dump(mode="json") for d in domains]},
+                )
+                save_artifact(self.session, opportunity.id, "outreach_drafts", {"drafts": outreach})
+                save_artifact(
+                    self.session,
+                    opportunity.id,
+                    "site_config",
+                    {
+                        "config": site_config.model_dump(mode="json"),
+                        "generated_path": str(site_path) if site_path else None,
+                    },
+                )
+            opportunity.status = "preliminary_review" if is_preliminary else "full_review"
+            if is_preliminary:
+                if opportunity.latest_score is None:
+                    opportunity.confidence = "preliminary"
+                    opportunity.score_version = score.scoring_version
+            else:
+                opportunity.latest_score = score.total_score
+                opportunity.score_version = score.scoring_version
+                opportunity.confidence = score.confidence.value
             opportunity.missing_data_flags = score.missing_fields
             scan.status = "completed"
             scan.completed_at = datetime.now(UTC)
+            scan.actual_cost_usd = self._actual_api_cost_between(scan.started_at, scan.completed_at)
             self.session.commit()
             return {
                 "opportunity_id": opportunity.id,
                 "scan_id": scan.id,
                 "data_mode": self.data_mode.value,
                 "score": score,
+                "assessment_type": "preliminary" if is_preliminary else "full",
+                "scan_plan": plan,
                 "domains": domains,
                 "providers": providers,
                 "site_path": site_path,
@@ -176,9 +220,52 @@ class ScanPipeline:
             scan.status = "failed"
             scan.error_summary = str(exc)
             scan.completed_at = datetime.now(UTC)
-            opportunity.status = "review_required"
+            scan.actual_cost_usd = self._actual_api_cost_between(scan.started_at, scan.completed_at)
+            opportunity.status = "scan_failed"
             self.session.commit()
             raise
+
+    def _prepare_scan_run(
+        self,
+        *,
+        existing_scan_id: int | None,
+        opportunity_id: int,
+        source: str,
+        service: ServiceFamily,
+        market: Market,
+        plan: Any,
+    ) -> ScanRunORM:
+        scan = self.session.get(ScanRunORM, existing_scan_id) if existing_scan_id else None
+        if scan is None:
+            scan = ScanRunORM(opportunity_id=opportunity_id, source=source)
+            self.session.add(scan)
+        scan.opportunity_id = opportunity_id
+        scan.source = source
+        scan.status = "running"
+        scan.estimated_cost_usd = float(plan.estimated_uncached_cost_usd)
+        scan.actual_cost_usd = 0
+        scan.started_at = datetime.now(UTC)
+        scan.completed_at = None
+        scan.error_summary = None
+        scan.integration_versions = {
+            "data_mode": self.data_mode.value,
+            "market_research_provider": getattr(
+                self.research_provider,
+                "provider_name",
+                type(self.research_provider).__name__,
+            ),
+            "domain_provider": type(self.domain_provider).__name__,
+            "live_scan_depth": self.live_scan_depth if self.data_mode == DataMode.live else None,
+            "cache_policy_version": "v2",
+        }
+        scan.request_parameters = {
+            "service": service.slug,
+            "market": market.slug,
+            "data_mode": self.data_mode.value,
+            "live_scan_depth": self.live_scan_depth if self.data_mode == DataMode.live else None,
+            "scan_plan": plan.model_dump(mode="json"),
+        }
+        return scan
 
     @property
     def serp_keyword_limit(self) -> int:
@@ -208,6 +295,36 @@ class ScanPipeline:
             + backlink_calls
             + business_listing_calls
         )
+
+    @property
+    def is_preliminary_assessment(self) -> bool:
+        return self.data_mode == DataMode.live and self.live_scan_depth == "testing"
+
+    @property
+    def unavailable_components(self) -> list[str]:
+        return ["backlink_competitor_metrics", "full_serp_sample"] if self.is_preliminary_assessment else []
+
+    @property
+    def additional_calls_required_for_full_scan(self) -> int:
+        return 7 if self.is_preliminary_assessment else 0
+
+    def _actual_api_cost_between(
+        self,
+        started_at: datetime | None,
+        completed_at: datetime | None,
+    ) -> float:
+        if self.data_mode != DataMode.live or started_at is None:
+            return 0.0
+        total = 0.0
+        upper_bound = completed_at or datetime.now(UTC)
+        rows = self.session.scalars(
+            select(RawApiResponseORM)
+            .where(RawApiResponseORM.response_time >= started_at)
+            .where(RawApiResponseORM.response_time <= upper_bound)
+        ).all()
+        for row in rows:
+            total += row.cost_usd or 0.0
+        return round(total, 6)
 
 
 def score_summary(score: OpportunityScore) -> str:

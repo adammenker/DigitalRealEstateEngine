@@ -5,6 +5,7 @@ from typing import Any, cast
 from urllib.parse import urlparse
 
 import httpx
+from sqlalchemy.orm import Session
 
 from rank_rent.domain.models import (
     CompetitorMetric,
@@ -20,6 +21,7 @@ from rank_rent.domain.models import (
     slugify,
 )
 from rank_rent.runtime import DataMode, validate_runtime_mode
+from rank_rent.services.cache import RawResponseCache, normalize_request
 from rank_rent.settings import Settings, get_settings
 
 
@@ -96,10 +98,18 @@ class DataForSEOLiveProvider:
     us_labs_location_code = 2840
     us_labs_location_name = "United States"
 
-    def __init__(self, settings: Settings | None = None, timeout_seconds: float = 45.0) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        timeout_seconds: float = 45.0,
+        session: Session | None = None,
+        force_refresh: bool = False,
+    ) -> None:
         self.settings = settings or get_settings()
         validate_runtime_mode(self.settings, DataMode.live)
         self.timeout_seconds = timeout_seconds
+        self.cache = RawResponseCache(session, self.provider_name, self.api_version) if session else None
+        self.force_refresh = force_refresh
 
     async def check_account(self) -> dict[str, Any]:
         payload = await self._get("/v3/appendix/user_data")
@@ -363,14 +373,52 @@ class DataForSEOLiveProvider:
         return 5 if self.scan_depth == "testing" else 10
 
     async def _get(self, path: str) -> dict[str, Any]:
+        cached = self._cache_get(path, {})
+        if cached is not None:
+            return cached
         async with self._client() as client:
             response = await client.get(path)
-        return self._parse_response(response)
+        payload = self._parse_response(response)
+        self._cache_set(path, {}, payload, status_code=response.status_code)
+        return payload
 
     async def _post(self, path: str, tasks: list[dict[str, Any]]) -> dict[str, Any]:
+        params = {"tasks": tasks}
+        cached = self._cache_get(path, params)
+        if cached is not None:
+            return cached
         async with self._client() as client:
             response = await client.post(path, json=tasks)
-        return self._parse_response(response)
+        payload = self._parse_response(response)
+        self._cache_set(path, params, payload, status_code=response.status_code)
+        return payload
+
+    def _cache_get(self, path: str, params: dict[str, Any]) -> dict[str, Any] | None:
+        if self.cache is None or self.force_refresh:
+            return None
+        return self.cache.get(path, normalize_request(params))
+
+    def _cache_set(
+        self,
+        path: str,
+        params: dict[str, Any],
+        payload: dict[str, Any],
+        *,
+        status_code: int,
+    ) -> None:
+        if self.cache is None:
+            return
+        task = self._first_task(payload) if payload.get("tasks") else {}
+        cost = self._to_float(task.get("cost")) or 0.0
+        task_id = self._clean_optional_str(task.get("id"))
+        self.cache.set(
+            path,
+            normalize_request(params),
+            payload,
+            status_code=status_code,
+            cost_usd=cost,
+            provider_task_id=task_id,
+        )
 
     def _client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(

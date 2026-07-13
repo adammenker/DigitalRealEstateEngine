@@ -57,7 +57,7 @@ class OpportunityScorer:
         organic = _bounded(
             self.weights["organic_accessibility"]
             - min(18, avg_ref_domains / 35)
-            + local_competitor_share * 10,
+            - local_competitor_share * 10,
             self.weights["organic_accessibility"],
         )
 
@@ -67,10 +67,12 @@ class OpportunityScorer:
             if serp_results
             else 1
         )
-        local_pack_bonus = 3 if any("local_pack" in s.features_present for s in serp_snapshots) else 0
+        local_pack_penalty = 3 if any("local_pack" in s.features_present for s in serp_snapshots) else 0
         ads_penalty = 2 if any("ads_top" in s.features_present for s in serp_snapshots) else 0
         serp = _bounded(
-            self.weights["serp_accessibility"] * (1 - directory_share) + local_pack_bonus - ads_penalty,
+            self.weights["serp_accessibility"] * (1 - directory_share)
+            - local_pack_penalty
+            - ads_penalty,
             self.weights["serp_accessibility"],
         )
 
@@ -93,7 +95,7 @@ class OpportunityScorer:
         )
         penalties = {field: penalty_each for field in missing}
         total = demand + commercial + organic + serp + provider_supply - sum(penalties.values())
-        confidence = Confidence.high if len(missing) <= 1 else Confidence.medium
+        confidence = Confidence.high if not missing else Confidence.medium
         if len(missing) > self.config["thresholds"]["medium_confidence_missing_fields"]:
             confidence = Confidence.low
 

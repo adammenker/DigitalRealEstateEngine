@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
@@ -55,6 +55,9 @@ class MarketORM(TimestampMixin, Base):
 
 class OpportunityORM(TimestampMixin, Base):
     __tablename__ = "opportunities"
+    __table_args__ = (
+        UniqueConstraint("service_family_id", "market_id", name="uq_opportunity_service_market"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     service_family_id: Mapped[int] = mapped_column(ForeignKey("service_families.id"))
@@ -86,6 +89,22 @@ class ScanRunORM(TimestampMixin, Base):
     request_parameters: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
 
+class ScanPlanCallORM(TimestampMixin, Base):
+    __tablename__ = "scan_plan_calls"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id"))
+    provider: Mapped[str] = mapped_column(String(80))
+    endpoint: Mapped[str] = mapped_column(String(160))
+    stage: Mapped[str] = mapped_column(String(80))
+    request_parameters: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    cache_key: Mapped[str] = mapped_column(String(128), index=True)
+    cache_hit: Mapped[bool] = mapped_column(Boolean, default=False)
+    request_known: Mapped[bool] = mapped_column(Boolean, default=True)
+    estimated_cost_usd: Mapped[float] = mapped_column(Float, default=0)
+    required: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 class RawApiResponseORM(TimestampMixin, Base):
     __tablename__ = "raw_api_responses"
 
@@ -112,6 +131,98 @@ class JsonArtifactORM(TimestampMixin, Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
 
+class KeywordMetricORM(TimestampMixin, Base):
+    __tablename__ = "keyword_metrics"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id"))
+    opportunity_id: Mapped[int | None] = mapped_column(ForeignKey("opportunities.id"), nullable=True)
+    keyword: Mapped[str] = mapped_column(String(240))
+    canonical_keyword: Mapped[str] = mapped_column(String(240))
+    intent: Mapped[str] = mapped_column(String(80))
+    search_volume: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cpc: Mapped[float | None] = mapped_column(Float, nullable=True)
+    paid_competition: Mapped[float | None] = mapped_column(Float, nullable=True)
+    monthly_history: Mapped[list[int]] = mapped_column(JSON, default=list)
+    source: Mapped[str] = mapped_column(String(120))
+    source_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    market_granularity: Mapped[str] = mapped_column(String(40))
+    included: Mapped[bool] = mapped_column(Boolean, default=True)
+    excluded_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class SerpSnapshotORM(TimestampMixin, Base):
+    __tablename__ = "serp_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id"))
+    opportunity_id: Mapped[int | None] = mapped_column(ForeignKey("opportunities.id"), nullable=True)
+    query: Mapped[str] = mapped_column(String(240))
+    market_id: Mapped[str] = mapped_column(String(160))
+    device: Mapped[str] = mapped_column(String(40))
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    features_present: Mapped[list[str]] = mapped_column(JSON, default=list)
+    raw_response_ref: Mapped[str | None] = mapped_column(String(160), nullable=True)
+
+
+class SerpResultORM(TimestampMixin, Base):
+    __tablename__ = "serp_results"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    serp_snapshot_id: Mapped[int] = mapped_column(ForeignKey("serp_snapshots.id"))
+    order: Mapped[int] = mapped_column(Integer)
+    result_type: Mapped[str] = mapped_column(String(80))
+    url: Mapped[str] = mapped_column(Text)
+    domain: Mapped[str] = mapped_column(String(240))
+    title: Mapped[str] = mapped_column(Text)
+    description: Mapped[str] = mapped_column(Text, default="")
+    classification: Mapped[str] = mapped_column(String(80))
+    is_local_provider: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_directory: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_national_brand: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_lead_generation_site: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class CompetitorMetricORM(TimestampMixin, Base):
+    __tablename__ = "competitor_metrics"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id"))
+    opportunity_id: Mapped[int | None] = mapped_column(ForeignKey("opportunities.id"), nullable=True)
+    url: Mapped[str] = mapped_column(Text)
+    domain: Mapped[str] = mapped_column(String(240))
+    referring_domains: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    backlinks: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    authority: Mapped[float | None] = mapped_column(Float, nullable=True)
+    page_relevance_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    local_relevance: Mapped[float | None] = mapped_column(Float, nullable=True)
+    page_type: Mapped[str] = mapped_column(String(80))
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ProviderCandidateORM(TimestampMixin, Base):
+    __tablename__ = "provider_candidates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id"))
+    opportunity_id: Mapped[int | None] = mapped_column(ForeignKey("opportunities.id"), nullable=True)
+    name: Mapped[str] = mapped_column(String(240))
+    website: Mapped[str | None] = mapped_column(Text, nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    contact_form_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    service_area: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    category: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    rating: Mapped[float | None] = mapped_column(Float, nullable=True)
+    review_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    business_status: Mapped[str] = mapped_column(String(80))
+    contact_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str] = mapped_column(String(120))
+    raw_response_ref: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    outreach_status: Mapped[str] = mapped_column(String(80))
+
+
 class ProviderConfigORM(TimestampMixin, Base):
     __tablename__ = "provider_configs"
 
@@ -133,4 +244,3 @@ class InterventionLogORM(TimestampMixin, Base):
     reason: Mapped[str] = mapped_column(Text)
     recurs_for_every_property: Mapped[bool] = mapped_column(default=True)
     suggested_future_automation: Mapped[str] = mapped_column(Text, default="")
-

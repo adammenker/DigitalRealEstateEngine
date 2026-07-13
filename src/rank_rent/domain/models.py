@@ -5,7 +5,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, model_validator
 
 
 def slugify(value: str) -> str:
@@ -48,10 +48,10 @@ class ServiceFamily(BaseModel):
     regulated: bool = False
     enabled: bool = True
 
-    @field_validator("slug", mode="before")
-    @classmethod
-    def default_slug(cls, value: str | None, info: Any) -> str:
-        return value or slugify(info.data.get("id", "service"))
+    @model_validator(mode="after")
+    def default_slug(self) -> ServiceFamily:
+        self.slug = self.slug or slugify(self.id)
+        return self
 
 
 class Market(BaseModel):
@@ -69,10 +69,10 @@ class Market(BaseModel):
     provider_location_name: str | None = None
     resolution_metadata: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("slug", mode="before")
-    @classmethod
-    def default_slug(cls, value: str | None, info: Any) -> str:
-        return value or slugify(info.data.get("id", "market"))
+    @model_validator(mode="after")
+    def default_slug(self) -> Market:
+        self.slug = self.slug or slugify(self.id)
+        return self
 
 
 class ResolvedLocation(BaseModel):

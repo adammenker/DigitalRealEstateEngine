@@ -11,11 +11,13 @@ import typer
 import uvicorn
 from sqlalchemy import select
 
-from rank_rent.db.base import SessionLocal, init_db
-from rank_rent.db.orm import JsonArtifactORM, OpportunityORM
+from rank_rent.db.base import SessionLocal, init_db, reset_db
+from rank_rent.db.orm import JsonArtifactORM, OpportunityORM, ScanRunORM
 from rank_rent.domain.models import Market, ServiceFamily
 from rank_rent.integrations.dataforseo.live import DataForSEOError, DataForSEOLiveProvider
+from rank_rent.integrations.dataforseo.replay import DataForSEOReplayProvider
 from rank_rent.qualification.report import fixture_capability_report
+from rank_rent.replay import export_responses_for_scan, load_response_bundle
 from rank_rent.repositories import market_from_orm, service_from_orm, upsert_market, upsert_service
 from rank_rent.runtime import ConfigurationError, DataMode, validate_runtime_mode
 from rank_rent.services.scanner import ScanPipeline, score_summary
@@ -25,7 +27,13 @@ from rank_rent.site_generator.generator import build_site_config, generate_stati
 
 app = typer.Typer(no_args_is_help=True)
 site_app = typer.Typer(no_args_is_help=True)
+replay_app = typer.Typer(no_args_is_help=True)
+fixtures_app = typer.Typer(no_args_is_help=True)
+data_app = typer.Typer(no_args_is_help=True)
 app.add_typer(site_app, name="site")
+app.add_typer(replay_app, name="replay")
+app.add_typer(fixtures_app, name="fixtures")
+app.add_typer(data_app, name="data")
 
 
 def require_runtime_mode(mode: DataMode) -> None:
@@ -40,6 +48,15 @@ def require_runtime_mode(mode: DataMode) -> None:
 def init_database() -> None:
     init_db()
     typer.echo("Initialized database.")
+
+
+@app.command("reset-db")
+def reset_database(confirm: Annotated[bool, typer.Option("--confirm")] = False) -> None:
+    if not confirm:
+        typer.echo("Pass --confirm to delete all local DB rows and rebuild the current schema.")
+        raise typer.Exit(1)
+    reset_db()
+    typer.echo("Reset database.")
 
 
 @app.command("ingest-seeds")
@@ -127,8 +144,104 @@ def scan(
         result = asyncio.run(
             ScanPipeline(session, data_mode=data_mode).run(selected_service, selected_market)
         )
-        typer.echo(f"Opportunity {result['opportunity_id']}: {score_summary(result['score'])}")
-        typer.echo(f"Generated site: {result['site_path']}")
+        typer.echo(
+            f"Opportunity {result['opportunity_id']} ({result['assessment_type']}): "
+            f"{score_summary(result['score'])}"
+        )
+        if result["site_path"]:
+            typer.echo(f"Generated site: {result['site_path']}")
+        else:
+            typer.echo("No site generated during scan; use `rank-rent site generate` after review.")
+
+
+@replay_app.command("scan")
+def replay_scan(scan_run_id: int) -> None:
+    init_db()
+    require_runtime_mode(DataMode.replay)
+    with SessionLocal() as session:
+        scan = session.get(ScanRunORM, scan_run_id)
+        if scan is None or scan.opportunity_id is None:
+            raise typer.BadParameter(f"Scan run {scan_run_id} was not found or has no opportunity.")
+        opportunity = session.get(OpportunityORM, scan.opportunity_id)
+        if opportunity is None:
+            raise typer.BadParameter(f"Opportunity {scan.opportunity_id} was not found.")
+        result = asyncio.run(
+            ScanPipeline(session, data_mode=DataMode.replay).run(
+                service_from_orm(opportunity.service_family),
+                market_from_orm(opportunity.market),
+                source=f"replay:{scan_run_id}",
+                build_site=False,
+            )
+        )
+        typer.echo(json.dumps({"replayed_from_scan_run_id": scan_run_id, "result": result["data_mode"]}))
+
+
+@replay_app.command("bundle")
+def replay_bundle(
+    bundle_path: Path,
+    service: Annotated[str, typer.Option("--service")],
+    market: Annotated[str, typer.Option("--market")],
+) -> None:
+    init_db()
+    require_runtime_mode(DataMode.replay)
+    services = {item.id: item for item in load_services()}
+    markets = {item.id: item for item in load_markets()}
+    selected_service = services.get(service) or ServiceFamily(
+        id=service,
+        display_name=service.replace("_", " ").title(),
+        seed_queries=[service.replace("_", " ")],
+    )
+    selected_market = markets.get(market) or Market(id=market, display_name=market)
+    transport = load_response_bundle(str(bundle_path))
+    with SessionLocal() as session:
+        result = asyncio.run(
+            ScanPipeline(
+                session,
+                research_provider=DataForSEOReplayProvider(transport),
+                data_mode=DataMode.replay,
+            ).run(
+                selected_service,
+                selected_market,
+                source=f"bundle:{bundle_path.name}",
+                build_site=False,
+            )
+        )
+        typer.echo(
+            json.dumps(
+                {
+                    "bundle": str(bundle_path),
+                    "data_mode": result["data_mode"],
+                    "scan_id": result["scan_id"],
+                    "opportunity_id": result["opportunity_id"],
+                    "assessment_type": result["assessment_type"],
+                },
+                indent=2,
+            )
+        )
+
+
+@fixtures_app.command("export")
+def fixtures_export(
+    scan_run_id: int,
+    output: Annotated[Path, typer.Option("--output")] = Path("fixtures/recorded/responses.json"),
+) -> None:
+    init_db()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with SessionLocal() as session:
+        try:
+            export_responses_for_scan(session, str(output), scan_run_id=scan_run_id)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"Exported sanitized stored responses for scan {scan_run_id} to {output}")
+
+
+@data_app.command("audit")
+def data_audit() -> None:
+    from rank_rent.services.data_audit import audit_data
+
+    init_db()
+    with SessionLocal() as session:
+        typer.echo(json.dumps(audit_data(session), indent=2))
 
 
 @site_app.command("generate")
