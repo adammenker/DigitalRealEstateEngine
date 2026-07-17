@@ -48,6 +48,35 @@ def test_live_mode_never_instantiates_mock_adapter() -> None:
     assert not isinstance(domain_provider, MockDomainAvailabilityProvider)
 
 
+def test_live_mode_uses_sandbox_environment_by_default() -> None:
+    settings = Settings(
+        data_mode="live",
+        allow_live_api_calls=True,
+        dataforseo_login="user",
+        dataforseo_password="password",
+    )
+    provider = build_market_research_provider(settings, DataMode.live)
+
+    assert isinstance(provider, DataForSEOLiveProvider)
+    assert provider.provider_name == "dataforseo-sandbox"
+    assert provider.base_url == "https://sandbox.dataforseo.com"
+
+
+def test_live_mode_can_explicitly_use_production_environment() -> None:
+    settings = Settings(
+        data_mode="live",
+        allow_live_api_calls=True,
+        dataforseo_login="user",
+        dataforseo_password="password",
+        dataforseo_environment="production",
+    )
+    provider = build_market_research_provider(settings, DataMode.live)
+
+    assert isinstance(provider, DataForSEOLiveProvider)
+    assert provider.provider_name == "dataforseo-live"
+    assert provider.base_url == "https://api.dataforseo.com"
+
+
 def test_replay_mode_does_not_require_live_credentials() -> None:
     settings = Settings(data_mode="replay", allow_live_api_calls=False)
     validate_runtime_mode(settings, DataMode.replay)

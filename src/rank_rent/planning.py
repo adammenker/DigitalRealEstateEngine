@@ -9,7 +9,12 @@ from sqlalchemy.orm import Session
 
 from rank_rent.db.orm import RawApiResponseORM
 from rank_rent.domain.models import Market, ServiceFamily
-from rank_rent.integrations.dataforseo.live import CITY_COORDINATES, DataForSEOLiveProvider
+from rank_rent.integrations.dataforseo.live import (
+    CITY_COORDINATES,
+    DataForSEOLiveProvider,
+    dataforseo_provider_name,
+    normalize_dataforseo_environment,
+)
 from rank_rent.runtime import DataMode
 from rank_rent.services.cache import cache_key, normalize_request
 from rank_rent.settings import Settings
@@ -30,9 +35,13 @@ class PlannedApiCall(BaseModel):
 class ScanPlan(BaseModel):
     scan_profile: str
     planned_calls: list[PlannedApiCall] = Field(default_factory=list)
+    cache_hit_count: int = 0
+    paid_call_count: int = 0
     cached_cost_usd: Decimal = Decimal("0")
     estimated_uncached_cost_usd: Decimal = Decimal("0")
     maximum_allowed_cost_usd: Decimal = Decimal("0")
+    maximum_request_count: int = 0
+    confirmation_required: bool = False
     blocked: bool = False
     block_reason: str | None = None
 
@@ -49,15 +58,19 @@ def build_scan_plan(
         return ScanPlan(
             scan_profile=settings.live_scan_depth,
             maximum_allowed_cost_usd=maximum,
+            maximum_request_count=settings.max_scan_requests,
         )
 
     profile = settings.live_scan_depth.lower().strip()
+    provider = dataforseo_provider_name(settings)
+    free_sandbox = normalize_dataforseo_environment(settings) == "sandbox"
     planned: list[PlannedApiCall] = []
 
     if not market.provider_location_code and not market.provider_location_name:
         _append_call(
             planned,
             session=session,
+            provider=provider,
             endpoint="/v3/serp/google/locations/us",
             stage="location_resolution",
             params={},
@@ -74,18 +87,20 @@ def build_scan_plan(
         "location_code": DataForSEOLiveProvider.us_labs_location_code,
     }
     _append_call(
-        planned,
-        session=session,
-        endpoint="/v3/dataforseo_labs/google/keyword_suggestions/live",
+            planned,
+            session=session,
+            provider=provider,
+            endpoint="/v3/dataforseo_labs/google/keyword_suggestions/live",
         stage="keyword_discovery",
         params={"tasks": [keyword_task]},
-        cost="0.012",
+        cost="0" if free_sandbox else "0.012",
         required=True,
     )
 
     _append_call(
         planned,
         session=session,
+        provider=provider,
         endpoint="/v3/dataforseo_labs/google/historical_search_volume/live",
         stage="keyword_metrics",
         params={
@@ -97,7 +112,7 @@ def build_scan_plan(
                 }
             ]
         },
-        cost="0.012",
+        cost="0" if free_sandbox else "0.012",
         required=True,
         request_known=False,
     )
@@ -107,6 +122,7 @@ def build_scan_plan(
         _append_call(
             planned,
             session=session,
+            provider=provider,
             endpoint="/v3/serp/google/organic/live/advanced",
             stage="serp",
             params={
@@ -120,7 +136,7 @@ def build_scan_plan(
                     }
                 ]
             },
-            cost="0.002",
+            cost="0" if free_sandbox else "0.002",
             required=True,
             request_known=False,
         )
@@ -129,6 +145,7 @@ def build_scan_plan(
         _append_call(
             planned,
             session=session,
+            provider=provider,
             endpoint="/v3/backlinks/summary/live",
             stage="competitors",
             params={
@@ -139,7 +156,7 @@ def build_scan_plan(
                     }
                 ]
             },
-            cost="0.02",
+            cost="0" if free_sandbox else "0.02",
             required=False,
             request_known=False,
         )
@@ -158,10 +175,11 @@ def build_scan_plan(
     _append_call(
         planned,
         session=session,
+        provider=provider,
         endpoint="/v3/business_data/business_listings/search/live",
         stage="provider_discovery",
         params={"tasks": [provider_task]},
-        cost="0.01",
+        cost="0" if free_sandbox else "0.01",
         required=True,
         request_known=True,
     )
@@ -174,16 +192,25 @@ def build_scan_plan(
         (call.estimated_cost_usd for call in planned if call.cache_hit),
         Decimal("0"),
     )
+    paid_call_count = len([call for call in planned if not call.cache_hit and call.estimated_cost_usd > 0])
+    over_budget = uncached > maximum
+    over_request_limit = len(planned) > settings.max_scan_requests
     return ScanPlan(
         scan_profile=profile,
         planned_calls=planned,
+        cache_hit_count=len([call for call in planned if call.cache_hit]),
+        paid_call_count=paid_call_count,
         cached_cost_usd=cached,
         estimated_uncached_cost_usd=uncached,
         maximum_allowed_cost_usd=maximum,
-        blocked=uncached > maximum,
+        maximum_request_count=settings.max_scan_requests,
+        confirmation_required=uncached > 0,
+        blocked=over_budget or over_request_limit,
         block_reason=(
             f"Estimated uncached API cost ${uncached} exceeds MAX_SCAN_COST_USD ${maximum}."
-            if uncached > maximum
+            if over_budget
+            else f"Planned API request count {len(planned)} exceeds MAX_SCAN_REQUESTS {settings.max_scan_requests}."
+            if over_request_limit
             else None
         ),
     )
@@ -193,6 +220,7 @@ def _append_call(
     planned: list[PlannedApiCall],
     *,
     session: Session | None,
+    provider: str,
     endpoint: str,
     stage: str,
     params: dict[str, Any],
@@ -201,11 +229,11 @@ def _append_call(
     request_known: bool = True,
 ) -> None:
     normalized = normalize_request(params)
-    key = cache_key("dataforseo-live", endpoint, normalized, "v3")
+    key = cache_key(provider, endpoint, normalized, "v3")
     hit = _cache_hit(session, key) if request_known else False
     planned.append(
         PlannedApiCall(
-            provider="dataforseo-live",
+            provider=provider,
             endpoint=endpoint,
             request_parameters=normalized,
             cache_key=key,

@@ -30,6 +30,9 @@ def validate_runtime_mode(settings: Settings, mode: DataMode | None = None) -> D
     data_mode = mode or resolve_data_mode(settings.data_mode)
     if data_mode == DataMode.live:
         missing: list[str] = []
+        environment = settings.dataforseo_environment.strip().lower()
+        if environment not in {"sandbox", "production"}:
+            missing.append("DATAFORSEO_ENVIRONMENT=sandbox|production")
         if not settings.allow_live_api_calls:
             missing.append("ALLOW_LIVE_API_CALLS=true")
         if not settings.dataforseo_login:
@@ -38,7 +41,7 @@ def validate_runtime_mode(settings: Settings, mode: DataMode | None = None) -> D
             missing.append("DATAFORSEO_PASSWORD")
         if missing:
             raise ConfigurationError(
-                "Live mode requires production API configuration. Missing: "
+                "Live mode requires explicit DataForSEO configuration. Missing: "
                 + ", ".join(missing)
             )
     return data_mode

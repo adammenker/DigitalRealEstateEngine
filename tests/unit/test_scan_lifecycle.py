@@ -183,6 +183,13 @@ def test_scan_reuses_queued_row_and_writes_typed_records(monkeypatch) -> None:
         scan = session.get(ScanRunORM, queued.id)
         assert scan is not None
         assert scan.status == "completed"
+        assert scan.data_mode == "live"
+        assert scan.scan_profile == "testing"
+        assert scan.progress_stage == "completed"
+        assert scan.adapter_names["market_research"] == "minimal-test-provider"
+        assert scan.cache_policy_version == "v2"
+        assert scan.planned_cost_usd == scan.estimated_cost_usd
+        assert scan.scoring_version == "v1"
         assert len(session.scalars(select(ScanPlanCallORM)).all()) == 5
         assert len(session.scalars(select(KeywordMetricORM)).all()) == 1
         assert len(session.scalars(select(SerpSnapshotORM)).all()) == 1

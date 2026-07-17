@@ -29,6 +29,29 @@ class DataForSEOError(RuntimeError):
     pass
 
 
+DATAFORSEO_BASE_URLS = {
+    "sandbox": "https://sandbox.dataforseo.com",
+    "production": "https://api.dataforseo.com",
+}
+
+
+def normalize_dataforseo_environment(settings: Settings) -> str:
+    environment = settings.dataforseo_environment.strip().lower()
+    return "production" if environment == "production" else "sandbox"
+
+
+def dataforseo_provider_name(settings: Settings) -> str:
+    return (
+        "dataforseo-live"
+        if normalize_dataforseo_environment(settings) == "production"
+        else "dataforseo-sandbox"
+    )
+
+
+def dataforseo_base_url(settings: Settings) -> str:
+    return DATAFORSEO_BASE_URLS[normalize_dataforseo_environment(settings)]
+
+
 STATE_NAMES = {
     "al": "alabama",
     "ak": "alaska",
@@ -95,6 +118,7 @@ CITY_COORDINATES = {
 class DataForSEOLiveProvider:
     provider_name = "dataforseo-live"
     api_version = "v3"
+    response_shape_version = "v1"
     us_labs_location_code = 2840
     us_labs_location_name = "United States"
 
@@ -107,9 +131,13 @@ class DataForSEOLiveProvider:
     ) -> None:
         self.settings = settings or get_settings()
         validate_runtime_mode(self.settings, DataMode.live)
+        self.api_environment = normalize_dataforseo_environment(self.settings)
+        self.provider_name = dataforseo_provider_name(self.settings)
+        self.base_url = dataforseo_base_url(self.settings)
         self.timeout_seconds = timeout_seconds
         self.cache = RawResponseCache(session, self.provider_name, self.api_version) if session else None
         self.force_refresh = force_refresh
+        self.current_scan_run_id: int | None = None
 
     async def check_account(self) -> dict[str, Any]:
         payload = await self._get("/v3/appendix/user_data")
@@ -409,8 +437,11 @@ class DataForSEOLiveProvider:
         if self.cache is None:
             return
         task = self._first_task(payload) if payload.get("tasks") else {}
-        cost = self._to_float(task.get("cost")) or 0.0
+        cost = 0.0 if self.api_environment == "sandbox" else self._to_float(task.get("cost")) or 0.0
         task_id = self._clean_optional_str(task.get("id"))
+        request_id = self._clean_optional_str(
+            payload.get("request_id") or payload.get("id") or task.get("request_id")
+        )
         self.cache.set(
             path,
             normalize_request(params),
@@ -418,11 +449,13 @@ class DataForSEOLiveProvider:
             status_code=status_code,
             cost_usd=cost,
             provider_task_id=task_id,
+            provider_request_id=request_id,
+            source_scan_run_id=self.current_scan_run_id,
         )
 
     def _client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
-            base_url="https://api.dataforseo.com",
+            base_url=self.base_url,
             auth=(self.settings.dataforseo_login, self.settings.dataforseo_password),
             timeout=self.timeout_seconds,
         )

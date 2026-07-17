@@ -16,7 +16,7 @@ The steering document is a multi-milestone remediation plan. This implementation
 - scan planning with cache-aware endpoint estimates, exact request payloads where known, and budget blocking;
 - low-cost testing scans written as preliminary assessments rather than full ranked scores;
 - default scan lifecycle separation from generated sites, domains, and outreach;
-- model-driven startup initialization for disposable local test databases;
+- Alembic-backed startup initialization for file-backed local and Docker databases;
 - typed scan records for plan calls, keyword metrics, SERPs, competitors, and providers;
 - queued background scan jobs with status endpoints;
 - API/UI data-mode exposure, fixture-data banner, cost confirmation, and recent scan status;
@@ -37,15 +37,13 @@ Live DataForSEO work is functionally wired. Live/replay domain checks use a no-c
 
 The offline remediation specification is intentionally broad. This implementation completed the credit-safety and replay foundation but leaves these items for later slices:
 
-- raw response storage uses the existing `raw_api_responses` table rather than the full typed `StoredApiResponse` table shape;
-- checksums are computed by the replay model but not persisted as a dedicated column;
-- cache TTL/expiry and force-refresh confirmation are not fully implemented;
+- raw response storage extends the existing `raw_api_responses` table rather than renaming it to `stored_api_responses`;
 - scan planning uses maintained endpoint estimates rather than provider price-table extraction;
 - async scans are in-process background jobs; cancellation, retry locking, and external queue workers are not implemented;
 - geographic resolution still uses the existing market model plus limited offline coordinates rather than a complete U.S. city/ZIP dataset;
 - scoring remains version `v1` with targeted live/preliminary labeling fixes rather than a full version-2 scoring rewrite;
-- Alembic migrations and old-local-database compatibility are intentionally deferred. During the testing phase, local DB data is disposable and schema changes should be handled with `rank-rent reset-db --confirm` or `docker compose down -v`.
+- migrations are restored, but migration coverage is currently an upgrade-head smoke test rather than a large populated historical fixture matrix.
 
 ## Data Mode Persistence
 
-The steering spec requires `data_mode` and adapter versions on every `ScanRun`. This slice records those values in `ScanRun.integration_versions` and `ScanRun.request_parameters`. If/when production data needs durable compatibility, `data_mode` can be promoted into a typed column from a fresh baseline.
+The steering spec requires `data_mode` and adapter versions on every `ScanRun`. This slice now stores those values in typed columns as well as keeping the historical JSON metadata for UI/backward compatibility.

@@ -17,7 +17,12 @@ from rank_rent.domain.models import Market, ServiceFamily
 from rank_rent.integrations.dataforseo.live import DataForSEOError, DataForSEOLiveProvider
 from rank_rent.integrations.dataforseo.replay import DataForSEOReplayProvider
 from rank_rent.qualification.report import fixture_capability_report
-from rank_rent.replay import export_responses_for_scan, load_response_bundle
+from rank_rent.replay import (
+    ReplayIntegrityError,
+    export_responses_for_scan,
+    load_response_bundle,
+    validate_response_bundle,
+)
 from rank_rent.repositories import market_from_orm, service_from_orm, upsert_market, upsert_service
 from rank_rent.runtime import ConfigurationError, DataMode, validate_runtime_mode
 from rank_rent.services.scanner import ScanPipeline, score_summary
@@ -233,6 +238,15 @@ def fixtures_export(
         except ValueError as exc:
             raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"Exported sanitized stored responses for scan {scan_run_id} to {output}")
+
+
+@fixtures_app.command("validate")
+def fixtures_validate(bundle_path: Path) -> None:
+    try:
+        result = validate_response_bundle(str(bundle_path))
+    except (ReplayIntegrityError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(json.dumps(result, indent=2))
 
 
 @data_app.command("audit")

@@ -16,6 +16,7 @@ Baseline and remediation state notes.
 - `config/`: scoring and outreach configuration.
 - `seeds/`: example service and location seeds.
 - `tests/`: focused unit and end-to-end fixture tests.
+- `migrations/`: Alembic migration environment for local and Docker DB schema upgrades.
 - `Dockerfile`, `Dockerfile.frontend`, `docker-compose.yml`: local backend/frontend containers.
 
 ## Verification Commands
@@ -51,10 +52,10 @@ After Milestone 0 cleanup:
 - `make docker-build`: passing.
 - `make verify`: passing.
 
-After offline remediation and backend/data hardening:
+After V1 hardening:
 
 - `make backend-check`: passing.
-- Backend tests cover fixture/live/replay mode separation, deterministic raw-response cache keys, replay transport misses, scan planning budget blocks, failed live-scan persistence, queued scan reuse, typed scan records, current-data audits, and scan-window replay exports.
+- Backend tests cover fixture/live/replay mode separation, deterministic raw-response cache keys, replay transport misses, corrupted replay bundles, cache expiry and sanitization, scan planning budget blocks, Alembic upgrade, failed live-scan persistence, queued scan reuse, typed scan records, current-data audits, and scan-window replay exports.
 - `make frontend-build`: passing on Next.js 16 with a clean production `npm audit --omit=dev`.
 - `make docker-build`: passing in the current local verification flow.
 
@@ -62,6 +63,7 @@ After offline remediation and backend/data hardening:
 
 - `DataForSEOLiveProvider`: live DataForSEO adapter for account checks, Google location resolution, keyword suggestions, historical keyword volume, organic SERP snapshots, backlinks summaries, and business listings.
 - Live scans are guarded by `DATA_MODE=live` and `ALLOW_LIVE_API_CALLS=true` because several DataForSEO endpoints are paid.
+- DataForSEO live-mode traffic targets `DATAFORSEO_ENVIRONMENT=sandbox` by default, using `https://sandbox.dataforseo.com/v3/...` for free dummy responses. Production calls require `DATAFORSEO_ENVIRONMENT=production`.
 - Live calls are cached in `raw_api_responses` when a DB session is available.
 - Live scan plans now include exact request payloads where possible, cache-hit state, and explicit unknown request payloads where later calls depend on purchased upstream results.
 - `LIVE_SCAN_DEPTH=testing` limits paid-call fan-out and produces a preliminary assessment instead of a full ranked score.
@@ -72,6 +74,7 @@ After offline remediation and backend/data hardening:
 - `DataForSEOReplayProvider`: reuses the live DataForSEO normalization methods while reading stored responses from replay transport.
 - `DatabaseReplayTransport`: reads stored responses from `raw_api_responses`.
 - `BundleReplayTransport`: runs exported response bundles through the replay adapter with `rank-rent replay bundle`.
+- `rank-rent fixtures validate <bundle>` verifies stored response checksums before replay use.
 - Recorded response exports are limited to the requested scan's request/response time window.
 - Replay mode makes no network calls and does not require live credentials.
 
@@ -86,12 +89,13 @@ After offline remediation and backend/data hardening:
 
 - Scans can run synchronously or as queued background jobs through the API/UI.
 - `GET /api/scans` and `GET /api/scans/{scan_id}` expose scan status, costs, plan calls, and typed record counts.
-- Scan outputs are retained as JSON artifacts for UI compatibility and also persisted into typed tables for keyword metrics, SERP snapshots/results, competitor metrics, provider candidates, and scan plan calls.
+- Scan outputs are retained as JSON artifacts for UI compatibility and also persisted into typed tables for keyword metrics, SERP snapshots/results, competitor metrics, provider candidates, scan plan calls, scan plans, preliminary assessments, full scores, and score components.
+- DataForSEO responses are stored with sanitized payloads, checksums, response shape versions, expiry metadata, provider IDs, and source scan IDs.
 - `rank-rent data audit` reports raw response counts, typed record counts, and scan/opportunity status distribution.
-- Local DB data is disposable during the testing phase. Use `rank-rent reset-db --confirm` or `docker compose down -v` when the schema changes or when clean test data is preferred.
+- `rank-rent reset-db --confirm` remains available for clean local testing, but normal schema evolution now runs through Alembic.
 
 ## Known Broken or Prototype Paths
 
 - Full live qualification reports are not implemented yet; `rank-rent qualify --live` performs a low-cost account and location smoke check.
 - Site generation, domain generation, and outreach are no longer part of the default scan pipeline, but full approval workflow actions are not implemented yet.
-- `init_db()` creates the current schema directly from SQLAlchemy models. Alembic migrations and old-local-DB compatibility are intentionally out of scope until there is production data worth preserving.
+- Startup initialization runs Alembic migrations for normal file-backed DBs. In-memory SQLite tests still use direct SQLAlchemy table creation.

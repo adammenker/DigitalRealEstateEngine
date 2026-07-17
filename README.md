@@ -47,8 +47,15 @@ docker compose restart
 docker compose down
 ```
 
-The default path uses deterministic fixtures and mock providers. Live API calls are disabled unless
-`ALLOW_LIVE_API_CALLS=true` is set and credentials are configured.
+Schema changes are applied through Alembic when the backend starts. For a clean local testing DB,
+run `rank-rent reset-db --confirm` inside the backend environment or `docker compose down -v`.
+Recorded replay bundles can be checked with `rank-rent fixtures validate <bundle_path>`.
+
+The default path uses deterministic fixtures and mock providers. When `DATA_MODE=live` is enabled,
+DataForSEO targets `DATAFORSEO_ENVIRONMENT=sandbox` by default, which uses
+`https://sandbox.dataforseo.com/v3/...` and returns free dummy responses with production-shaped
+payloads. Paid production calls require explicitly setting `DATAFORSEO_ENVIRONMENT=production`,
+`ALLOW_LIVE_API_CALLS=true`, and credentials.
 
 This project does not claim an opportunity is guaranteed to rank or become profitable. Scores are
 deterministic research aids with explicit assumptions and missing-data flags.

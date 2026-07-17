@@ -7,7 +7,13 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from rank_rent.db.orm import RawApiResponseORM, ScanRunORM
+from rank_rent.db.orm import (
+    FullOpportunityScoreORM,
+    PreliminaryAssessmentORM,
+    RawApiResponseORM,
+    ScanRunORM,
+    ScoreComponentORM,
+)
 from rank_rent.domain.interfaces import DomainAvailabilityProvider, MarketResearchProvider
 from rank_rent.domain.models import Market, OpportunityScore, ServiceFamily
 from rank_rent.integrations.factory import (
@@ -86,6 +92,8 @@ class ScanPipeline:
             plan=plan,
         )
         self.session.flush()
+        if hasattr(self.research_provider, "current_scan_run_id"):
+            self.research_provider.current_scan_run_id = scan.id
         save_scan_plan_calls(self.session, scan.id, plan)
 
         try:
@@ -94,6 +102,7 @@ class ScanPipeline:
                 and not market.provider_location_code
                 and not market.provider_location_name
             ):
+                scan.progress_stage = "resolving_location"
                 market = (await self.research_provider.resolve_location(market.display_name)).market
                 market_row = upsert_market(self.session, market)
                 opportunity = get_or_create_opportunity(self.session, service_row, market_row)
@@ -108,12 +117,15 @@ class ScanPipeline:
                         "granularity": market.type.value,
                     },
                 }
+            scan.progress_stage = "discovering_keywords"
             candidates = await self.research_provider.discover_keywords(service, market)
             keywords = dedupe_and_filter_keywords(candidates, service.negative_terms)
             included_keywords = [k.keyword for k in keywords if k.included]
+            scan.progress_stage = "fetching_metrics"
             metrics = await self.research_provider.get_keyword_metrics(included_keywords, market)
             representative = included_keywords[: self.serp_keyword_limit]
             serp_snapshots = []
+            scan.progress_stage = "fetching_serps"
             for keyword in representative:
                 snapshot = await self.research_provider.get_serp_snapshot(keyword, market)
                 snapshot.results = [classify_result(result) for result in snapshot.results]
@@ -121,12 +133,15 @@ class ScanPipeline:
             competitor_urls = [
                 r.url for s in serp_snapshots for r in s.results if r.result_type == "organic"
             ][: self.backlink_competitor_limit]
+            scan.progress_stage = "fetching_competitors"
             competitors = (
                 await self.research_provider.get_competitor_metrics(competitor_urls)
                 if competitor_urls
                 else []
             )
+            scan.progress_stage = "fetching_providers"
             providers = await self.research_provider.find_providers(service, market)
+            scan.progress_stage = "scoring"
             score = self.scorer.score(metrics, serp_snapshots, competitors, providers)
             is_preliminary = self.is_preliminary_assessment
             save_scan_records(
@@ -174,6 +189,7 @@ class ScanPipeline:
                     "score": score.model_dump(mode="json"),
                 },
             )
+            self._save_assessment_records(scan, opportunity.id, score, is_preliminary)
             if build_site and site_config:
                 save_artifact(
                     self.session,
@@ -202,8 +218,10 @@ class ScanPipeline:
                 opportunity.confidence = score.confidence.value
             opportunity.missing_data_flags = score.missing_fields
             scan.status = "completed"
+            scan.progress_stage = "completed"
             scan.completed_at = datetime.now(UTC)
             scan.actual_cost_usd = self._actual_api_cost_between(scan.started_at, scan.completed_at)
+            scan.scoring_version = score.scoring_version
             self.session.commit()
             return {
                 "opportunity_id": opportunity.id,
@@ -218,10 +236,16 @@ class ScanPipeline:
             }
         except Exception as exc:
             scan.status = "failed"
+            scan.progress_stage = "failed"
             scan.error_summary = str(exc)
             scan.completed_at = datetime.now(UTC)
             scan.actual_cost_usd = self._actual_api_cost_between(scan.started_at, scan.completed_at)
             opportunity.status = "scan_failed"
+            scan.partial_outputs = {
+                **(scan.partial_outputs or {}),
+                "failed_stage": scan.progress_stage,
+                "error": str(exc),
+            }
             self.session.commit()
             raise
 
@@ -242,6 +266,24 @@ class ScanPipeline:
         scan.opportunity_id = opportunity_id
         scan.source = source
         scan.status = "running"
+        scan.data_mode = self.data_mode.value
+        scan.scan_profile = self.live_scan_depth if self.data_mode == DataMode.live else "full"
+        scan.adapter_names = {
+            "market_research": getattr(
+                self.research_provider,
+                "provider_name",
+                type(self.research_provider).__name__,
+            ),
+            "domain": type(self.domain_provider).__name__,
+        }
+        scan.adapter_versions = {
+            "market_research_api": getattr(self.research_provider, "api_version", "fixture"),
+            "domain": "v1",
+        }
+        scan.normalization_version = "v1"
+        scan.cache_policy_version = "v2"
+        scan.planned_cost_usd = float(plan.estimated_uncached_cost_usd)
+        scan.progress_stage = "planning"
         scan.estimated_cost_usd = float(plan.estimated_uncached_cost_usd)
         scan.actual_cost_usd = 0
         scan.started_at = datetime.now(UTC)
@@ -266,6 +308,49 @@ class ScanPipeline:
             "scan_plan": plan.model_dump(mode="json"),
         }
         return scan
+
+    def _save_assessment_records(
+        self,
+        scan: ScanRunORM,
+        opportunity_id: int,
+        score: OpportunityScore,
+        is_preliminary: bool,
+    ) -> None:
+        payload = score.model_dump(mode="json")
+        if is_preliminary:
+            self.session.add(
+                PreliminaryAssessmentORM(
+                    scan_run_id=scan.id,
+                    opportunity_id=opportunity_id,
+                    scoring_version=score.scoring_version,
+                    confidence="preliminary",
+                    missing_components=self.unavailable_components + score.missing_fields,
+                    payload=payload,
+                )
+            )
+        else:
+            self.session.add(
+                FullOpportunityScoreORM(
+                    scan_run_id=scan.id,
+                    opportunity_id=opportunity_id,
+                    scoring_version=score.scoring_version,
+                    total_score=score.total_score,
+                    confidence=score.confidence.value,
+                    explanation=score.explanation,
+                    payload=payload,
+                )
+            )
+        for component, value in score.component_scores.items():
+            self.session.add(
+                ScoreComponentORM(
+                    scan_run_id=scan.id,
+                    component=component,
+                    score=value,
+                    inputs=score.input_measurements,
+                    formula=f"{score.scoring_version}:{component}",
+                    penalties=score.missing_data_penalties,
+                )
+            )
 
     @property
     def serp_keyword_limit(self) -> int:

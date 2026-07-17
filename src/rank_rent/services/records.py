@@ -8,6 +8,7 @@ from rank_rent.db.orm import (
     KeywordMetricORM,
     ProviderCandidateORM,
     ScanPlanCallORM,
+    ScanPlanORM,
     SerpResultORM,
     SerpSnapshotORM,
 )
@@ -22,6 +23,20 @@ from rank_rent.planning import ScanPlan
 
 def save_scan_plan_calls(session: Session, scan_run_id: int, plan: ScanPlan) -> None:
     session.execute(delete(ScanPlanCallORM).where(ScanPlanCallORM.scan_run_id == scan_run_id))
+    session.execute(delete(ScanPlanORM).where(ScanPlanORM.scan_run_id == scan_run_id))
+    session.add(
+        ScanPlanORM(
+            scan_run_id=scan_run_id,
+            scan_profile=plan.scan_profile,
+            cache_hit_count=plan.cache_hit_count,
+            paid_call_count=plan.paid_call_count,
+            estimated_uncached_cost_usd=float(plan.estimated_uncached_cost_usd),
+            maximum_allowed_cost_usd=float(plan.maximum_allowed_cost_usd),
+            confirmation_required=plan.confirmation_required,
+            blocked=plan.blocked,
+            block_reason=plan.block_reason,
+        )
+    )
     for call in plan.planned_calls:
         session.add(
             ScanPlanCallORM(

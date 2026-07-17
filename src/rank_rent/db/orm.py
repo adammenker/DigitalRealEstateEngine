@@ -87,6 +87,19 @@ class ScanRunORM(TimestampMixin, Base):
     error_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     integration_versions: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     request_parameters: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    data_mode: Mapped[str] = mapped_column(String(20), default="fixture")
+    scan_profile: Mapped[str] = mapped_column(String(40), default="testing")
+    adapter_names: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    adapter_versions: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    normalization_version: Mapped[str] = mapped_column(String(40), default="v1")
+    scoring_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    cache_policy_version: Mapped[str] = mapped_column(String(40), default="v2")
+    planned_cost_usd: Mapped[float] = mapped_column(Float, default=0)
+    source_scan_run_id: Mapped[int | None] = mapped_column(ForeignKey("scan_runs.id"), nullable=True)
+    progress_stage: Mapped[str] = mapped_column(String(80), default="queued")
+    partial_outputs: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class ScanPlanCallORM(TimestampMixin, Base):
@@ -114,12 +127,77 @@ class RawApiResponseORM(TimestampMixin, Base):
     endpoint: Mapped[str] = mapped_column(String(120))
     parameters: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     api_version: Mapped[str] = mapped_column(String(40), default="fixture")
+    response_shape_version: Mapped[str] = mapped_column(String(40), default="v1")
     response_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    sanitized: Mapped[bool] = mapped_column(Boolean, default=True)
     status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     request_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     response_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     cost_usd: Mapped[float] = mapped_column(Float, default=0)
     provider_task_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    provider_request_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    source_scan_run_id: Mapped[int | None] = mapped_column(ForeignKey("scan_runs.id"), nullable=True)
+    checksum: Mapped[str] = mapped_column(String(128), default="")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ApiCallORM(TimestampMixin, Base):
+    __tablename__ = "api_calls"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scan_run_id: Mapped[int | None] = mapped_column(ForeignKey("scan_runs.id"), nullable=True)
+    raw_api_response_id: Mapped[int | None] = mapped_column(
+        ForeignKey("raw_api_responses.id"), nullable=True
+    )
+    provider: Mapped[str] = mapped_column(String(80))
+    endpoint: Mapped[str] = mapped_column(String(160))
+    stage: Mapped[str] = mapped_column(String(80))
+    cache_key: Mapped[str] = mapped_column(String(128), index=True)
+    cache_hit: Mapped[bool] = mapped_column(Boolean, default=False)
+    force_refresh: Mapped[bool] = mapped_column(Boolean, default=False)
+    estimated_cost_usd: Mapped[float] = mapped_column(Float, default=0)
+    actual_cost_usd: Mapped[float] = mapped_column(Float, default=0)
+    status: Mapped[str] = mapped_column(String(80), default="planned")
+    error_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ScanPlanORM(TimestampMixin, Base):
+    __tablename__ = "scan_plans"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id"))
+    scan_profile: Mapped[str] = mapped_column(String(40))
+    cache_hit_count: Mapped[int] = mapped_column(Integer, default=0)
+    paid_call_count: Mapped[int] = mapped_column(Integer, default=0)
+    estimated_uncached_cost_usd: Mapped[float] = mapped_column(Float, default=0)
+    maximum_allowed_cost_usd: Mapped[float] = mapped_column(Float, default=0)
+    confirmation_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+    block_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class KeywordClusterORM(TimestampMixin, Base):
+    __tablename__ = "keyword_clusters"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id"))
+    representative_keyword: Mapped[str] = mapped_column(String(240))
+    keywords: Mapped[list[str]] = mapped_column(JSON, default=list)
+    dedupe_method: Mapped[str] = mapped_column(String(80), default="exact")
+    combined_volume: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class KeywordDecisionORM(TimestampMixin, Base):
+    __tablename__ = "keyword_decisions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id"))
+    keyword: Mapped[str] = mapped_column(String(240))
+    canonical_keyword: Mapped[str] = mapped_column(String(240))
+    decision: Mapped[str] = mapped_column(String(40))
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    representative: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class JsonArtifactORM(TimestampMixin, Base):
@@ -221,6 +299,102 @@ class ProviderCandidateORM(TimestampMixin, Base):
     source: Mapped[str] = mapped_column(String(120))
     raw_response_ref: Mapped[str | None] = mapped_column(String(160), nullable=True)
     outreach_status: Mapped[str] = mapped_column(String(80))
+
+
+class PreliminaryAssessmentORM(TimestampMixin, Base):
+    __tablename__ = "preliminary_assessments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id"))
+    opportunity_id: Mapped[int] = mapped_column(ForeignKey("opportunities.id"))
+    scoring_version: Mapped[str] = mapped_column(String(40))
+    confidence: Mapped[str] = mapped_column(String(20), default="preliminary")
+    missing_components: Mapped[list[str]] = mapped_column(JSON, default=list)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class FullOpportunityScoreORM(TimestampMixin, Base):
+    __tablename__ = "full_opportunity_scores"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id"))
+    opportunity_id: Mapped[int] = mapped_column(ForeignKey("opportunities.id"))
+    scoring_version: Mapped[str] = mapped_column(String(40))
+    total_score: Mapped[float] = mapped_column(Float)
+    confidence: Mapped[str] = mapped_column(String(20))
+    explanation: Mapped[str] = mapped_column(Text)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class ScoreComponentORM(TimestampMixin, Base):
+    __tablename__ = "score_components"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id"))
+    component: Mapped[str] = mapped_column(String(120))
+    score: Mapped[float] = mapped_column(Float)
+    inputs: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    formula: Mapped[str] = mapped_column(Text, default="")
+    penalties: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class DomainCandidateORM(TimestampMixin, Base):
+    __tablename__ = "domain_candidates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    opportunity_id: Mapped[int] = mapped_column(ForeignKey("opportunities.id"))
+    domain: Mapped[str] = mapped_column(String(240))
+    availability_status: Mapped[str] = mapped_column(String(80))
+    rank: Mapped[int] = mapped_column(Integer, default=0)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class OutreachDraftORM(TimestampMixin, Base):
+    __tablename__ = "outreach_drafts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    opportunity_id: Mapped[int] = mapped_column(ForeignKey("opportunities.id"))
+    provider_candidate_id: Mapped[int | None] = mapped_column(
+        ForeignKey("provider_candidates.id"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String(80), default="draft")
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class SiteConfigORM(TimestampMixin, Base):
+    __tablename__ = "site_configs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    opportunity_id: Mapped[int] = mapped_column(ForeignKey("opportunities.id"))
+    version: Mapped[str] = mapped_column(String(40), default="v1")
+    status: Mapped[str] = mapped_column(String(80), default="draft")
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class AssetORM(TimestampMixin, Base):
+    __tablename__ = "assets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    opportunity_id: Mapped[int | None] = mapped_column(ForeignKey("opportunities.id"), nullable=True)
+    site_config_id: Mapped[int | None] = mapped_column(ForeignKey("site_configs.id"), nullable=True)
+    type: Mapped[str] = mapped_column(String(80))
+    source_provider: Mapped[str] = mapped_column(String(120), default="manual")
+    source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    local_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    approved: Mapped[bool] = mapped_column(Boolean, default=False)
+    provenance: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class DeploymentORM(TimestampMixin, Base):
+    __tablename__ = "deployments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    site_config_id: Mapped[int] = mapped_column(ForeignKey("site_configs.id"))
+    provider: Mapped[str] = mapped_column(String(120))
+    environment: Mapped[str] = mapped_column(String(80), default="staging")
+    url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(80), default="created")
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
 
 class ProviderConfigORM(TimestampMixin, Base):

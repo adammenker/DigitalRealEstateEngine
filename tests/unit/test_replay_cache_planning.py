@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -10,18 +10,25 @@ from sqlalchemy.orm import sessionmaker
 from rank_rent.db.base import Base, make_engine
 from rank_rent.db.orm import RawApiResponseORM, ScanRunORM
 from rank_rent.domain.models import Market, ServiceFamily
+from rank_rent.integrations.dataforseo.live import DataForSEOLiveProvider
 from rank_rent.integrations.dataforseo.replay import DataForSEOReplayProvider
 from rank_rent.planning import build_scan_plan
 from rank_rent.replay import (
     BundleReplayTransport,
     DatabaseReplayTransport,
+    ReplayIntegrityError,
     ReplayMissError,
     StoredApiResponse,
     export_responses_for_scan,
     load_response_bundle,
 )
 from rank_rent.runtime import DataMode
-from rank_rent.services.cache import RawResponseCache, cache_key, normalize_request
+from rank_rent.services.cache import (
+    RawResponseCache,
+    cache_key,
+    checksum_payload,
+    normalize_request,
+)
 from rank_rent.settings import Settings
 
 
@@ -44,6 +51,51 @@ def test_raw_response_cache_hit_and_miss() -> None:
         assert cache.get("/endpoint", {"keyword": "drywall"}) is None
         cache.set("/endpoint", {"keyword": "drywall"}, {"tasks": []}, cost_usd=0.01)
         assert cache.get("/endpoint", {"keyword": "drywall"}) == {"tasks": []}
+
+
+def test_raw_response_cache_sanitizes_and_rejects_expired_rows() -> None:
+    Session = make_session()
+    with Session() as session:
+        cache = RawResponseCache(session, "dataforseo-live", "v3")
+        cache.set(
+            "/endpoint",
+            {"keyword": "drywall"},
+            {"tasks": [], "password": "secret", "nested": {"api_key": "secret"}},
+            cost_usd=0.01,
+        )
+        row = cache.get_row("/endpoint", {"keyword": "drywall"})
+        assert row is not None
+        assert row.response_json["password"] == "<redacted>"
+        assert row.response_json["nested"]["api_key"] == "<redacted>"
+        row.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        session.commit()
+
+        assert cache.get("/endpoint", {"keyword": "drywall"}) is None
+
+
+def test_sandbox_provider_stores_free_sandbox_cache_rows() -> None:
+    Session = make_session()
+    settings = Settings(
+        data_mode="live",
+        allow_live_api_calls=True,
+        dataforseo_login="user",
+        dataforseo_password="password",
+        dataforseo_environment="sandbox",
+    )
+    with Session() as session:
+        provider = DataForSEOLiveProvider(settings=settings, session=session)
+        provider._cache_set(
+            "/v3/test",
+            {"tasks": [{"keyword": "drywall"}]},
+            {"tasks": [{"id": "task-id", "cost": 9.99, "result": []}], "request_id": "request-id"},
+            status_code=200,
+        )
+        row = session.query(RawApiResponseORM).one()
+
+    assert row.provider == "dataforseo-sandbox"
+    assert row.cost_usd == 0
+    assert row.provider_task_id == "task-id"
+    assert row.provider_request_id == "request-id"
 
 
 @pytest.mark.asyncio
@@ -85,7 +137,7 @@ async def test_bundle_replay_uses_requested_api_version() -> None:
         provider_cost_usd=Decimal("0.01"),
         requested_at=datetime.now(UTC),
         received_at=datetime.now(UTC),
-        checksum="test",
+        checksum=checksum_payload({"tasks": [{"status_code": 20000, "result": []}]}),
     )
     transport = BundleReplayTransport([stored])
 
@@ -152,7 +204,7 @@ async def test_load_response_bundle_returns_replay_transport(tmp_path) -> None:
         provider_cost_usd=Decimal("0.01"),
         requested_at=datetime.now(UTC),
         received_at=datetime.now(UTC),
-        checksum="test",
+        checksum=checksum_payload({"tasks": [{"status_code": 20000, "result": []}]}),
     )
     bundle = tmp_path / "bundle.json"
     bundle.write_text(json.dumps({"responses": [stored.model_dump(mode="json")]}))
@@ -161,6 +213,26 @@ async def test_load_response_bundle_returns_replay_transport(tmp_path) -> None:
 
     response = await transport.get_response("dataforseo-live", "/endpoint", params, "v3")
     assert response.response_body == stored.response_body
+
+
+def test_corrupted_response_bundle_is_rejected(tmp_path) -> None:
+    params = normalize_request({"tasks": [{"keyword": "drywall"}]})
+    stored = StoredApiResponse(
+        provider="dataforseo-live",
+        endpoint="/endpoint",
+        api_version="v3",
+        normalized_request=params,
+        response_body={"tasks": [{"status_code": 20000, "result": []}]},
+        provider_cost_usd=Decimal("0.01"),
+        requested_at=datetime.now(UTC),
+        received_at=datetime.now(UTC),
+        checksum="not-the-real-checksum",
+    )
+    bundle = tmp_path / "bundle.json"
+    bundle.write_text(json.dumps({"responses": [stored.model_dump(mode="json")]}))
+
+    with pytest.raises(ReplayIntegrityError):
+        load_response_bundle(str(bundle))
 
 
 def test_testing_scan_plan_is_low_cost_and_blocks_over_budget() -> None:
@@ -173,6 +245,7 @@ def test_testing_scan_plan_is_low_cost_and_blocks_over_budget() -> None:
         dataforseo_password="password",
         live_scan_depth="testing",
         max_scan_cost_usd=0.001,
+        dataforseo_environment="production",
     )
     plan = build_scan_plan(settings, DataMode.live, service, market)
     assert len(plan.planned_calls) == 5
@@ -181,6 +254,26 @@ def test_testing_scan_plan_is_low_cost_and_blocks_over_budget() -> None:
     assert "location_coordinate" in plan.planned_calls[-1].request_parameters["tasks"][0]
     assert plan.blocked is True
     assert plan.block_reason is not None
+
+
+def test_sandbox_scan_plan_uses_free_sandbox_provider() -> None:
+    service = ServiceFamily(id="drywall", display_name="Drywall", seed_queries=["drywall"])
+    market = Market(id="st_louis", display_name="St. Louis, MO")
+    settings = Settings(
+        data_mode="live",
+        allow_live_api_calls=True,
+        dataforseo_login="user",
+        dataforseo_password="password",
+        live_scan_depth="testing",
+        max_scan_cost_usd=0,
+        dataforseo_environment="sandbox",
+    )
+    plan = build_scan_plan(settings, DataMode.live, service, market)
+
+    assert plan.blocked is False
+    assert plan.confirmation_required is False
+    assert plan.estimated_uncached_cost_usd == Decimal("0")
+    assert {call.provider for call in plan.planned_calls} == {"dataforseo-sandbox"}
 
 
 def test_scan_plan_marks_exact_cached_calls() -> None:
@@ -194,6 +287,7 @@ def test_scan_plan_marks_exact_cached_calls() -> None:
         dataforseo_password="password",
         live_scan_depth="testing",
         max_scan_cost_usd=10,
+        dataforseo_environment="production",
     )
     with Session() as session:
         first_plan = build_scan_plan(settings, DataMode.live, service, market)
