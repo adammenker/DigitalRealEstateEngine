@@ -32,8 +32,9 @@ class OpportunityScorer:
         competitors: list[CompetitorMetric],
         providers: list[ProviderCandidate],
     ) -> OpportunityScore:
+        scored_metrics = [metric for metric in metrics if metric.included]
         missing: list[str] = []
-        if not metrics:
+        if not scored_metrics:
             missing.append("keyword_metrics")
         if not serp_snapshots:
             missing.append("serp_snapshots")
@@ -42,13 +43,17 @@ class OpportunityScorer:
         if not providers:
             missing.append("provider_candidates")
 
-        total_volume = sum(m.search_volume or 0 for m in metrics)
-        high_intent = [m for m in metrics if m.intent in {"transactional", "commercial"}]
-        avg_cpc = mean([m.cpc for m in metrics if m.cpc is not None] or [0])
+        total_volume = sum(m.search_volume or 0 for m in scored_metrics)
+        high_intent = [m for m in scored_metrics if m.intent in {"transactional", "commercial"}]
+        avg_cpc = mean([m.cpc for m in scored_metrics if m.cpc is not None] or [0])
+        metric_granularities = sorted({m.market_granularity or "unknown" for m in scored_metrics})
+        has_country_level_metrics = any(
+            granularity in {"country", "national"} for granularity in metric_granularities
+        )
 
         demand = _bounded((total_volume / 900) * self.weights["demand"], self.weights["demand"])
         commercial = _bounded(
-            (avg_cpc / 25) * 8 + (len(high_intent) / max(1, len(metrics))) * 7,
+            (avg_cpc / 25) * 8 + (len(high_intent) / max(1, len(scored_metrics))) * 7,
             self.weights["commercial_intent"],
         )
 
@@ -108,6 +113,13 @@ class OpportunityScorer:
         }
         measurements: dict[str, Any] = {
             "deduplicated_search_volume": total_volume,
+            "scored_keyword_count": len(scored_metrics),
+            "excluded_keyword_metric_count": len(metrics) - len(scored_metrics),
+            "keyword_metric_granularities": metric_granularities,
+            "raw_national_service_demand": total_volume if has_country_level_metrics else None,
+            "estimated_market_demand": None,
+            "market_estimation_method": "not_estimated",
+            "market_estimation_confidence": "none",
             "high_intent_keyword_count": len(high_intent),
             "average_cpc": round(avg_cpc, 2),
             "average_competitor_referring_domains": round(avg_ref_domains, 2),
@@ -115,13 +127,20 @@ class OpportunityScorer:
             "credible_provider_count": len(credible),
             "serp_result_count": len(serp_results),
         }
-        live_sources = [m for m in metrics if not m.source.startswith("fixture") and "fixture" not in m.source]
-        volume_label = "live monthly searches" if live_sources else "fixture monthly searches"
-        assumption = (
-            "Live provider data can mix country-level keyword metrics with city-level SERP/provider data."
-            if live_sources
-            else "Fixture adapter uses representative sample data."
-        )
+        live_sources = [
+            m for m in scored_metrics if not m.source.startswith("fixture") and "fixture" not in m.source
+        ]
+        if live_sources and has_country_level_metrics:
+            volume_label = "country-level monthly searches"
+            assumption = (
+                "Keyword demand is reported at country granularity; localized market demand has not been estimated."
+            )
+        elif live_sources:
+            volume_label = "live monthly searches"
+            assumption = "Live provider data may use a broader keyword geography than SERP/provider evidence."
+        else:
+            volume_label = "fixture monthly searches"
+            assumption = "Fixture adapter uses representative sample data."
         explanation = (
             f"Score {round(total, 1)} reflects {total_volume} {volume_label}, "
             f"{len(high_intent)} high-intent terms, average CPC ${avg_cpc:.2f}, "

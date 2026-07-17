@@ -16,6 +16,7 @@ from rank_rent.domain.models import (
     slugify,
 )
 from rank_rent.services.cache import RawResponseCache
+from rank_rent.services.keywords import service_seed_keywords
 
 
 class FixtureMarketResearchProvider:
@@ -55,7 +56,7 @@ class FixtureMarketResearchProvider:
     ) -> list[KeywordCandidate]:
         candidates = []
         city = market.cities[0] if market.cities else market.display_name
-        for query in service.seed_queries or [service.display_name]:
+        for query in service_seed_keywords(service):
             candidates.extend(
                 [
                     KeywordCandidate(keyword=query, source="seed"),
@@ -162,4 +163,3 @@ class FixtureMarketResearchProvider:
                 contact_confidence=0.55,
             ),
         ]
-

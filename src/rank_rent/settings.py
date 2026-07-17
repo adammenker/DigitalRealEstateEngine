@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     live_scan_depth: str = "testing"
     pelias_base_url: str = ""
     location_search_timeout_seconds: float = Field(default=1.5, ge=0.1)
+    scan_worker_enabled: bool = True
+    scan_worker_poll_seconds: float = Field(default=1.0, ge=0.1)
+    scan_worker_heartbeat_seconds: float = Field(default=5.0, ge=0.5)
+    scan_worker_stale_after_seconds: float = Field(default=30.0, ge=1.0)
     project_root: Path = Path.cwd()
 
 

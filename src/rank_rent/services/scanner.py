@@ -32,11 +32,19 @@ from rank_rent.runtime import DataMode, resolve_data_mode
 from rank_rent.scoring.score import OpportunityScorer
 from rank_rent.scoring.serp import classify_result
 from rank_rent.services.domains import generate_domain_candidates
-from rank_rent.services.keywords import dedupe_and_filter_keywords
+from rank_rent.services.keywords import (
+    plan_keyword_candidates,
+    rank_and_cluster_keyword_metrics,
+    service_keyword_terms,
+)
 from rank_rent.services.outreach import generate_initial_email
 from rank_rent.services.records import save_scan_plan_calls, save_scan_records
 from rank_rent.settings import get_settings
 from rank_rent.site_generator.generator import build_site_config, generate_static_site
+
+
+class ScanCancelled(Exception):
+    """Raised when a persisted scan has been cancelled before the next stage."""
 
 
 class ScanPipeline:
@@ -97,11 +105,13 @@ class ScanPipeline:
         save_scan_plan_calls(self.session, scan.id, plan)
 
         try:
+            self._ensure_not_cancelled(scan)
             if (
                 self.data_mode == DataMode.live
                 and not market.provider_location_code
                 and not market.provider_location_name
             ):
+                self._ensure_not_cancelled(scan)
                 scan.progress_stage = "resolving_location"
                 market = (await self.research_provider.resolve_location(market.display_name)).market
                 market_row = upsert_market(self.session, market)
@@ -117,32 +127,48 @@ class ScanPipeline:
                         "granularity": market.type.value,
                     },
                 }
+            self._ensure_not_cancelled(scan)
             scan.progress_stage = "discovering_keywords"
             candidates = await self.research_provider.discover_keywords(service, market)
-            keywords = dedupe_and_filter_keywords(candidates, service.negative_terms)
-            included_keywords = [k.keyword for k in keywords if k.included]
+            _, negative_terms = service_keyword_terms(service)
+            keyword_candidates = plan_keyword_candidates(candidates, negative_terms)
+            included_keywords = keyword_candidates.included_keywords
+            self._ensure_not_cancelled(scan)
             scan.progress_stage = "fetching_metrics"
-            metrics = await self.research_provider.get_keyword_metrics(included_keywords, market)
-            representative = included_keywords[: self.serp_keyword_limit]
+            raw_metrics = await self.research_provider.get_keyword_metrics(included_keywords, market)
+            keyword_metrics = rank_and_cluster_keyword_metrics(
+                raw_metrics,
+                service=service,
+                market=market,
+                selected_limit=self.serp_keyword_limit,
+                existing_decisions=keyword_candidates.decisions,
+            )
+            metrics = keyword_metrics.metrics
+            representative = keyword_metrics.selected_serp_keywords
             serp_snapshots = []
+            self._ensure_not_cancelled(scan)
             scan.progress_stage = "fetching_serps"
             for keyword in representative:
+                self._ensure_not_cancelled(scan)
                 snapshot = await self.research_provider.get_serp_snapshot(keyword, market)
                 snapshot.results = [classify_result(result) for result in snapshot.results]
                 serp_snapshots.append(snapshot)
             competitor_urls = [
                 r.url for s in serp_snapshots for r in s.results if r.result_type == "organic"
             ][: self.backlink_competitor_limit]
+            self._ensure_not_cancelled(scan)
             scan.progress_stage = "fetching_competitors"
             competitors = (
                 await self.research_provider.get_competitor_metrics(competitor_urls)
                 if competitor_urls
                 else []
             )
+            self._ensure_not_cancelled(scan)
             scan.progress_stage = "fetching_providers"
             providers = await self.research_provider.find_providers(service, market)
+            self._ensure_not_cancelled(scan)
             scan.progress_stage = "scoring"
-            score = self.scorer.score(metrics, serp_snapshots, competitors, providers)
+            score = self.scorer.score(keyword_metrics.scoring_metrics, serp_snapshots, competitors, providers)
             is_preliminary = self.is_preliminary_assessment
             save_scan_records(
                 self.session,
@@ -152,6 +178,8 @@ class ScanPipeline:
                 serp_snapshots=serp_snapshots,
                 competitors=competitors,
                 providers=providers,
+                keyword_clusters=keyword_metrics.clusters,
+                keyword_decisions=keyword_metrics.decisions,
             )
             domains = (
                 await generate_domain_candidates(service, market, self.domain_provider)
@@ -180,8 +208,16 @@ class ScanPipeline:
                     "assessment_type": "preliminary" if is_preliminary else "full",
                     "unavailable_components": self.unavailable_components,
                     "additional_calls_required_for_full_scan": self.additional_calls_required_for_full_scan,
+                    "demand_evidence": self._demand_evidence(metrics, market),
                     "scan_plan": plan.model_dump(mode="json"),
-                    "keywords": [k.model_dump(mode="json") for k in keywords],
+                    "keywords": [k.model_dump(mode="json") for k in keyword_candidates.candidates],
+                    "keyword_clusters": [
+                        cluster.__dict__ for cluster in keyword_metrics.clusters
+                    ],
+                    "keyword_decisions": [
+                        decision.__dict__ for decision in keyword_metrics.decisions
+                    ],
+                    "representative_keywords": representative,
                     "metrics": [m.model_dump(mode="json") for m in metrics],
                     "serp_snapshots": [s.model_dump(mode="json") for s in serp_snapshots],
                     "competitors": [c.model_dump(mode="json") for c in competitors],
@@ -234,6 +270,17 @@ class ScanPipeline:
                 "providers": providers,
                 "site_path": site_path,
             }
+        except ScanCancelled:
+            scan.status = "cancelled"
+            scan.progress_stage = "cancelled"
+            scan.completed_at = datetime.now(UTC)
+            scan.actual_cost_usd = self._actual_api_cost_between(scan.started_at, scan.completed_at)
+            scan.partial_outputs = {
+                **(scan.partial_outputs or {}),
+                "cancelled": True,
+            }
+            self.session.commit()
+            raise
         except Exception as exc:
             scan.status = "failed"
             scan.progress_stage = "failed"
@@ -306,8 +353,15 @@ class ScanPipeline:
             "data_mode": self.data_mode.value,
             "live_scan_depth": self.live_scan_depth if self.data_mode == DataMode.live else None,
             "scan_plan": plan.model_dump(mode="json"),
+            "service_payload": service.model_dump(mode="json"),
+            "market_payload": market.model_dump(mode="json"),
         }
         return scan
+
+    def _ensure_not_cancelled(self, scan: ScanRunORM) -> None:
+        self.session.refresh(scan)
+        if scan.cancel_requested:
+            raise ScanCancelled(f"Scan {scan.id} was cancelled.")
 
     def _save_assessment_records(
         self,
@@ -351,6 +405,28 @@ class ScanPipeline:
                     penalties=score.missing_data_penalties,
                 )
             )
+
+    def _demand_evidence(self, metrics: list[Any], market: Market) -> dict[str, Any]:
+        granularities = sorted({metric.market_granularity or "unknown" for metric in metrics})
+        country_level = any(item in {"country", "national"} for item in granularities)
+        total_volume = sum(metric.search_volume or 0 for metric in metrics)
+        warning = None
+        if country_level:
+            warning = (
+                "Keyword volume is provider-reported at country level. Treat it as service demand "
+                "evidence, not exact city demand, until local estimation is implemented."
+            )
+        return {
+            "keyword_metric_granularities": granularities,
+            "provider_reported_metric_granularity": "mixed" if len(granularities) > 1 else (granularities[0] if granularities else "none"),
+            "national_service_demand": total_volume if country_level else None,
+            "estimated_market_demand": None,
+            "market_estimation_method": "not_estimated",
+            "market_estimation_confidence": "none",
+            "localized_competition": bool(market.provider_location_code or market.provider_location_name or market.latitude),
+            "localized_provider_supply": bool(market.latitude and market.longitude),
+            "warning": warning,
+        }
 
     @property
     def serp_keyword_limit(self) -> int:

@@ -8,6 +8,8 @@ from sqlalchemy.orm import sessionmaker
 
 from rank_rent.db.base import Base, make_engine
 from rank_rent.db.orm import (
+    KeywordClusterORM,
+    KeywordDecisionORM,
     KeywordMetricORM,
     OpportunityORM,
     ProviderCandidateORM,
@@ -29,7 +31,7 @@ from rank_rent.domain.models import (
     ServiceFamily,
 )
 from rank_rent.repositories import get_or_create_opportunity, upsert_market, upsert_service
-from rank_rent.services.scanner import ScanPipeline
+from rank_rent.services.scanner import ScanCancelled, ScanPipeline
 from rank_rent.settings import get_settings
 
 
@@ -191,6 +193,39 @@ def test_scan_reuses_queued_row_and_writes_typed_records(monkeypatch) -> None:
         assert scan.planned_cost_usd == scan.estimated_cost_usd
         assert scan.scoring_version == "v1"
         assert len(session.scalars(select(ScanPlanCallORM)).all()) == 5
+        assert len(session.scalars(select(KeywordClusterORM)).all()) == 1
+        assert len(session.scalars(select(KeywordDecisionORM)).all()) >= 2
         assert len(session.scalars(select(KeywordMetricORM)).all()) == 1
         assert len(session.scalars(select(SerpSnapshotORM)).all()) == 1
         assert len(session.scalars(select(ProviderCandidateORM)).all()) == 1
+
+
+def test_cancelled_queued_scan_does_not_run_provider_calls(monkeypatch) -> None:
+    monkeypatch.setenv("LIVE_SCAN_DEPTH", "testing")
+    get_settings.cache_clear()
+    engine = make_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    service = ServiceFamily(id="drywall", display_name="Drywall", seed_queries=["drywall"])
+    market = Market(id="st_louis_mo", display_name="St. Louis, MO")
+
+    with Session() as session:
+        queued = ScanRunORM(source="manual_async", status="queued", cancel_requested=True)
+        session.add(queued)
+        session.commit()
+
+        with pytest.raises(ScanCancelled):
+            asyncio.run(
+                ScanPipeline(
+                    session,
+                    research_provider=MinimalResearchProvider(),
+                    domain_provider=StaticDomainProvider(),
+                    data_mode="live",
+                ).run(service, market, source="manual_async", existing_scan_id=queued.id)
+            )
+
+        scan = session.get(ScanRunORM, queued.id)
+        assert scan is not None
+        assert scan.status == "cancelled"
+        assert scan.progress_stage == "cancelled"
+        assert len(session.scalars(select(KeywordMetricORM)).all()) == 0

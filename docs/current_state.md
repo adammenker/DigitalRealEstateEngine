@@ -87,8 +87,10 @@ After V1 hardening:
 
 ## Persistence and Jobs
 
-- Scans can run synchronously or as queued background jobs through the API/UI.
+- Scans can run synchronously or as durable queued jobs through the API/UI.
 - `GET /api/scans` and `GET /api/scans/{scan_id}` expose scan status, costs, plan calls, and typed record counts.
+- The backend process starts a database-backed scan worker that atomically claims queued scans,
+  heartbeats running work, recovers stale worker-owned scans, and releases terminal scans.
 - Scan outputs are retained as JSON artifacts for UI compatibility and also persisted into typed tables for keyword metrics, SERP snapshots/results, competitor metrics, provider candidates, scan plan calls, scan plans, preliminary assessments, full scores, and score components.
 - DataForSEO responses are stored with sanitized payloads, checksums, response shape versions, expiry metadata, provider IDs, and source scan IDs.
 - `rank-rent data audit` reports raw response counts, typed record counts, and scan/opportunity status distribution.

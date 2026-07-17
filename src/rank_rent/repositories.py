@@ -17,6 +17,8 @@ def upsert_service(session: Session, service: ServiceFamily) -> ServiceFamilyORM
     row.description = service.description
     row.seed_queries = service.seed_queries
     row.negative_terms = service.negative_terms
+    row.intent_modifiers = service.intent_modifiers
+    row.negative_product_terms = service.negative_product_terms
     row.provider_categories = service.provider_categories
     row.regulated = service.regulated
     row.enabled = service.enabled
@@ -78,6 +80,8 @@ def service_from_orm(row: ServiceFamilyORM) -> ServiceFamily:
         description=row.description,
         seed_queries=row.seed_queries,
         negative_terms=row.negative_terms,
+        intent_modifiers=row.intent_modifiers,
+        negative_product_terms=row.negative_product_terms,
         provider_categories=row.provider_categories,
         regulated=row.regulated,
         enabled=row.enabled,

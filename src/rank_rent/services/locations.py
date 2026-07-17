@@ -15,7 +15,6 @@ from rank_rent.domain.models import LocationType, Market, slugify
 from rank_rent.services.seeds import SeedValidationError, load_markets
 from rank_rent.settings import Settings
 
-
 STATE_ABBREVIATIONS = {
     "alabama": "AL",
     "alaska": "AK",
@@ -83,6 +82,11 @@ COUNTRY_ALIASES = {
     "ca": "CA",
     "canada": "CA",
 }
+COUNTRY_DISPLAY_NAMES = {
+    "US": "United States",
+    "GB": "United Kingdom",
+    "CA": "Canada",
+}
 
 
 class LocationCandidate(BaseModel):
@@ -105,6 +109,21 @@ class LocationCandidate(BaseModel):
     def to_market(self) -> Market:
         cities = [self.city] if self.city else []
         postal_codes = [self.postal_code] if self.postal_code else []
+        inferred_provider_name = self.provider_location_name or _infer_provider_location_name(
+            city=self.city,
+            state=self.state,
+            country=self.country,
+            location_type=self.type,
+        )
+        provider_mapping_status = (
+            "provider_code"
+            if self.provider_location_code
+            else "provider_name"
+            if self.provider_location_name
+            else "inferred_provider_name"
+            if inferred_provider_name
+            else "unmapped"
+        )
         return Market(
             id=self.id,
             slug=slugify(self.id),
@@ -117,13 +136,14 @@ class LocationCandidate(BaseModel):
             latitude=self.latitude,
             longitude=self.longitude,
             provider_location_code=self.provider_location_code,
-            provider_location_name=self.provider_location_name,
+            provider_location_name=inferred_provider_name,
             resolution_metadata={
                 **self.resolution_metadata,
                 "selected_location_id": self.id,
                 "selected_location_source": self.source,
                 "selected_location_confidence": self.confidence,
                 "selected_location_match_reason": self.match_reason,
+                "dataforseo_mapping_status": provider_mapping_status,
             },
         )
 
@@ -173,6 +193,12 @@ async def resolve_market_for_scan(
         )
 
     best = candidates[0]
+    if (
+        best.source == "explicit"
+        and best.match_reason in {"city_state", "zip_code"}
+        and best.confidence >= 0.9
+    ):
+        return best.to_market()
     second = candidates[1] if len(candidates) > 1 else None
     has_clear_gap = second is None or best.confidence - second.confidence >= 0.12
     if best.confidence >= 0.9 and has_clear_gap:
@@ -478,8 +504,12 @@ def _rank_and_dedupe(
             ]
         )
         existing = deduped.get(key)
-        if existing is None or candidate.confidence > existing.confidence:
+        if existing is None:
             deduped[key] = candidate
+        elif candidate.confidence > existing.confidence:
+            deduped[key] = _merge_candidate_fields(candidate, existing)
+        else:
+            deduped[key] = _merge_candidate_fields(existing, candidate)
     normalized_query = _normalize(query)
     ranked = sorted(
         deduped.values(),
@@ -492,6 +522,29 @@ def _rank_and_dedupe(
         reverse=True,
     )
     return ranked[:limit]
+
+
+def _merge_candidate_fields(
+    preferred: LocationCandidate, fallback: LocationCandidate
+) -> LocationCandidate:
+    update: dict[str, Any] = {}
+    for field_name in [
+        "latitude",
+        "longitude",
+        "provider_location_code",
+        "provider_location_name",
+        "state",
+        "city",
+        "postal_code",
+    ]:
+        if getattr(preferred, field_name) is None and getattr(fallback, field_name) is not None:
+            update[field_name] = getattr(fallback, field_name)
+    if fallback.resolution_metadata:
+        update["resolution_metadata"] = {
+            **fallback.resolution_metadata,
+            **preferred.resolution_metadata,
+        }
+    return preferred.model_copy(update=update) if update else preferred
 
 
 def _dataforseo_location_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -529,6 +582,24 @@ def _provider_label(city: str | None, state: str | None, country: str, fallback:
     if city:
         return f"{city}, {country}"
     return fallback
+
+
+def _infer_provider_location_name(
+    *,
+    city: str | None,
+    state: str | None,
+    country: str,
+    location_type: LocationType,
+) -> str | None:
+    if location_type != LocationType.city or not city:
+        return None
+    if country == "US" and state:
+        state_name = STATE_NAMES.get(state.upper()) or state
+        return f"{city},{state_name},{COUNTRY_DISPLAY_NAMES['US']}"
+    country_name = COUNTRY_DISPLAY_NAMES.get(country)
+    if country_name:
+        return f"{city},{country_name}"
+    return None
 
 
 def _market_country_consistent(row: MarketORM) -> bool:

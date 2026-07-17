@@ -18,15 +18,18 @@ The steering document is a multi-milestone remediation plan. This implementation
 - default scan lifecycle separation from generated sites, domains, and outreach;
 - Alembic-backed startup initialization for file-backed local and Docker databases;
 - typed scan records for plan calls, keyword metrics, SERPs, competitors, and providers;
-- queued background scan jobs with status endpoints;
+- typed keyword clusters and keyword decisions for inclusion, exclusion, grouping, ranking,
+  and representative SERP selection;
+- database-backed queued scan jobs with status, cancellation, retry, atomic claim, heartbeat,
+  and stale-worker recovery;
 - API/UI data-mode exposure, fixture-data banner, cost confirmation, and recent scan status;
 - Milestone 0 verification command and current-state documentation.
 
 The following later milestones are not complete yet:
 
 - full real qualification framework;
-- scoring rewrite;
-- cancellation, retry locking, and durable worker orchestration beyond in-process background jobs;
+- full scoring rewrite beyond the V1 close-variant demand and keyword-selection fixes;
+- external queue workers beyond the V1 in-process database worker;
 - approval-gated site generation;
 - registrar-grade domain availability;
 - real cloud staging deployment.
@@ -39,9 +42,10 @@ The offline remediation specification is intentionally broad. This implementatio
 
 - raw response storage extends the existing `raw_api_responses` table rather than renaming it to `stored_api_responses`;
 - scan planning uses maintained endpoint estimates rather than provider price-table extraction;
-- async scans are in-process background jobs; cancellation, retry locking, and external queue workers are not implemented;
+- async scans use an in-process database-backed worker; an external queue service remains deferred;
 - geographic resolution still uses the existing market model plus limited offline coordinates rather than a complete U.S. city/ZIP dataset;
-- scoring remains version `v1` with targeted live/preliminary labeling fixes rather than a full version-2 scoring rewrite;
+- scoring remains version `v1` with targeted live/preliminary labeling, close-variant demand
+  deduping, and representative keyword selection rather than a full version-2 scoring rewrite;
 - migrations are restored, but migration coverage is currently an upgrade-head smoke test rather than a large populated historical fixture matrix.
 
 ## Data Mode Persistence

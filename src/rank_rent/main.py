@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -14,10 +16,12 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from rank_rent.db.base import SessionLocal, get_session, init_db
+from rank_rent.db.base import get_session, init_db
 from rank_rent.db.orm import (
     CompetitorMetricORM,
     JsonArtifactORM,
+    KeywordClusterORM,
+    KeywordDecisionORM,
     KeywordMetricORM,
     OpportunityORM,
     ProviderCandidateORM,
@@ -31,6 +35,10 @@ from rank_rent.planning import build_scan_plan
 from rank_rent.repositories import get_or_create_opportunity, upsert_market, upsert_service
 from rank_rent.runtime import resolve_data_mode, validate_runtime_mode
 from rank_rent.services.data_audit import audit_data
+from rank_rent.services.keywords import (
+    DEFAULT_AD_HOC_INTENT_MODIFIERS,
+    DEFAULT_NEGATIVE_PRODUCT_TERMS,
+)
 from rank_rent.services.locations import (
     LocationCandidate,
     LocationResolutionError,
@@ -38,6 +46,7 @@ from rank_rent.services.locations import (
     search_locations,
 )
 from rank_rent.services.records import save_scan_plan_calls
+from rank_rent.services.scan_worker import active_retry_for_scan, scan_worker_loop
 from rank_rent.services.scanner import ScanPipeline
 from rank_rent.settings import get_settings
 
@@ -47,7 +56,34 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     init_db()
-    yield
+    settings = get_settings()
+    stop_event: asyncio.Event | None = None
+    worker_task: asyncio.Task[None] | None = None
+    if settings.scan_worker_enabled:
+        stop_event = asyncio.Event()
+        worker_task = asyncio.create_task(
+            scan_worker_loop(
+                stop_event,
+                poll_seconds=settings.scan_worker_poll_seconds,
+                heartbeat_seconds=settings.scan_worker_heartbeat_seconds,
+                stale_after_seconds=settings.scan_worker_stale_after_seconds,
+            )
+        )
+    try:
+        yield
+    finally:
+        if stop_event is not None:
+            stop_event.set()
+        if worker_task is not None:
+            try:
+                await asyncio.wait_for(
+                    worker_task,
+                    timeout=max(1.0, settings.scan_worker_heartbeat_seconds + 1.0),
+                )
+            except TimeoutError:
+                worker_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await worker_task
 
 
 app = FastAPI(title="Digital Real Estate Engine", lifespan=lifespan)
@@ -108,6 +144,11 @@ def _scan_summary(row: ScanRunORM, session: Session) -> dict[str, Any]:
         "scoring_version": row.scoring_version,
         "cache_policy_version": row.cache_policy_version,
         "source_scan_run_id": row.source_scan_run_id,
+        "retry_count": row.retry_count,
+        "cancel_requested": row.cancel_requested,
+        "worker_id": row.worker_id,
+        "claimed_at": row.claimed_at.isoformat() if row.claimed_at else None,
+        "heartbeat_at": row.heartbeat_at.isoformat() if row.heartbeat_at else None,
         "integration_versions": row.integration_versions,
         "request_parameters": row.request_parameters,
         "typed_counts": typed_counts,
@@ -119,6 +160,16 @@ def _typed_counts(session: Session, scan_run_id: int) -> dict[str, int]:
         "keyword_metrics": len(
             session.scalars(
                 select(KeywordMetricORM.id).where(KeywordMetricORM.scan_run_id == scan_run_id)
+            ).all()
+        ),
+        "keyword_clusters": len(
+            session.scalars(
+                select(KeywordClusterORM.id).where(KeywordClusterORM.scan_run_id == scan_run_id)
+            ).all()
+        ),
+        "keyword_decisions": len(
+            session.scalars(
+                select(KeywordDecisionORM.id).where(KeywordDecisionORM.scan_run_id == scan_run_id)
             ).all()
         ),
         "serp_snapshots": len(
@@ -239,9 +290,17 @@ def api_opportunity_detail(
         .where(JsonArtifactORM.opportunity_id == opportunity_id)
         .order_by(JsonArtifactORM.id.desc())
     ).all()
+    latest_scan = session.scalar(
+        select(ScanRunORM)
+        .where(ScanRunORM.opportunity_id == opportunity_id)
+        .order_by(ScanRunORM.id.desc())
+        .limit(1)
+    )
     return {
         "data_mode": _artifact_data_mode(artifacts),
         "opportunity": _opportunity_summary(opportunity),
+        "keyword_decisions": _keyword_decision_rows(session, latest_scan.id) if latest_scan else [],
+        "keyword_clusters": _keyword_cluster_rows(session, latest_scan.id) if latest_scan else [],
         "artifacts": [
             {
                 "id": artifact.id,
@@ -252,6 +311,42 @@ def api_opportunity_detail(
             for artifact in artifacts
         ],
     }
+
+
+def _keyword_decision_rows(session: Session, scan_id: int) -> list[dict[str, Any]]:
+    rows = session.scalars(
+        select(KeywordDecisionORM)
+        .where(KeywordDecisionORM.scan_run_id == scan_id)
+        .order_by(KeywordDecisionORM.representative.desc(), KeywordDecisionORM.rank, KeywordDecisionORM.id)
+    ).all()
+    return [
+        {
+            "keyword": row.keyword,
+            "canonical_keyword": row.canonical_keyword,
+            "decision": row.decision,
+            "reason": row.reason,
+            "rank": row.rank,
+            "representative": row.representative,
+        }
+        for row in rows
+    ]
+
+
+def _keyword_cluster_rows(session: Session, scan_id: int) -> list[dict[str, Any]]:
+    rows = session.scalars(
+        select(KeywordClusterORM)
+        .where(KeywordClusterORM.scan_run_id == scan_id)
+        .order_by(KeywordClusterORM.id)
+    ).all()
+    return [
+        {
+            "representative_keyword": row.representative_keyword,
+            "keywords": row.keywords,
+            "dedupe_method": row.dedupe_method,
+            "combined_volume": row.combined_volume,
+        }
+        for row in rows
+    ]
 
 
 @app.get("/api/data/audit")
@@ -276,10 +371,86 @@ def api_scan_status(scan_id: int, session: Session = Depends(get_session)) -> di
     }
 
 
+@app.post("/api/scans/{scan_id}/cancel")
+def api_cancel_scan(scan_id: int, session: Session = Depends(get_session)) -> dict[str, Any]:
+    scan = session.get(ScanRunORM, scan_id)
+    if scan is None:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    if scan.status in {"completed", "failed", "cancelled"}:
+        return {
+            "cancelled": scan.status == "cancelled",
+            "message": f"Scan {scan.id} is already {scan.status}.",
+            "scan": _scan_summary(scan, session),
+        }
+    scan.cancel_requested = True
+    if scan.status == "queued":
+        scan.status = "cancelled"
+        scan.progress_stage = "cancelled"
+        scan.completed_at = datetime.now(UTC)
+        scan.worker_id = None
+        scan.heartbeat_at = None
+    session.commit()
+    return {
+        "cancelled": True,
+        "message": f"Cancellation requested for scan {scan.id}.",
+        "scan": _scan_summary(scan, session),
+    }
+
+
+@app.post("/api/scans/{scan_id}/retry")
+def api_retry_scan(
+    scan_id: int,
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    scan = session.get(ScanRunORM, scan_id)
+    if scan is None:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    if scan.status in {"queued", "running"}:
+        raise HTTPException(status_code=409, detail="Active scans cannot be retried.")
+    existing_retry = active_retry_for_scan(session, scan.id)
+    if existing_retry is not None:
+        return {
+            "queued": True,
+            "message": f"Retry scan {existing_retry.id} is already active.",
+            "scan_id": existing_retry.id,
+            "source_scan_run_id": scan.id,
+            "scan_plan": (existing_retry.request_parameters or {}).get("scan_plan"),
+        }
+    request = scan.request_parameters or {}
+    service_payload = request.get("service_payload")
+    market_payload = request.get("market_payload")
+    if not isinstance(service_payload, dict) or not isinstance(market_payload, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="This scan does not have structured retry metadata. Run a new scan instead.",
+        )
+    data_mode = str(request.get("data_mode") or scan.data_mode)
+    service = ServiceFamily(**service_payload)
+    market = Market(**market_payload)
+    plan = build_scan_plan(get_settings(), resolve_data_mode(data_mode), service, market, session=session)
+    if plan.blocked:
+        raise HTTPException(status_code=400, detail=plan.block_reason or "Retry blocked by cost policy.")
+    retry = _queue_scan(
+        session,
+        service,
+        market,
+        data_mode,
+        plan.model_dump(mode="json"),
+        source_scan_run_id=scan.id,
+        retry_count=(scan.retry_count or 0) + 1,
+    )
+    return {
+        "queued": True,
+        "message": f"Queued retry scan {retry.id} from scan {scan.id}.",
+        "scan_id": retry.id,
+        "source_scan_run_id": scan.id,
+        "scan_plan": plan.model_dump(mode="json"),
+    }
+
+
 @app.post("/api/scans")
 async def api_scan(
     payload: ScanRequest,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     settings = get_settings()
@@ -291,6 +462,8 @@ async def api_scan(
         display_name=payload.service_text.title(),
         seed_queries=[payload.service_text],
         negative_terms=["diy", "jobs", "salary"],
+        intent_modifiers=DEFAULT_AD_HOC_INTENT_MODIFIERS,
+        negative_product_terms=DEFAULT_NEGATIVE_PRODUCT_TERMS,
     )
     try:
         market = await resolve_market_for_scan(
@@ -341,13 +514,6 @@ async def api_scan(
         )
     if payload.async_run:
         scan = _queue_scan(session, service, market, requested_mode.value, plan.model_dump(mode="json"))
-        background_tasks.add_task(
-            _run_scan_job,
-            scan.id,
-            service.model_dump(mode="json"),
-            market.model_dump(mode="json"),
-            requested_mode.value,
-        )
         return {
             "dry_run": False,
             "queued": True,
@@ -392,6 +558,8 @@ def _queue_scan(
     market: Market,
     data_mode: str,
     scan_plan: dict[str, Any],
+    source_scan_run_id: int | None = None,
+    retry_count: int = 0,
 ) -> ScanRunORM:
     service_row = upsert_service(session, service)
     market_row = upsert_market(session, market)
@@ -404,14 +572,22 @@ def _queue_scan(
         planned_cost_usd=float(scan_plan.get("estimated_uncached_cost_usd") or 0),
         data_mode=data_mode,
         scan_profile=str(scan_plan.get("scan_profile") or "testing"),
+        source_scan_run_id=source_scan_run_id,
+        retry_count=retry_count,
         progress_stage="queued",
         cache_policy_version="v2",
-        integration_versions={"data_mode": data_mode, "queued": True},
+        integration_versions={
+            "data_mode": data_mode,
+            "queued": True,
+            "async_worker": "database_in_process",
+        },
         request_parameters={
             "service": service.slug,
             "market": market.slug,
             "data_mode": data_mode,
             "scan_plan": scan_plan,
+            "service_payload": service.model_dump(mode="json"),
+            "market_payload": market.model_dump(mode="json"),
         },
     )
     session.add(scan)
@@ -420,27 +596,6 @@ def _queue_scan(
     save_scan_plan_calls(session, scan.id, plan)
     session.commit()
     return scan
-
-
-async def _run_scan_job(
-    scan_id: int,
-    service_data: dict[str, Any],
-    market_data: dict[str, Any],
-    data_mode: str,
-) -> None:
-    with SessionLocal() as session:
-        service = ServiceFamily(**service_data)
-        market = Market(**market_data)
-        try:
-            await ScanPipeline(session, data_mode=data_mode).run(
-                service,
-                market,
-                source="manual_async",
-                existing_scan_id=scan_id,
-            )
-        except Exception:
-            logger.exception("Background scan %s failed unexpectedly.", scan_id)
-            return
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -467,6 +622,8 @@ async def scan(
         display_name=service_text.title(),
         seed_queries=[service_text],
         negative_terms=["diy", "jobs", "salary"],
+        intent_modifiers=DEFAULT_AD_HOC_INTENT_MODIFIERS,
+        negative_product_terms=DEFAULT_NEGATIVE_PRODUCT_TERMS,
     )
     try:
         market = await resolve_market_for_scan(

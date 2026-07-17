@@ -321,7 +321,8 @@ h1 {
 }
 
 .planStrip,
-.scanTimeline {
+.scanTimeline,
+.plannedCalls {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -345,9 +346,38 @@ h1 {
   border: 1px solid var(--line);
 }
 
+.plannedCalls span {
+  min-height: 34px;
+  display: inline-grid;
+  grid-auto-flow: column;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  color: var(--muted);
+  padding: 0 10px;
+  font-size: 0.78rem;
+}
+
+.plannedCalls strong {
+  color: var(--ink);
+}
+
 .scanChip {
   background: #eef3f1;
   color: var(--muted);
+  gap: 8px;
+}
+
+.scanChip button {
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.72rem;
+  font-weight: 850;
+  padding: 3px 6px;
 }
 
 .scanChip.running,
@@ -381,6 +411,18 @@ h1 {
 
 .fixtureBanner strong {
   white-space: nowrap;
+}
+
+.fixtureBanner.sandbox {
+  border-color: #b6d9d2;
+  background: #eef8f5;
+  color: var(--brand-strong);
+}
+
+.fixtureBanner.production {
+  border-color: #e9b6ae;
+  background: #fff1ef;
+  color: var(--red);
 }
 
 .syntheticNote {

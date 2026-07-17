@@ -77,6 +77,25 @@ const api = {
       throw new Error(message);
     }
     return response.json();
+  },
+  async cancelScan(id) {
+    const response = await fetch(`/api/backend/api/scans/${id}/cancel`, { method: "POST" });
+    if (!response.ok) throw new Error("Could not cancel scan");
+    return response.json();
+  },
+  async retryScan(id) {
+    const response = await fetch(`/api/backend/api/scans/${id}/retry`, { method: "POST" });
+    if (!response.ok) {
+      let message = "Could not retry scan";
+      try {
+        const error = await response.json();
+        message = error.detail || message;
+      } catch {
+        // Keep generic fallback.
+      }
+      throw new Error(message);
+    }
+    return response.json();
   }
 };
 
@@ -114,7 +133,7 @@ export default function Dashboard() {
   const [sort, setSort] = useState("score");
   const [form, setForm] = useState({
     service_text: "water heater repair",
-    location_text: "Stamford, CT",
+    location_text: "",
     country: "US",
     dry_run: true,
     async_run: true,
@@ -233,6 +252,26 @@ export default function Dashboard() {
     }
   }
 
+  async function cancelScan(id) {
+    try {
+      const result = await api.cancelScan(id);
+      setNotice({ type: "success", message: result.message });
+      await refresh(false);
+    } catch (error) {
+      setNotice({ type: "error", message: error.message });
+    }
+  }
+
+  async function retryScan(id) {
+    try {
+      const result = await api.retryScan(id);
+      setNotice({ type: "success", message: result.message });
+      await refresh(false);
+    } catch (error) {
+      setNotice({ type: "error", message: error.message });
+    }
+  }
+
   const filtered = useMemo(() => {
     const text = query.trim().toLowerCase();
     const rows = opportunities.filter((item) => {
@@ -252,9 +291,12 @@ export default function Dashboard() {
   const outreach = artifactByKind(artifacts, "outreach_drafts")?.drafts || [];
   const site = artifactByKind(artifacts, "site_config");
   const components = scan?.score?.component_scores || {};
+  const demandEvidence = scan?.demand_evidence || null;
   const providers = scan?.providers || [];
   const competitors = scan?.competitors || [];
   const keywords = scan?.metrics || [];
+  const keywordDecisions = detail?.keyword_decisions || scan?.keyword_decisions || [];
+  const keywordClusters = detail?.keyword_clusters || scan?.keyword_clusters || [];
   const activeScanCount = scans.filter((item) => ["queued", "running"].includes(item.status)).length;
 
   return (
@@ -285,6 +327,23 @@ export default function Dashboard() {
             Fixture mode uses deterministic test data for scores, SERPs, providers, domains, and
             outreach. Do not treat it as live market evidence.
           </span>
+        </section>
+      )}
+      {meta?.dataforseo_sandbox && meta?.data_mode === "live" && (
+        <section className="fixtureBanner sandbox">
+          <AlertTriangle size={18} />
+          <strong>DataForSEO sandbox</strong>
+          <span>
+            Live mode is using free sandbox responses. API plumbing is real, but returned market
+            data may be mock or unrelated.
+          </span>
+        </section>
+      )}
+      {!meta?.dataforseo_sandbox && meta?.data_mode === "live" && meta?.live_api_calls_allowed && (
+        <section className="fixtureBanner production">
+          <AlertTriangle size={18} />
+          <strong>Production API spend enabled</strong>
+          <span>Real DataForSEO production calls may consume credits when scans are confirmed.</span>
         </section>
       )}
 
@@ -402,18 +461,39 @@ export default function Dashboard() {
           </button>
         </form>
         {lastPlan && (
-          <div className="planStrip">
-            <span>{lastPlan.planned_calls?.length || 0} calls</span>
-            <span>{money(lastPlan.estimated_uncached_cost_usd)} uncached</span>
-            <span>{money(lastPlan.cached_cost_usd)} cached</span>
-            <span>{lastPlan.blocked ? "blocked" : lastPlan.scan_profile}</span>
-          </div>
+          <>
+            <div className="planStrip">
+              <span>{lastPlan.planned_calls?.length || 0} calls</span>
+              <span>{money(lastPlan.estimated_uncached_cost_usd)} uncached</span>
+              <span>{money(lastPlan.cached_cost_usd)} cached</span>
+              <span>{lastPlan.blocked ? "blocked" : lastPlan.scan_profile}</span>
+            </div>
+            <div className="plannedCalls">
+              {(lastPlan.planned_calls || []).map((call) => (
+                <span key={`${call.stage}-${call.endpoint}`}>
+                  <strong>{call.stage}</strong>
+                  <small>{call.cache_hit ? "cache hit" : call.request_known ? "uncached" : "estimated"}</small>
+                  <small>{money(call.estimated_cost_usd)}</small>
+                </span>
+              ))}
+            </div>
+          </>
         )}
         {scans.length > 0 && (
           <div className="scanTimeline">
             {scans.slice(0, 4).map((item) => (
               <span key={item.id} className={`scanChip ${item.status}`}>
                 #{item.id} {item.status} {money(item.actual_cost_usd || item.estimated_cost_usd)}
+                {["queued", "running"].includes(item.status) && (
+                  <button type="button" onClick={() => cancelScan(item.id)}>
+                    Cancel
+                  </button>
+                )}
+                {["failed", "cancelled"].includes(item.status) && (
+                  <button type="button" onClick={() => retryScan(item.id)}>
+                    Retry
+                  </button>
+                )}
               </span>
             ))}
           </div>
@@ -524,6 +604,9 @@ export default function Dashboard() {
                       Preliminary testing assessment. It is not comparable to a full opportunity score.
                     </p>
                   )}
+                  {demandEvidence?.warning && (
+                    <p className="syntheticNote">{demandEvidence.warning}</p>
+                  )}
                 </div>
                 <ScoreDial score={detail.opportunity.score} confidence={detail.opportunity.confidence} />
               </div>
@@ -539,14 +622,38 @@ export default function Dashboard() {
               <div className="detailGrid">
                 <Panel title="Keyword Cluster" icon={Search}>
                   <Table
-                    columns={["Keyword", "Intent", "Volume", "CPC"]}
+                    columns={["Keyword", "Intent", "Volume", "Granularity", "CPC"]}
                     rows={keywords.slice(0, 8).map((item) => [
                       item.keyword,
                       item.intent,
                       item.search_volume,
+                      item.market_granularity || "unknown",
                       `$${item.cpc}`
                     ])}
                   />
+                  {demandEvidence && (
+                    <p className="muted">
+                      Metric source: {demandEvidence.provider_reported_metric_granularity}.
+                      Local demand estimate: {demandEvidence.market_estimation_method}.
+                    </p>
+                  )}
+                </Panel>
+                <Panel title="Keyword Decisions" icon={ShieldCheck}>
+                  <Table
+                    columns={["Keyword", "Decision", "Rank", "Reason"]}
+                    rows={keywordDecisions.slice(0, 10).map((item) => [
+                      item.keyword,
+                      item.representative ? "SERP representative" : item.decision,
+                      item.rank || "n/a",
+                      item.reason || "n/a"
+                    ])}
+                  />
+                  {keywordClusters.length > 0 && (
+                    <p className="muted">
+                      {keywordClusters.length} close-variant clusters saved. Cluster demand uses
+                      the representative volume rather than blindly summing variants.
+                    </p>
+                  )}
                 </Panel>
                 <Panel title="Domain Candidates" icon={Globe2}>
                   <Table

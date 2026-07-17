@@ -5,6 +5,8 @@ from sqlalchemy.orm import Session
 
 from rank_rent.db.orm import (
     CompetitorMetricORM,
+    KeywordClusterORM,
+    KeywordDecisionORM,
     KeywordMetricORM,
     ProviderCandidateORM,
     ScanPlanCallORM,
@@ -19,6 +21,7 @@ from rank_rent.domain.models import (
     SerpSnapshot,
 )
 from rank_rent.planning import ScanPlan
+from rank_rent.services.keywords import KeywordCluster, KeywordDecision
 
 
 def save_scan_plan_calls(session: Session, scan_run_id: int, plan: ScanPlan) -> None:
@@ -64,8 +67,32 @@ def save_scan_records(
     serp_snapshots: list[SerpSnapshot],
     competitors: list[CompetitorMetric],
     providers: list[ProviderCandidate],
+    keyword_clusters: list[KeywordCluster] | None = None,
+    keyword_decisions: list[KeywordDecision] | None = None,
 ) -> None:
     _clear_scan_records(session, scan_run_id)
+    for cluster in keyword_clusters or []:
+        session.add(
+            KeywordClusterORM(
+                scan_run_id=scan_run_id,
+                representative_keyword=cluster.representative_keyword,
+                keywords=cluster.keywords,
+                dedupe_method=cluster.dedupe_method,
+                combined_volume=cluster.combined_volume,
+            )
+        )
+    for decision in keyword_decisions or []:
+        session.add(
+            KeywordDecisionORM(
+                scan_run_id=scan_run_id,
+                keyword=decision.keyword,
+                canonical_keyword=decision.canonical_keyword,
+                decision=decision.decision,
+                reason=decision.reason,
+                rank=decision.rank,
+                representative=decision.representative,
+            )
+        )
     for metric in metrics:
         session.add(
             KeywordMetricORM(
@@ -163,6 +190,8 @@ def _clear_scan_records(session: Session, scan_run_id: int) -> None:
     snapshot_ids = select(SerpSnapshotORM.id).where(SerpSnapshotORM.scan_run_id == scan_run_id)
     session.execute(delete(SerpResultORM).where(SerpResultORM.serp_snapshot_id.in_(snapshot_ids)))
     session.execute(delete(SerpSnapshotORM).where(SerpSnapshotORM.scan_run_id == scan_run_id))
+    session.execute(delete(KeywordDecisionORM).where(KeywordDecisionORM.scan_run_id == scan_run_id))
+    session.execute(delete(KeywordClusterORM).where(KeywordClusterORM.scan_run_id == scan_run_id))
     session.execute(delete(KeywordMetricORM).where(KeywordMetricORM.scan_run_id == scan_run_id))
     session.execute(delete(CompetitorMetricORM).where(CompetitorMetricORM.scan_run_id == scan_run_id))
     session.execute(delete(ProviderCandidateORM).where(ProviderCandidateORM.scan_run_id == scan_run_id))

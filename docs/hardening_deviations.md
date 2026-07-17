@@ -12,14 +12,19 @@ This file records intentional deviations from `specs/DigitalRealEstateEngine_V1_
 - Cache keys include provider, endpoint, API version, response shape version, and normalized request.
 - Scan plans expose cache hit count, paid call count, request limit, confirmation requirement, and cost budget blocks.
 - Preliminary/full assessment and score-component tables are added.
+- Async scans now use a database-backed in-process worker with atomic claim, heartbeat,
+  stale recovery, cancellation, and idempotent active retry behavior.
+- Keyword handling now records exact duplicates, negative filters, close-variant clusters,
+  representative SERP selections, and value-ranking reasons.
 
 ## Deferred
 
-- The full scoring rewrite remains deferred; current scoring is still `v1` with existing directionality tests.
+- The full scoring rewrite remains deferred; current scoring is still `v1`, now with
+  close-variant deduped demand inputs and existing directionality tests.
 - Offline geographic resolution is not a complete U.S. city/ZIP/county dataset yet.
 - Demand granularity is partially represented through metric granularity fields, but full national-versus-local estimation models are deferred.
 - Qualification harness is still a smoke/fixture/replay foundation rather than a complete capability matrix.
-- Async scans remain in-process background jobs; locking, cancellation, and durable worker restart semantics are not production-grade.
+- A separate external queue service is deferred; V1 intentionally uses the backend process worker.
 - Site generator hardening is deferred beyond preserving the existing workflow separation.
 
 ## Rationale

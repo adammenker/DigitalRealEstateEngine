@@ -44,6 +44,8 @@ class ServiceFamily(BaseModel):
     description: str = ""
     seed_queries: list[str] = Field(default_factory=list)
     negative_terms: list[str] = Field(default_factory=list)
+    intent_modifiers: list[str] = Field(default_factory=list)
+    negative_product_terms: list[str] = Field(default_factory=list)
     provider_categories: list[str] = Field(default_factory=list)
     regulated: bool = False
     enabled: bool = True

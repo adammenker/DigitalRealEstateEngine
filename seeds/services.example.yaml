@@ -7,12 +7,21 @@ services:
       - water heater replacement
       - emergency water heater repair
       - tankless water heater installation
+    intent_modifiers:
+      - repair
+      - replacement
+      - emergency
+      - installation
     negative_terms:
       - diy
       - jobs
       - salary
+    negative_product_terms:
       - parts
       - manual
+      - kit
+      - lowes
+      - home depot
     provider_categories:
       - plumber
       - water heater installation service
@@ -25,12 +34,19 @@ services:
       - epoxy flooring
       - garage epoxy floor
       - epoxy floor installers
+    intent_modifiers:
+      - installer
+      - contractor
+      - coating
+      - commercial
     negative_terms:
       - diy
-      - kit
       - jobs
+    negative_product_terms:
+      - kit
+      - paint
+      - home depot
     provider_categories:
       - flooring contractor
     regulated: false
     enabled: true
-

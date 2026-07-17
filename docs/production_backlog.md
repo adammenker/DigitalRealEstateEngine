@@ -4,6 +4,8 @@ This file tracks work that should be completed before the Digital Real Estate En
 
 ## Geocoding And Market Resolution
 
+- [x] Add a first-pass local location dropdown with explicit city/state parsing and ambiguous city choices.
+- [x] Infer DataForSEO `location_name` values for selected U.S. city/state markets to avoid a separate location-catalog lookup when no provider code is cached.
 - [ ] Run Pelias as an optional Docker Compose profile with persistent volumes, health checks, and documented import/update commands.
 - [ ] Decide the first production geography scope: US-only, US plus Canada, or broader international.
 - [ ] Import the matching Pelias datasets for that scope, likely Who's On First for administrative areas, OpenStreetMap for places, and OpenAddresses/postal data where needed.
@@ -11,7 +13,8 @@ This file tracks work that should be completed before the Digital Real Estate En
 - [ ] Add an admin UI or CLI command to inspect unresolved market mappings before spending DataForSEO calls.
 - [ ] Add strict country/state validation so provider matches cannot silently cross from `US` to `GB` or any other mismatched country.
 - [ ] Improve ZIP-code resolution with city/state, lat/lng, and DataForSEO location mapping.
-- [ ] Add automated tests for ambiguous city names such as London, Springfield, Portland, and Columbus.
+- [x] Add automated tests for ambiguous city names such as London.
+- [ ] Expand automated ambiguous-city tests to cover Springfield, Portland, and Columbus.
 - [ ] Add a user-facing "unsupported geography" state for locations outside the configured production scope.
 
 ## DataForSEO Cost Controls
@@ -25,6 +28,11 @@ This file tracks work that should be completed before the Digital Real Estate En
 
 ## Data Quality And Scoring
 
+- [x] Label country-level keyword volume as national demand evidence instead of exact local demand.
+- [x] Add service-configured intent modifiers and negative product terms.
+- [x] Add close-variant keyword clustering and prevent grouped variants from inflating demand.
+- [x] Select representative SERP queries after keyword metrics using value/intent ranking.
+- [x] Persist keyword inclusion, exclusion, grouping, and representative-selection decisions.
 - [ ] Promote preliminary scores in the UI separately from full scores so users do not confuse incomplete sandbox/testing scans with production-grade opportunities.
 - [ ] Add confidence bands based on source mode: fixture, sandbox, replay, and production live.
 - [ ] Add relevance validation for sandbox/provider responses so obviously unrelated results are labeled as mock/noisy.
@@ -33,6 +41,8 @@ This file tracks work that should be completed before the Digital Real Estate En
 
 ## Operations
 
+- [x] Add basic scan cancellation and retry API hooks with UI controls.
+- [x] Add a database-backed durable scan worker with atomic claim, heartbeat, stale recovery, and idempotent active retries.
 - [ ] Add production database selection and backup/restore workflow.
 - [ ] Add structured logs for every scan stage with scan ID, opportunity ID, provider, cache status, and cost.
 - [ ] Add health checks for backend, frontend, database, DataForSEO credentials, and optional Pelias.

@@ -22,6 +22,7 @@ from rank_rent.domain.models import (
 )
 from rank_rent.runtime import DataMode, validate_runtime_mode
 from rank_rent.services.cache import RawResponseCache, normalize_request
+from rank_rent.services.keywords import service_seed_keywords
 from rank_rent.settings import Settings, get_settings
 
 
@@ -531,22 +532,7 @@ class DataForSEOLiveProvider:
         return f"{coordinates[0]:.6f},{coordinates[1]:.6f},{radius_km}"
 
     def _keyword_seeds(self, service: ServiceFamily) -> list[str]:
-        base = service.display_name.lower()
-        seeds = list(service.seed_queries or [])
-        seeds.extend(
-            [
-                f"{base} contractor",
-                f"{base} repair",
-                f"{base} installation",
-                base,
-            ]
-        )
-        deduped: list[str] = []
-        for seed in seeds:
-            normalized = " ".join(seed.lower().split())
-            if normalized and normalized not in deduped:
-                deduped.append(normalized)
-        return deduped
+        return service_seed_keywords(service)
 
     def _rank_keyword_candidates(
         self,
@@ -571,7 +557,7 @@ class DataForSEOLiveProvider:
             tokens = set(slugify(candidate.keyword).split("-"))
             relevance = len(tokens.intersection(service_terms)) * 10
             relevance += len(tokens.intersection(buyer_terms)) * 4
-            if any(word in tokens for word in {"anchor", "screw", "sheet", "panel", "lowes", "home"}):
+            if tokens.intersection(set(service.negative_product_terms)):
                 relevance -= 6
             return (-relevance, candidate.keyword)
 

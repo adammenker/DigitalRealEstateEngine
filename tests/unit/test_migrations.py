@@ -27,6 +27,16 @@ def test_alembic_upgrade_head_creates_v1_schema(tmp_path, monkeypatch) -> None:
     assert "full_opportunity_scores" in tables
     assert "api_calls" in tables
     scan_columns = {column["name"] for column in inspector.get_columns("scan_runs")}
-    assert {"data_mode", "scan_profile", "planned_cost_usd", "progress_stage"} <= scan_columns
+    assert {
+        "data_mode",
+        "scan_profile",
+        "planned_cost_usd",
+        "progress_stage",
+        "worker_id",
+        "claimed_at",
+        "heartbeat_at",
+    } <= scan_columns
     response_columns = {column["name"] for column in inspector.get_columns("raw_api_responses")}
     assert {"response_shape_version", "sanitized", "checksum", "expires_at"} <= response_columns
+    service_columns = {column["name"] for column in inspector.get_columns("service_families")}
+    assert {"intent_modifiers", "negative_product_terms"} <= service_columns

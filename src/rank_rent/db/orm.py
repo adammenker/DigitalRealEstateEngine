@@ -30,6 +30,8 @@ class ServiceFamilyORM(TimestampMixin, Base):
     description: Mapped[str] = mapped_column(Text, default="")
     seed_queries: Mapped[list[str]] = mapped_column(JSON, default=list)
     negative_terms: Mapped[list[str]] = mapped_column(JSON, default=list)
+    intent_modifiers: Mapped[list[str]] = mapped_column(JSON, default=list)
+    negative_product_terms: Mapped[list[str]] = mapped_column(JSON, default=list)
     provider_categories: Mapped[list[str]] = mapped_column(JSON, default=list)
     regulated: Mapped[bool] = mapped_column(default=False)
     enabled: Mapped[bool] = mapped_column(default=True)
@@ -100,6 +102,9 @@ class ScanRunORM(TimestampMixin, Base):
     partial_outputs: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    worker_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ScanPlanCallORM(TimestampMixin, Base):

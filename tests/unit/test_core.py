@@ -14,7 +14,10 @@ from rank_rent.integrations.domain_availability.mock import MockDomainAvailabili
 from rank_rent.scoring.score import OpportunityScorer
 from rank_rent.scoring.serp import classify_result
 from rank_rent.services.domains import generate_domain_candidates
-from rank_rent.services.keywords import dedupe_and_filter_keywords
+from rank_rent.services.keywords import (
+    dedupe_and_filter_keywords,
+    rank_and_cluster_keyword_metrics,
+)
 
 
 def test_keyword_dedupe_and_negative_filter() -> None:
@@ -26,10 +29,78 @@ def test_keyword_dedupe_and_negative_filter() -> None:
         ],
         ["jobs"],
     )
-    assert len(result) == 2
+    assert len(result) == 3
     assert result[0].included is True
     assert result[1].included is False
-    assert result[1].excluded_reason == "negative_term"
+    assert result[1].excluded_reason == "duplicate_exact"
+    assert result[2].included is False
+    assert result[2].excluded_reason == "negative_term:jobs"
+
+
+def test_keyword_close_variants_are_grouped_and_not_double_counted() -> None:
+    service = ServiceFamily(id="water_heater", display_name="Water Heater Repair")
+    market = Market(id="stamford_ct", display_name="Stamford, CT", state="CT", cities=["Stamford"])
+    metrics = [
+        KeywordMetric(
+            keyword="water heater repair",
+            canonical_keyword="water heater repair",
+            intent="commercial",
+            search_volume=100,
+            cpc=10,
+        ),
+        KeywordMetric(
+            keyword="water heater repairs near me",
+            canonical_keyword="water heater repairs near me",
+            intent="transactional",
+            search_volume=90,
+            cpc=18,
+        ),
+    ]
+
+    plan = rank_and_cluster_keyword_metrics(
+        metrics,
+        service=service,
+        market=market,
+        selected_limit=1,
+    )
+    score = OpportunityScorer().score(plan.metrics, [_snapshot()], [], [_provider()])
+
+    assert len(plan.clusters) == 1
+    assert plan.clusters[0].combined_volume == 100
+    assert any(metric.included is False for metric in plan.metrics)
+    assert score.input_measurements["deduplicated_search_volume"] == 100
+    assert score.input_measurements["excluded_keyword_metric_count"] == 1
+
+
+def test_serp_representatives_are_selected_by_metric_value_not_input_order() -> None:
+    service = ServiceFamily(id="drywall", display_name="Drywall Repair")
+    market = Market(id="st_louis_mo", display_name="St. Louis, MO", state="MO", cities=["St. Louis"])
+    metrics = [
+        KeywordMetric(
+            keyword="drywall",
+            canonical_keyword="drywall",
+            intent="informational",
+            search_volume=900,
+            cpc=1,
+        ),
+        KeywordMetric(
+            keyword="emergency drywall repair st louis",
+            canonical_keyword="emergency drywall repair st louis",
+            intent="transactional",
+            search_volume=120,
+            cpc=24,
+        ),
+    ]
+
+    plan = rank_and_cluster_keyword_metrics(
+        metrics,
+        service=service,
+        market=market,
+        selected_limit=1,
+    )
+
+    assert plan.selected_serp_keywords == ["emergency drywall repair st louis"]
+    assert plan.decisions[-2].representative is True
 
 
 def test_serp_classification_directory_and_local_provider() -> None:
@@ -154,3 +225,16 @@ def test_missing_competitor_metrics_prevents_high_confidence() -> None:
 
     assert score.confidence.value != "high"
     assert "competitor_metrics" in score.missing_fields
+
+
+def test_country_level_keyword_volume_is_labeled_as_national_demand() -> None:
+    metric = _metric()
+    metric.market_granularity = "country"
+    metric.source = "dataforseo:historical_search_volume"
+
+    score = OpportunityScorer().score([metric], [_snapshot()], [], [_provider()])
+
+    assert score.input_measurements["keyword_metric_granularities"] == ["country"]
+    assert score.input_measurements["raw_national_service_demand"] == 100
+    assert score.input_measurements["estimated_market_demand"] is None
+    assert "country granularity" in score.assumptions[0]
