@@ -6,6 +6,7 @@ import {
   ArrowDownUp,
   Building2,
   CheckCircle2,
+  ChevronDown,
   CircleDollarSign,
   Database,
   ExternalLink,
@@ -48,6 +49,14 @@ const api = {
     if (!response.ok) throw new Error("Could not load scans");
     return response.json();
   },
+  async searchLocations(query, country) {
+    const params = new URLSearchParams({ q: query, country, limit: "8" });
+    const response = await fetch(`/api/backend/api/locations/search?${params}`, {
+      cache: "no-store"
+    });
+    if (!response.ok) throw new Error("Could not search locations");
+    return response.json();
+  },
   async runScan(payload) {
     const response = await fetch("/api/backend/api/scans", {
       method: "POST",
@@ -58,7 +67,10 @@ const api = {
       let message = "Scan failed";
       try {
         const error = await response.json();
-        message = error.detail || message;
+        message =
+          typeof error.detail === "string"
+            ? error.detail
+            : error.detail?.message || error.message || message;
       } catch {
         // Keep the generic fallback when the backend returns non-JSON.
       }
@@ -94,6 +106,10 @@ export default function Dashboard() {
   const [scanLoading, setScanLoading] = useState(false);
   const [notice, setNotice] = useState(null);
   const [lastPlan, setLastPlan] = useState(null);
+  const [locationOptions, setLocationOptions] = useState([]);
+  const [locationLoading, setLocationLoading] = useState(false);
+  const [locationOpen, setLocationOpen] = useState(false);
+  const [selectedLocation, setSelectedLocation] = useState(null);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("score");
   const [form, setForm] = useState({
@@ -147,12 +163,65 @@ export default function Dashboard() {
       .finally(() => setDetailLoading(false));
   }, [selectedId]);
 
+  useEffect(() => {
+    const text = form.location_text.trim();
+    if (selectedLocation && selectedLocation.label === text) return undefined;
+    if (text.length < 2) {
+      setLocationOptions([]);
+      setLocationOpen(false);
+      return undefined;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      setLocationLoading(true);
+      api
+        .searchLocations(text, form.country || "US")
+        .then((result) => {
+          if (cancelled) return;
+          setLocationOptions(result.locations || []);
+          setLocationOpen(true);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setLocationOptions([]);
+          setLocationOpen(false);
+        })
+        .finally(() => {
+          if (!cancelled) setLocationLoading(false);
+        });
+    }, 220);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [form.location_text, form.country, selectedLocation]);
+
+  function updateLocationText(value) {
+    setSelectedLocation(null);
+    setLocationOpen(true);
+    setForm({ ...form, location_text: value });
+  }
+
+  function chooseLocation(option) {
+    setSelectedLocation(option);
+    setLocationOpen(false);
+    setLocationOptions([]);
+    setForm({
+      ...form,
+      location_text: option.label,
+      country: option.country || form.country
+    });
+  }
+
   async function submitScan(event) {
     event.preventDefault();
     setScanLoading(true);
     setNotice(null);
     try {
-      const result = await api.runScan(form);
+      const result = await api.runScan({
+        ...form,
+        selected_location: selectedLocation
+      });
       setLastPlan(result.scan_plan || null);
       setNotice({ type: result.dry_run ? "dry-run" : "success", message: result.message });
       await refresh(false);
@@ -230,16 +299,72 @@ export default function Dashboard() {
           </label>
           <label>
             <span>Location</span>
-            <input
-              value={form.location_text}
-              onChange={(event) => setForm({ ...form, location_text: event.target.value })}
-            />
+            <div className="locationPicker">
+              <div className="locationInputWrap">
+                <input
+                  value={form.location_text}
+                  onFocus={() => {
+                    setLocationOpen(true);
+                  }}
+                  onChange={(event) => updateLocationText(event.target.value)}
+                  placeholder="City, state, ZIP, or country"
+                />
+                <button
+                  type="button"
+                  className="locationToggle"
+                  onClick={() => setLocationOpen(!locationOpen)}
+                  aria-label="Show location options"
+                >
+                  <ChevronDown size={16} />
+                </button>
+                {locationLoading && <Loader2 className="locationSpinner spin" size={15} />}
+              </div>
+              {selectedLocation && (
+                <div className="selectedLocation">
+                  <MapPin size={14} />
+                  <span>{selectedLocation.source}</span>
+                  <span>{Math.round((selectedLocation.confidence || 0) * 100)}%</span>
+                </div>
+              )}
+              {locationOpen && (
+                <div className="locationMenu">
+                  {locationOptions.length === 0 ? (
+                    <div className="locationEmpty">
+                      {locationLoading
+                        ? "Searching locations..."
+                        : "No local matches yet. Try City, ST or a ZIP code."}
+                    </div>
+                  ) : (
+                    locationOptions.map((option) => (
+                      <button
+                        type="button"
+                        key={`${option.source}-${option.id}`}
+                        className="locationOption"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => chooseLocation(option)}
+                      >
+                        <span>
+                          <strong>{option.label}</strong>
+                          <small>
+                            {option.type} · {option.source} · {option.match_reason}
+                          </small>
+                        </span>
+                        <span>{Math.round((option.confidence || 0) * 100)}%</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
           </label>
           <label className="countryField">
             <span>Country</span>
             <input
               value={form.country}
-              onChange={(event) => setForm({ ...form, country: event.target.value })}
+              onChange={(event) => {
+                setSelectedLocation(null);
+                setForm({ ...form, country: event.target.value.toUpperCase() });
+              }}
             />
           </label>
           <label className="toggle">

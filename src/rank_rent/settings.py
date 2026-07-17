@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     max_scan_requests: int = Field(default=10, ge=0)
     allow_live_api_calls: bool = False
     live_scan_depth: str = "testing"
+    pelias_base_url: str = ""
+    location_search_timeout_seconds: float = Field(default=1.5, ge=0.1)
     project_root: Path = Path.cwd()
 
 

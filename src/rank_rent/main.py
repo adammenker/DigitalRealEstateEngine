@@ -31,6 +31,12 @@ from rank_rent.planning import build_scan_plan
 from rank_rent.repositories import get_or_create_opportunity, upsert_market, upsert_service
 from rank_rent.runtime import resolve_data_mode, validate_runtime_mode
 from rank_rent.services.data_audit import audit_data
+from rank_rent.services.locations import (
+    LocationCandidate,
+    LocationResolutionError,
+    resolve_market_for_scan,
+    search_locations,
+)
 from rank_rent.services.records import save_scan_plan_calls
 from rank_rent.services.scanner import ScanPipeline
 from rank_rent.settings import get_settings
@@ -60,6 +66,7 @@ class ScanRequest(BaseModel):
     service_text: str
     location_text: str
     country: str = "US"
+    selected_location: LocationCandidate | None = None
     dry_run: bool = False
     async_run: bool = False
     confirm_live_cost: bool = False
@@ -180,7 +187,30 @@ def api_meta() -> dict[str, Any]:
         "dataforseo_environment": settings.dataforseo_environment,
         "dataforseo_sandbox": settings.dataforseo_environment.strip().lower() == "sandbox",
         "requires_live_cost_confirmation": data_mode.value == "live",
+        "geocoder": {
+            "pelias_enabled": bool(settings.pelias_base_url.strip()),
+            "pelias_base_url_configured": bool(settings.pelias_base_url.strip()),
+            "fallback_sources": ["explicit", "seed", "database", "dataforseo-cache"],
+        },
     }
+
+
+@app.get("/api/locations/search")
+async def api_location_search(
+    q: str,
+    country: str = "US",
+    limit: int = 8,
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    settings = get_settings()
+    candidates = await search_locations(
+        session=session,
+        query=q,
+        country=country,
+        settings=settings,
+        limit=max(1, min(limit, 12)),
+    )
+    return {"locations": [candidate.model_dump(mode="json") for candidate in candidates]}
 
 
 @app.get("/api/opportunities")
@@ -262,11 +292,22 @@ async def api_scan(
         seed_queries=[payload.service_text],
         negative_terms=["diy", "jobs", "salary"],
     )
-    market = Market(
-        id=payload.location_text,
-        display_name=payload.location_text,
-        country_code=payload.country,
-    )
+    try:
+        market = await resolve_market_for_scan(
+            session=session,
+            location_text=payload.location_text,
+            country=payload.country,
+            settings=settings,
+            selected_location=payload.selected_location,
+        )
+    except LocationResolutionError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": str(exc),
+                "candidates": [candidate.model_dump(mode="json") for candidate in exc.candidates],
+            },
+        ) from exc
     if payload.dry_run:
         plan = build_scan_plan(settings, requested_mode, service, market, session=session)
         return {
@@ -278,7 +319,10 @@ async def api_scan(
                 f"Interpreted as {service.display_name} in {market.display_name}. "
                 f"Estimated uncached cost: ${plan.estimated_uncached_cost_usd}."
             ),
-            "resolved": {"service": service.display_name, "market": market.display_name},
+            "resolved": {
+                "service": service.display_name,
+                "market": market.model_dump(mode="json"),
+            },
         }
     plan = build_scan_plan(settings, requested_mode, service, market, session=session)
     if plan.blocked:
@@ -424,7 +468,19 @@ async def scan(
         seed_queries=[service_text],
         negative_terms=["diy", "jobs", "salary"],
     )
-    market = Market(id=location_text, display_name=location_text, country_code=country)
+    try:
+        market = await resolve_market_for_scan(
+            session=session,
+            location_text=location_text,
+            country=country,
+            settings=settings,
+        )
+    except LocationResolutionError as exc:
+        return templates.TemplateResponse(
+            request,
+            "scan_result.html",
+            {"dry_run": False, "message": f"Scan failed: {exc}"},
+        )
     plan = build_scan_plan(settings, data_mode, service, market, session=session)
     if dry_run:
         return templates.TemplateResponse(
