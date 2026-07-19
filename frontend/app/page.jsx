@@ -120,6 +120,18 @@ function artifactByKind(artifacts, kind) {
   return artifacts.find((artifact) => artifact.kind === kind)?.payload;
 }
 
+function componentLabel(value) {
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function signedPoints(value) {
+  const points = Number(value || 0);
+  return `${points >= 0 ? "+" : ""}${points.toFixed(2)}`;
+}
+
 export default function Dashboard() {
   const [opportunities, setOpportunities] = useState([]);
   const [scans, setScans] = useState([]);
@@ -308,9 +320,22 @@ export default function Dashboard() {
   }, [opportunities, query, sort]);
 
   const artifacts = detail?.artifacts || [];
-  const scan = artifactByKind(artifacts, "scan_result") || artifactByKind(artifacts, "preliminary_assessment");
-  const report = artifactByKind(artifacts, "discovery_report") || scan?.discovery_report || null;
-  const components = scan?.score?.component_scores || {};
+  const scan =
+    artifactByKind(artifacts, "scan_result") ||
+    artifactByKind(artifacts, "preliminary_assessment");
+  const rescore = artifactByKind(artifacts, "rescore_result");
+  const scoreArtifact = rescore || scan;
+  const report =
+    rescore?.discovery_report ||
+    artifactByKind(artifacts, "discovery_report") ||
+    scan?.discovery_report ||
+    null;
+  const components =
+    report?.score_breakdown?.components || scoreArtifact?.score?.component_scores || {};
+  const componentDetails =
+    report?.score_breakdown?.component_details ||
+    scoreArtifact?.score?.component_details ||
+    {};
   const demandEvidence = report?.demand || scan?.demand_evidence || null;
   const providers = scan?.providers || [];
   const competitors = scan?.competitors || [];
@@ -613,7 +638,10 @@ export default function Dashboard() {
                   <h2>
                     {detail.opportunity.service} in {detail.opportunity.market}
                   </h2>
-                  <p>{scan?.score?.explanation || "No score explanation has been saved yet."}</p>
+                  <p>
+                    {scoreArtifact?.score?.explanation ||
+                      "No score explanation has been saved yet."}
+                  </p>
                   {detail.data_mode === "fixture" && (
                     <p className="syntheticNote">
                       Synthetic fixture data. Do not use as live market evidence.
@@ -702,13 +730,16 @@ export default function Dashboard() {
                     )}
                   />
                 </Panel>
-                <Panel title="Provider Suitability" icon={Building2}>
+                <Panel title="Provider Suitability" icon={Building2} wide>
                   <Table
-                    columns={["Provider", "Score", "Contact"]}
+                    columns={["Provider", "Score", "Service", "Geography", "Status", "Contact"]}
                     rows={providers.map((item) => [
                       item.name,
-                      item.suitability_score || "n/a",
-                      item.website ? "website" : item.phone ? "phone" : "unknown"
+                      item.suitability_score ?? "n/a",
+                      formatProviderSignal(item, "service_fit"),
+                      formatProviderSignal(item, "geographic_fit"),
+                      item.business_status || "unknown",
+                      formatProviderSignal(item, "contactability")
                     ])}
                   />
                 </Panel>
@@ -723,12 +754,44 @@ export default function Dashboard() {
                   />
                 </Panel>
                 <Panel title="Score Evidence" icon={FileText} wide>
-                  <Table
-                    columns={["Component", "Explanation"]}
-                    rows={Object.entries(scan?.score?.component_explanations || {}).map(
-                      ([label, value]) => [label, value]
-                    )}
-                  />
+                  {Object.keys(componentDetails).length > 0 ? (
+                    <div className="scoreTraces">
+                      {Object.entries(componentDetails).map(([label, trace]) => (
+                        <section className="scoreTrace" key={label}>
+                          <div className="scoreTraceHeading">
+                            <div>
+                              <strong>{componentLabel(label)}</strong>
+                              <span>{trace.explanation}</span>
+                            </div>
+                            <b>
+                              {number(trace.score)} / {number(trace.maximum_score)}
+                            </b>
+                          </div>
+                          <div className="scoreTraceSteps">
+                            {(trace.calculation_steps || []).map((step, index) => (
+                              <div className="scoreTraceStep" key={`${step.label}-${index}`}>
+                                <span>
+                                  <strong>{step.label}</strong>
+                                  <small>{step.detail}</small>
+                                </span>
+                                <b className={Number(step.points) < 0 ? "negative" : "positive"}>
+                                  {signedPoints(step.points)}
+                                </b>
+                              </div>
+                            ))}
+                          </div>
+                          <code>{trace.formula}</code>
+                        </section>
+                      ))}
+                    </div>
+                  ) : (
+                    <Table
+                      columns={["Component", "Explanation"]}
+                      rows={Object.entries(scoreArtifact?.score?.component_explanations || {}).map(
+                        ([label, value]) => [label, value]
+                      )}
+                    />
+                  )}
                 </Panel>
               </div>
             </>
@@ -817,4 +880,9 @@ function Table({ columns, rows }) {
       </table>
     </div>
   );
+}
+
+function formatProviderSignal(provider, signal) {
+  const value = provider?.suitability_signals?.[signal]?.normalized;
+  return typeof value === "number" ? `${Math.round(value * 100)}%` : "n/a";
 }

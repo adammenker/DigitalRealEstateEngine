@@ -358,21 +358,46 @@ class DataForSEOLiveProvider:
             rating = self._as_dict(item.get("rating"))
             address = self._format_address(item.get("address_info") or item.get("address"))
             work_time = self._as_dict(item.get("work_time"))
+            work_hours = self._as_dict(work_time.get("work_hours"))
+            contact_info = item.get("contact_info")
+            phone = self._clean_optional_str(item.get("phone")) or self._contact_value(
+                contact_info,
+                {"phone", "telephone"},
+            )
+            email = self._contact_value(contact_info, {"email"})
+            website = self._clean_optional_str(item.get("url") or item.get("domain"))
+            if isinstance(contact_info, list) and (phone or email):
+                contact_confidence = 0.9
+            elif phone or email:
+                contact_confidence = 0.8
+            elif website:
+                contact_confidence = 0.55
+            else:
+                contact_confidence = None
             providers.append(
                 ProviderCandidate(
                     name=name,
-                    website=self._clean_optional_str(item.get("url") or item.get("domain")),
-                    phone=self._clean_optional_str(item.get("phone")),
+                    website=website,
+                    phone=phone,
+                    email=email,
                     address=address,
-                    service_area=market.display_name,
+                    service_area=self._clean_optional_str(item.get("service_area")),
                     category=self._clean_optional_str(item.get("category")),
+                    categories=self._provider_categories(item),
+                    latitude=self._to_float(item.get("latitude")),
+                    longitude=self._to_float(item.get("longitude")),
                     rating=self._to_float(rating.get("value") or item.get("rating")),
                     review_count=self._to_int(rating.get("votes_count") or item.get("review_count")),
                     business_status=str(
-                        work_time.get("current_status") or item.get("current_status") or "unknown"
+                        work_hours.get("current_status")
+                        or work_time.get("current_status")
+                        or item.get("current_status")
+                        or "unknown"
                     ),
-                    contact_confidence=0.65 if item.get("url") or item.get("phone") else 0.35,
+                    contact_confidence=contact_confidence,
                     source="dataforseo:business_listings",
+                    source_timestamp=self._parse_timestamp(item.get("last_updated_time"))
+                    or datetime.now(UTC),
                 )
             )
         return providers
@@ -485,7 +510,7 @@ class DataForSEOLiveProvider:
     def _start_api_call(self, path: str, params: dict[str, Any]) -> ApiCallORM | None:
         if self.session is None:
             return None
-        plan = self._planned_call(path)
+        plan = self._planned_call(path, params)
         now = datetime.now(UTC)
         row = ApiCallORM(
             scan_run_id=self.current_scan_run_id,
@@ -504,6 +529,7 @@ class DataForSEOLiveProvider:
         self.session.add(row)
         if self.session is not None:
             self.session.flush()
+            self.session.commit()
         return row
 
     def _finish_api_call(
@@ -538,6 +564,7 @@ class DataForSEOLiveProvider:
             row.error_summary = str(error)
         if self.session is not None:
             self.session.flush()
+            self.session.commit()
 
     def _record_cache_hit(
         self,
@@ -547,7 +574,7 @@ class DataForSEOLiveProvider:
     ) -> None:
         if self.session is None:
             return
-        plan = self._planned_call(path)
+        plan = self._planned_call(path, params)
         now = datetime.now(UTC)
         self.session.add(
             ApiCallORM(
@@ -570,8 +597,9 @@ class DataForSEOLiveProvider:
             )
         )
         self.session.flush()
+        self.session.commit()
 
-    def _planned_call(self, path: str) -> dict[str, Any]:
+    def _planned_call(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         if self.session is None or self.current_scan_run_id is None:
             return {}
         scan = self.session.get(ScanRunORM, self.current_scan_run_id)
@@ -580,6 +608,21 @@ class DataForSEOLiveProvider:
         calls = (scan.request_parameters or {}).get("scan_plan", {}).get("planned_calls", [])
         if not isinstance(calls, list):
             return {}
+        matching = [call for call in calls if isinstance(call, dict) and call.get("endpoint") == path]
+        if not matching:
+            return {}
+        if params is not None:
+            request_cache_key = self._cache_key(path, params)
+            exact = [
+                call
+                for call in matching
+                if call.get("request_known", True) and call.get("cache_key") == request_cache_key
+            ]
+            if exact:
+                return cast(dict[str, Any], exact[0])
+            if any(call.get("request_known", True) for call in matching):
+                return {}
+
         completed_for_endpoint = len(
             self.session.scalars(
                 select(ApiCallORM.id).where(
@@ -588,10 +631,9 @@ class DataForSEOLiveProvider:
                 )
             ).all()
         )
-        matching = [call for call in calls if isinstance(call, dict) and call.get("endpoint") == path]
-        if matching:
-            return cast(dict[str, Any], matching[min(completed_for_endpoint, len(matching) - 1)])
-        return {}
+        if completed_for_endpoint >= len(matching):
+            return {}
+        return cast(dict[str, Any], matching[completed_for_endpoint])
 
     def _cache_key(self, path: str, params: dict[str, Any]) -> str:
         return cache_key(
@@ -809,6 +851,56 @@ class DataForSEOLiveProvider:
         ]
         text = ", ".join(str(part) for part in parts if part)
         return text or None
+
+    def _provider_categories(self, item: dict[str, Any]) -> list[str]:
+        values: list[str] = []
+        for key in ("category", "category_ids", "additional_categories"):
+            raw = item.get(key)
+            if isinstance(raw, list):
+                values.extend(str(value) for value in raw if value)
+            elif raw:
+                values.append(str(raw))
+        services = item.get("services")
+        if isinstance(services, list):
+            for service in services:
+                if not isinstance(service, dict):
+                    continue
+                values.extend(
+                    str(value)
+                    for value in (service.get("category"), service.get("title"))
+                    if value
+                )
+        seen: set[str] = set()
+        output: list[str] = []
+        for value in values:
+            normalized = value.strip()
+            key = normalized.lower()
+            if normalized and key not in seen:
+                seen.add(key)
+                output.append(normalized)
+        return output
+
+    def _contact_value(self, value: Any, contact_types: set[str]) -> str | None:
+        if not isinstance(value, list):
+            return None
+        for contact in value:
+            if not isinstance(contact, dict):
+                continue
+            contact_type = str(contact.get("type") or "").strip().lower()
+            if contact_type in contact_types:
+                cleaned = self._clean_optional_str(contact.get("value"))
+                if cleaned:
+                    return cleaned
+        return None
+
+    def _parse_timestamp(self, value: Any) -> datetime | None:
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
     def _clean_optional_str(self, value: Any) -> str | None:
         if value is None:

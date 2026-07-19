@@ -161,15 +161,20 @@ class ProviderCandidate(BaseModel):
     address: str | None = None
     service_area: str | None = None
     category: str | None = None
+    categories: list[str] = Field(default_factory=list)
+    latitude: float | None = None
+    longitude: float | None = None
     rating: float | None = None
     review_count: int | None = None
     business_status: str = "unknown"
     contact_confidence: float | None = None
     source: str = "fixture"
+    source_timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     raw_response_ref: str | None = None
     outreach_status: str = "not_contacted"
     suitability_score: float | None = None
     suitability_reasons: list[str] = Field(default_factory=list)
+    suitability_signals: dict[str, Any] = Field(default_factory=dict)
 
 
 class DomainAvailabilityResult(BaseModel):
@@ -192,6 +197,22 @@ class DomainCandidate(BaseModel):
     checked_at: datetime | None = None
 
 
+class ScoreCalculationStep(BaseModel):
+    label: str
+    points: float
+    detail: str
+    inputs: dict[str, Any] = Field(default_factory=dict)
+
+
+class ScoreComponentDetail(BaseModel):
+    score: float
+    maximum_score: float
+    formula: str
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    calculation_steps: list[ScoreCalculationStep] = Field(default_factory=list)
+    explanation: str
+
+
 class OpportunityScore(BaseModel):
     total_score: float
     component_scores: dict[str, float]
@@ -202,6 +223,7 @@ class OpportunityScore(BaseModel):
     explanation: str
     confidence: Confidence
     component_explanations: dict[str, str] = Field(default_factory=dict)
+    component_details: dict[str, ScoreComponentDetail] = Field(default_factory=dict)
     missing_fields: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))

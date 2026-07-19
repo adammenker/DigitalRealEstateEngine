@@ -4,7 +4,15 @@ from urllib.parse import urlparse
 
 from rank_rent.domain.models import CompetitorMetric, Market, SerpSnapshot, ServiceFamily, slugify
 
-DIRECTORY_TYPES = {"directory", "marketplace", "lead_generator", "national_brand"}
+COMPETITOR_ARCHETYPES = {
+    "directory",
+    "marketplace",
+    "lead_generator",
+    "national_brand",
+    "local_provider",
+    "informational_publisher",
+    "government_or_nonprofit",
+}
 
 
 def enrich_competitors(
@@ -41,11 +49,16 @@ def enrich_competitors(
             page_type = competitor.page_type
         relevance = round(max(competitor.page_relevance_score or 0, service_match), 3)
         local = round(max(competitor.local_relevance or 0, market_match), 3)
+        archetype = page_type if page_type in COMPETITOR_ARCHETYPES else "unknown"
         signals = {
             "serp_classification": result.classification if result else None,
+            "competitor_archetype": archetype,
             "service_token_match": round(service_match, 3),
             "market_token_match": round(market_match, 3),
-            "is_aggregator": page_type in DIRECTORY_TYPES,
+            "is_directory_aggregator": archetype == "directory",
+            "is_marketplace": archetype == "marketplace",
+            "is_lead_generator": archetype == "lead_generator",
+            "is_national_service_brand": archetype == "national_brand",
             "classification_confidence": result.classification_confidence if result else None,
         }
         output.append(

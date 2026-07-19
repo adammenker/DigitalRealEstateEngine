@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from rank_rent.db.orm import ApiCallORM
 from rank_rent.domain.models import (
     CompetitorMetric,
     KeywordMetric,
@@ -12,7 +16,6 @@ from rank_rent.domain.models import (
     ServiceFamily,
 )
 from rank_rent.services.demand import analyze_demand
-from rank_rent.services.providers import provider_suitability_summary
 
 
 def build_discovery_report(
@@ -79,17 +82,84 @@ def build_discovery_report(
                 for competitor in competitors
             ],
         },
-        "providers": provider_suitability_summary(providers),
+        "providers": score.input_measurements.get("provider_suitability", {}),
         "score_breakdown": {
             "version": score.scoring_version,
             "config_hash": score.scoring_config_hash,
             "components": score.component_scores,
             "component_explanations": score.component_explanations,
+            "component_details": {
+                component: detail.model_dump(mode="json")
+                for component, detail in score.component_details.items()
+            },
             "penalties": score.missing_data_penalties,
+            "penalty_details": [
+                {
+                    "field": field,
+                    "points": -points,
+                    "detail": f"Missing {field.replace('_', ' ')} evidence.",
+                }
+                for field, points in score.missing_data_penalties.items()
+            ],
             "missing_fields": score.missing_fields,
             "assumptions": score.assumptions,
+            "confidence_model": score.input_measurements.get("confidence_model", {}),
         },
         "scan_metadata": scan_metadata,
+    }
+
+
+def build_api_cost_ledger(
+    session: Session,
+    scan_run_id: int | None,
+) -> dict[str, Any]:
+    if scan_run_id is None:
+        rows: list[ApiCallORM] = []
+    else:
+        rows = list(
+            session.scalars(
+                select(ApiCallORM)
+                .where(ApiCallORM.scan_run_id == scan_run_id)
+                .order_by(ApiCallORM.id)
+            ).all()
+        )
+    terminal_statuses = {"cache_hit", "completed", "failed"}
+    actual_cost = round(sum(row.actual_cost_usd or 0 for row in rows), 6)
+    estimated_cost = round(sum(row.estimated_cost_usd or 0 for row in rows), 6)
+    return {
+        "scan_run_id": scan_run_id,
+        "ledger_complete": all(row.status in terminal_statuses for row in rows),
+        "call_count": len(rows),
+        "network_call_count": sum(
+            not row.cache_hit and row.status in {"completed", "failed"}
+            for row in rows
+        ),
+        "cache_hit_count": sum(row.cache_hit for row in rows),
+        "failed_call_count": sum(row.status == "failed" for row in rows),
+        "estimated_cost_usd": estimated_cost,
+        "actual_cost_usd": actual_cost,
+        "calls": [
+            {
+                "api_call_id": row.id,
+                "planned_request_id": row.planned_request_id,
+                "provider": row.provider,
+                "endpoint": row.endpoint,
+                "stage": row.stage,
+                "status": row.status,
+                "cache_hit": row.cache_hit,
+                "estimated_cost_usd": row.estimated_cost_usd,
+                "actual_cost_usd": row.actual_cost_usd,
+                "started_at": row.started_at.isoformat() if row.started_at else None,
+                "completed_at": row.completed_at.isoformat()
+                if row.completed_at
+                else None,
+                "provider_task_id": row.provider_task_id,
+                "provider_request_id": row.provider_request_id,
+                "error_type": row.error_type,
+                "error_summary": row.error_summary,
+            }
+            for row in rows
+        ],
     }
 
 

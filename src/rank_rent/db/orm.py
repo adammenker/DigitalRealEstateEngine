@@ -317,15 +317,22 @@ class ProviderCandidateORM(TimestampMixin, Base):
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     service_area: Mapped[str | None] = mapped_column(String(200), nullable=True)
     category: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    categories: Mapped[list[str]] = mapped_column(JSON, default=list)
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     rating: Mapped[float | None] = mapped_column(Float, nullable=True)
     review_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     business_status: Mapped[str] = mapped_column(String(80))
     contact_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     source: Mapped[str] = mapped_column(String(120))
+    source_timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc
+    )
     raw_response_ref: Mapped[str | None] = mapped_column(String(160), nullable=True)
     outreach_status: Mapped[str] = mapped_column(String(80))
     suitability_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     suitability_reasons: Mapped[list[str]] = mapped_column(JSON, default=list)
+    suitability_signals: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
 
 class PreliminaryAssessmentORM(TimestampMixin, Base):

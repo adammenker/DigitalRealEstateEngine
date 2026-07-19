@@ -56,3 +56,13 @@ def test_alembic_upgrade_head_creates_v1_schema(tmp_path, monkeypatch) -> None:
         "matched_rules",
         "classification_evidence",
     } <= serp_columns
+    provider_columns = {
+        column["name"] for column in inspector.get_columns("provider_candidates")
+    }
+    assert {
+        "categories",
+        "latitude",
+        "longitude",
+        "source_timestamp",
+        "suitability_signals",
+    } <= provider_columns

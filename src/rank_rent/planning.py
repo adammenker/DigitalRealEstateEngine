@@ -80,24 +80,26 @@ def build_scan_plan(
             required=True,
         )
 
-    first_seed = _keyword_seeds(service)[0]
-    keyword_task = {
-        "keyword": first_seed,
-        "language_code": "en",
-        "limit": 10 if profile == "testing" else 20,
-        "include_seed_keyword": True,
-        "location_code": DataForSEOLiveProvider.us_labs_location_code,
-    }
-    _append_call(
+    keyword_seed_limit = 1 if profile == "testing" else 3
+    keyword_suggestion_limit = 10 if profile == "testing" else 20
+    for seed in _keyword_seeds(service)[:keyword_seed_limit]:
+        keyword_task = {
+            "keyword": seed,
+            "language_code": "en",
+            "limit": keyword_suggestion_limit,
+            "include_seed_keyword": True,
+            **_labs_location_payload(market),
+        }
+        _append_call(
             planned,
             session=session,
             provider=provider,
             endpoint="/v3/dataforseo_labs/google/keyword_suggestions/live",
-        stage="keyword_discovery",
-        params={"tasks": [keyword_task]},
-        cost="0" if free_sandbox else "0.012",
-        required=True,
-    )
+            stage="keyword_discovery",
+            params={"tasks": [keyword_task]},
+            cost="0" if free_sandbox else "0.012",
+            required=True,
+        )
 
     _append_call(
         planned,
@@ -266,6 +268,12 @@ def _location_payload(market: Market) -> dict[str, Any]:
     if market.provider_location_name:
         return {"location_name": market.provider_location_name}
     return {"location_name": market.display_name}
+
+
+def _labs_location_payload(market: Market) -> dict[str, Any]:
+    if market.country_code.upper() == "US":
+        return {"location_code": DataForSEOLiveProvider.us_labs_location_code}
+    return {"location_name": market.country_code.upper()}
 
 
 def _location_coordinate(market: Market, radius_km: int = 50) -> str | None:

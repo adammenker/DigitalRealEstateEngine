@@ -4,11 +4,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from rank_rent.db.orm import (
-    ApiCallORM,
     FullOpportunityScoreORM,
     PreliminaryAssessmentORM,
     ScanRunORM,
@@ -32,7 +30,11 @@ from rank_rent.runtime import DataMode, resolve_data_mode
 from rank_rent.scoring.score import OpportunityScorer
 from rank_rent.scoring.serp import classify_result
 from rank_rent.services.competitors import enrich_competitors
-from rank_rent.services.discovery_report import build_discovery_report
+from rank_rent.services.demand import analyze_demand
+from rank_rent.services.discovery_report import (
+    build_api_cost_ledger,
+    build_discovery_report,
+)
 from rank_rent.services.domains import generate_domain_candidates
 from rank_rent.services.keywords import (
     plan_keyword_candidates,
@@ -123,6 +125,8 @@ class ScanPipeline:
                 scan.request_parameters = {
                     **scan.request_parameters,
                     "market": market.slug,
+                    "market_payload": market.model_dump(mode="json"),
+                    "final_market_payload": market.model_dump(mode="json"),
                     "resolved_market": {
                         "display_name": market.display_name,
                         "provider_location_code": market.provider_location_code,
@@ -130,6 +134,7 @@ class ScanPipeline:
                         "granularity": market.type.value,
                     },
                 }
+                self.session.commit()
             self._ensure_not_cancelled(scan)
             self._set_stage(scan, "discovering_keywords")
             candidates = await self.research_provider.discover_keywords(service, market)
@@ -154,7 +159,10 @@ class ScanPipeline:
             for keyword in representative:
                 self._ensure_not_cancelled(scan)
                 snapshot = await self.research_provider.get_serp_snapshot(keyword, market)
-                snapshot.results = [classify_result(result) for result in snapshot.results]
+                snapshot.results = [
+                    classify_result(result, service=service, market=market)
+                    for result in snapshot.results
+                ]
                 serp_snapshots.append(snapshot)
             competitor_urls = [
                 r.url for s in serp_snapshots for r in s.results if r.result_type == "organic"
@@ -173,17 +181,25 @@ class ScanPipeline:
                 await self.research_provider.find_providers(service, market),
                 service,
                 market,
+                self.scorer.config["providers"],
             )
+            for snapshot in serp_snapshots:
+                snapshot.results = [
+                    classify_result(result, service=service, market=market, providers=providers)
+                    for result in snapshot.results
+                ]
             self._ensure_not_cancelled(scan)
             self._set_stage(scan, "scoring")
+            is_preliminary = self.is_preliminary_assessment
             score = self.scorer.score(
                 keyword_metrics.scoring_metrics,
                 serp_snapshots,
                 competitors,
                 providers,
                 market,
+                source_mode=self.evidence_source_mode,
+                assessment_type="preliminary" if is_preliminary else "full",
             )
-            is_preliminary = self.is_preliminary_assessment
             save_scan_records(
                 self.session,
                 scan_run_id=scan.id,
@@ -211,17 +227,39 @@ class ScanPipeline:
             site_config = build_site_config(service, market, domains[0].domain if domains else None) if build_site else None
             site_path: Path | None = generate_static_site(site_config) if build_site and site_config else None
 
+            opportunity.status = "preliminary_review" if is_preliminary else "full_review"
+            if is_preliminary:
+                if opportunity.latest_score is None:
+                    opportunity.confidence = "preliminary"
+                    opportunity.score_version = score.scoring_version
+            else:
+                opportunity.latest_score = score.total_score
+                opportunity.score_version = score.scoring_version
+                opportunity.confidence = score.confidence.value
+            opportunity.missing_data_flags = score.missing_fields
+            scan.status = "completed"
+            scan.progress_stage = "completed"
+            scan.completed_at = datetime.now(UTC)
+            cost_ledger = build_api_cost_ledger(self.session, scan.id)
+            scan.actual_cost_usd = float(cost_ledger["actual_cost_usd"])
+            scan.scoring_version = score.scoring_version
             scan_metadata = {
                 "scan_run_id": scan.id,
                 "data_mode": self.data_mode.value,
+                "evidence_source_mode": self.evidence_source_mode,
                 "scan_profile": scan.scan_profile,
                 "planned_cost_usd": scan.planned_cost_usd,
+                "actual_cost_usd": scan.actual_cost_usd,
                 "estimated_paid_api_calls": self.estimated_paid_api_calls,
                 "started_at": scan.started_at.isoformat() if scan.started_at else None,
+                "completed_at": scan.completed_at.isoformat()
+                if scan.completed_at
+                else None,
                 "adapter_names": scan.adapter_names,
                 "adapter_versions": scan.adapter_versions,
                 "normalization_version": scan.normalization_version,
                 "cache_policy_version": scan.cache_policy_version,
+                "api_cost_ledger": cost_ledger,
             }
             discovery_report = build_discovery_report(
                 service=service,
@@ -240,6 +278,7 @@ class ScanPipeline:
                 "preliminary_assessment" if is_preliminary else "scan_result",
                 {
                     "data_mode": self.data_mode.value,
+                    "evidence_source_mode": self.evidence_source_mode,
                     "live_scan_depth": self.live_scan_depth if self.data_mode == DataMode.live else None,
                     "estimated_paid_api_calls": self.estimated_paid_api_calls,
                     "assessment_type": "preliminary" if is_preliminary else "full",
@@ -282,21 +321,6 @@ class ScanPipeline:
                         "generated_path": str(site_path) if site_path else None,
                     },
                 )
-            opportunity.status = "preliminary_review" if is_preliminary else "full_review"
-            if is_preliminary:
-                if opportunity.latest_score is None:
-                    opportunity.confidence = "preliminary"
-                    opportunity.score_version = score.scoring_version
-            else:
-                opportunity.latest_score = score.total_score
-                opportunity.score_version = score.scoring_version
-                opportunity.confidence = score.confidence.value
-            opportunity.missing_data_flags = score.missing_fields
-            scan.status = "completed"
-            scan.progress_stage = "completed"
-            scan.completed_at = datetime.now(UTC)
-            scan.actual_cost_usd = self._actual_api_cost_for_scan(scan.id)
-            scan.scoring_version = score.scoring_version
             self.session.commit()
             return {
                 "opportunity_id": opportunity.id,
@@ -313,7 +337,9 @@ class ScanPipeline:
             scan.status = "cancelled"
             scan.progress_stage = "cancelled"
             scan.completed_at = datetime.now(UTC)
-            scan.actual_cost_usd = self._actual_api_cost_for_scan(scan.id)
+            scan.actual_cost_usd = float(
+                build_api_cost_ledger(self.session, scan.id)["actual_cost_usd"]
+            )
             scan.partial_outputs = {
                 **(scan.partial_outputs or {}),
                 "cancelled": True,
@@ -326,7 +352,9 @@ class ScanPipeline:
             scan.progress_stage = "failed"
             scan.error_summary = str(exc)
             scan.completed_at = datetime.now(UTC)
-            scan.actual_cost_usd = self._actual_api_cost_for_scan(scan.id)
+            scan.actual_cost_usd = float(
+                build_api_cost_ledger(self.session, scan.id)["actual_cost_usd"]
+            )
             opportunity.status = "scan_failed"
             scan.partial_outputs = {
                 **(scan.partial_outputs or {}),
@@ -378,6 +406,12 @@ class ScanPipeline:
         scan.error_summary = None
         scan.integration_versions = {
             "data_mode": self.data_mode.value,
+            "evidence_source_mode": self.evidence_source_mode,
+            "dataforseo_environment": (
+                self.settings.dataforseo_environment
+                if self.data_mode == DataMode.live
+                else None
+            ),
             "market_research_provider": getattr(
                 self.research_provider,
                 "provider_name",
@@ -391,6 +425,12 @@ class ScanPipeline:
             "service": service.slug,
             "market": market.slug,
             "data_mode": self.data_mode.value,
+            "evidence_source_mode": self.evidence_source_mode,
+            "dataforseo_environment": (
+                self.settings.dataforseo_environment
+                if self.data_mode == DataMode.live
+                else None
+            ),
             "live_scan_depth": self.live_scan_depth if self.data_mode == DataMode.live else None,
             "scan_plan": plan.model_dump(mode="json"),
             "service_payload": service.model_dump(mode="json"),
@@ -443,38 +483,53 @@ class ScanPipeline:
                 )
             )
         for component, value in score.component_scores.items():
+            detail = score.component_details.get(component)
             self.session.add(
                 ScoreComponentORM(
                     scan_run_id=scan.id,
                     component=component,
                     score=value,
-                    inputs=score.input_measurements,
-                    formula=f"{score.scoring_version}:{component}",
-                    penalties=score.missing_data_penalties,
+                    inputs={
+                        "measurements": detail.inputs,
+                        "calculation_steps": [
+                            step.model_dump(mode="json")
+                            for step in detail.calculation_steps
+                        ],
+                        "maximum_score": detail.maximum_score,
+                        "explanation": detail.explanation,
+                    }
+                    if detail
+                    else {},
+                    formula=detail.formula if detail else "",
+                    penalties={},
                 )
             )
 
     def _demand_evidence(self, metrics: list[Any], market: Market) -> dict[str, Any]:
-        granularities = sorted({metric.market_granularity or "unknown" for metric in metrics})
-        country_level = any(item in {"country", "national"} for item in granularities)
-        total_volume = sum(metric.search_volume or 0 for metric in metrics)
-        warning = None
-        if country_level:
-            warning = (
-                "Keyword volume is provider-reported at country level. Treat it as service demand "
-                "evidence, not exact city demand, until local estimation is implemented."
-            )
+        evidence = analyze_demand(metrics, market)
+        warning = (
+            "Keyword volume is provider-reported at country level. It supports service "
+            "attractiveness, while market attractiveness requires measured or transparently "
+            "estimated local demand."
+            if evidence["national_service_demand"] is not None
+            else None
+        )
         return {
-            "keyword_metric_granularities": granularities,
-            "provider_reported_metric_granularity": "mixed" if len(granularities) > 1 else (granularities[0] if granularities else "none"),
-            "national_service_demand": total_volume if country_level else None,
-            "estimated_market_demand": None,
-            "market_estimation_method": "not_estimated",
-            "market_estimation_confidence": "none",
+            **evidence,
             "localized_competition": bool(market.provider_location_code or market.provider_location_name or market.latitude),
             "localized_provider_supply": bool(market.latitude and market.longitude),
             "warning": warning,
         }
+
+    @property
+    def evidence_source_mode(self) -> str:
+        if self.data_mode == DataMode.live:
+            return (
+                "live"
+                if self.settings.dataforseo_environment.strip().lower() == "production"
+                else "sandbox"
+            )
+        return self.data_mode.value
 
     @property
     def serp_keyword_limit(self) -> int:
@@ -516,18 +571,6 @@ class ScanPipeline:
     @property
     def additional_calls_required_for_full_scan(self) -> int:
         return 7 if self.is_preliminary_assessment else 0
-
-    def _actual_api_cost_for_scan(self, scan_run_id: int | None) -> float:
-        if self.data_mode != DataMode.live or scan_run_id is None:
-            return 0.0
-        total = 0.0
-        rows = self.session.scalars(
-            select(ApiCallORM).where(ApiCallORM.scan_run_id == scan_run_id)
-        ).all()
-        for row in rows:
-            total += row.actual_cost_usd or 0.0
-        return round(total, 6)
-
 
 def score_summary(score: OpportunityScore) -> str:
     return f"{score.total_score} ({score.confidence.value}) - {score.explanation}"

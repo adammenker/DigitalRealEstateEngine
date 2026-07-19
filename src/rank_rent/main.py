@@ -20,20 +20,24 @@ from rank_rent.db.base import get_session, init_db
 from rank_rent.db.orm import (
     ApiCallORM,
     CompetitorMetricORM,
+    FullOpportunityScoreORM,
     JsonArtifactORM,
     KeywordClusterORM,
     KeywordDecisionORM,
     KeywordMetricORM,
     OpportunityORM,
+    PreliminaryAssessmentORM,
     ProviderCandidateORM,
     ScanPlanCallORM,
     ScanRunORM,
+    ScoreComponentORM,
     SerpSnapshotORM,
 )
 from rank_rent.domain.models import (
     CompetitorMetric,
     KeywordMetric,
     Market,
+    OpportunityScore,
     ProviderCandidate,
     SerpSnapshot,
     ServiceFamily,
@@ -44,7 +48,10 @@ from rank_rent.repositories import get_or_create_opportunity, upsert_market, ups
 from rank_rent.runtime import resolve_data_mode, validate_runtime_mode
 from rank_rent.scoring.score import OpportunityScorer
 from rank_rent.services.data_audit import audit_data
-from rank_rent.services.discovery_report import build_discovery_report
+from rank_rent.services.discovery_report import (
+    build_api_cost_ledger,
+    build_discovery_report,
+)
 from rank_rent.services.keywords import (
     DEFAULT_AD_HOC_INTENT_MODIFIERS,
     DEFAULT_NEGATIVE_PRODUCT_TERMS,
@@ -284,13 +291,47 @@ def _latest_scan_payload(session: Session, opportunity_id: int) -> dict[str, Any
     return artifact.payload if artifact else None
 
 
+def _latest_score_artifact(session: Session, opportunity_id: int) -> JsonArtifactORM | None:
+    return session.scalar(
+        select(JsonArtifactORM)
+        .where(
+            JsonArtifactORM.opportunity_id == opportunity_id,
+            JsonArtifactORM.kind.in_(["scan_result", "preliminary_assessment", "rescore_result"]),
+        )
+        .order_by(JsonArtifactORM.created_at.desc(), JsonArtifactORM.id.desc())
+        .limit(1)
+    )
+
+
+def _latest_report_payload(session: Session, opportunity_id: int) -> dict[str, Any] | None:
+    artifact = session.scalar(
+        select(JsonArtifactORM)
+        .where(
+            JsonArtifactORM.opportunity_id == opportunity_id,
+            JsonArtifactORM.kind.in_(["discovery_report", "rescore_result"]),
+        )
+        .order_by(JsonArtifactORM.created_at.desc(), JsonArtifactORM.id.desc())
+        .limit(1)
+    )
+    if artifact is None:
+        return None
+    if artifact.kind == "rescore_result" and isinstance(artifact.payload.get("discovery_report"), dict):
+        return cast(dict[str, Any], artifact.payload["discovery_report"])
+    return artifact.payload
+
+
 def _latest_score_payload(session: Session, opportunity_id: int) -> dict[str, Any] | None:
-    payload = _latest_scan_payload(session, opportunity_id)
-    if payload and isinstance(payload.get("score"), dict):
-        return cast(dict[str, Any], payload["score"])
-    rescore = _latest_artifact_payload(session, opportunity_id, "rescore_result")
-    if rescore and isinstance(rescore.get("score"), dict):
-        return cast(dict[str, Any], rescore["score"])
+    artifact = _latest_score_artifact(session, opportunity_id)
+    if artifact is None:
+        return None
+    if isinstance(artifact.payload.get("score"), dict):
+        score = cast(dict[str, Any], artifact.payload["score"])
+        return {
+            **score,
+            "assessment_type": artifact.payload.get("assessment_type"),
+            "artifact_kind": artifact.kind,
+            "artifact_created_at": artifact.created_at.isoformat() if artifact.created_at else None,
+        }
     return None
 
 
@@ -363,7 +404,7 @@ def api_opportunity_compare(ids: str, session: Session = Depends(get_session)) -
         "opportunities": [
             {
                 "opportunity": _opportunity_summary(row),
-                "latest_report": _latest_artifact_payload(session, row.id, "discovery_report"),
+                "latest_report": _latest_report_payload(session, row.id),
                 "latest_score": _latest_score_payload(session, row.id),
             }
             for row in rows
@@ -426,7 +467,7 @@ def api_opportunity_rescore(
         raise HTTPException(status_code=400, detail="No stored scan evidence is available to rescore.")
     request = latest_scan.request_parameters or {}
     service_payload = request.get("service_payload")
-    market_payload = request.get("market_payload")
+    market_payload = request.get("final_market_payload") or request.get("market_payload")
     if not isinstance(service_payload, dict) or not isinstance(market_payload, dict):
         raise HTTPException(status_code=400, detail="Latest scan is missing structured service/market data.")
     service = ServiceFamily(**service_payload)
@@ -441,7 +482,19 @@ def api_opportunity_rescore(
     providers = [
         ProviderCandidate(**item) for item in artifact.get("providers", []) if isinstance(item, dict)
     ]
-    score = OpportunityScorer().score(metrics, serp_snapshots, competitors, providers, market)
+    assessment_type = _assessment_type_for_payload(artifact, latest_scan)
+    is_preliminary = assessment_type == "preliminary"
+    evidence_source_mode = _scan_evidence_source_mode(latest_scan)
+    score = OpportunityScorer().score(
+        metrics,
+        serp_snapshots,
+        competitors,
+        providers,
+        market,
+        source_mode=evidence_source_mode,
+        assessment_type=assessment_type,
+    )
+    cost_ledger = build_api_cost_ledger(session, latest_scan.id)
     report = build_discovery_report(
         service=service,
         market=market,
@@ -454,20 +507,42 @@ def api_opportunity_rescore(
             "scan_run_id": latest_scan.id,
             "rescored_from_stored_data": True,
             "data_mode": latest_scan.data_mode,
+            "evidence_source_mode": evidence_source_mode,
             "scan_profile": latest_scan.scan_profile,
             "planned_cost_usd": latest_scan.planned_cost_usd,
-            "actual_cost_usd": latest_scan.actual_cost_usd,
+            "actual_cost_usd": cost_ledger["actual_cost_usd"],
+            "completed_at": latest_scan.completed_at.isoformat()
+            if latest_scan.completed_at
+            else None,
+            "api_cost_ledger": cost_ledger,
+            "assessment_type": assessment_type,
         },
     )
-    opportunity.latest_score = score.total_score
-    opportunity.score_version = score.scoring_version
-    opportunity.confidence = score.confidence.value
-    opportunity.missing_data_flags = score.missing_fields
+    _save_rescore_assessment_records(
+        session,
+        scan=latest_scan,
+        opportunity_id=opportunity_id,
+        score=score,
+        is_preliminary=is_preliminary,
+    )
+    if is_preliminary:
+        if opportunity.latest_score is None:
+            opportunity.status = "preliminary_review"
+            opportunity.score_version = score.scoring_version
+            opportunity.confidence = "preliminary"
+            opportunity.missing_data_flags = score.missing_fields
+    else:
+        opportunity.status = "full_review"
+        opportunity.latest_score = score.total_score
+        opportunity.score_version = score.scoring_version
+        opportunity.confidence = score.confidence.value
+        opportunity.missing_data_flags = score.missing_fields
     session.add(
         JsonArtifactORM(
             opportunity_id=opportunity_id,
             kind="rescore_result",
             payload={
+                "assessment_type": assessment_type,
                 "score": score.model_dump(mode="json"),
                 "discovery_report": report,
                 "source_scan_run_id": latest_scan.id,
@@ -477,10 +552,101 @@ def api_opportunity_rescore(
     session.commit()
     return {
         "rescored": True,
+        "assessment_type": assessment_type,
         "opportunity": _opportunity_summary(opportunity),
         "score": score.model_dump(mode="json"),
         "discovery_report": report,
     }
+
+
+def _assessment_type_for_payload(payload: dict[str, Any], scan: ScanRunORM) -> str:
+    explicit = payload.get("assessment_type")
+    if explicit in {"preliminary", "full"}:
+        return str(explicit)
+    if scan.data_mode == "live" and scan.scan_profile == "testing":
+        return "preliminary"
+    return "full"
+
+
+def _scan_evidence_source_mode(scan: ScanRunORM) -> str:
+    request = scan.request_parameters or {}
+    integrations = scan.integration_versions or {}
+    explicit = request.get("evidence_source_mode") or integrations.get(
+        "evidence_source_mode"
+    )
+    if isinstance(explicit, str) and explicit:
+        return explicit
+    if scan.data_mode in {"fixture", "replay"}:
+        return str(scan.data_mode)
+    environment = request.get("dataforseo_environment") or integrations.get(
+        "dataforseo_environment"
+    )
+    if environment == "production":
+        return "live"
+    if environment == "sandbox":
+        return "sandbox"
+    return "unknown"
+
+
+def _save_rescore_assessment_records(
+    session: Session,
+    *,
+    scan: ScanRunORM,
+    opportunity_id: int,
+    score: OpportunityScore,
+    is_preliminary: bool,
+) -> None:
+    payload = {
+        **score.model_dump(mode="json"),
+        "rescore": True,
+        "source_scan_run_id": scan.id,
+    }
+    if is_preliminary:
+        session.add(
+            PreliminaryAssessmentORM(
+                scan_run_id=scan.id,
+                opportunity_id=opportunity_id,
+                scoring_version=score.scoring_version,
+                confidence="preliminary",
+                missing_components=score.missing_fields,
+                payload=payload,
+            )
+        )
+    else:
+        session.add(
+            FullOpportunityScoreORM(
+                scan_run_id=scan.id,
+                opportunity_id=opportunity_id,
+                scoring_version=score.scoring_version,
+                total_score=score.total_score,
+                confidence=score.confidence.value,
+                explanation=score.explanation,
+                payload=payload,
+            )
+        )
+    for component, value in score.component_scores.items():
+        detail = score.component_details.get(component)
+        session.add(
+            ScoreComponentORM(
+                scan_run_id=scan.id,
+                component=component,
+                score=value,
+                inputs={
+                    "measurements": detail.inputs,
+                    "calculation_steps": [
+                        step.model_dump(mode="json")
+                        for step in detail.calculation_steps
+                    ],
+                    "maximum_score": detail.maximum_score,
+                    "explanation": detail.explanation,
+                    "rescore": True,
+                }
+                if detail
+                else {"rescore": True},
+                formula=detail.formula if detail else "",
+                penalties={},
+            )
+        )
 
 
 def _keyword_decision_rows(session: Session, scan_id: int) -> list[dict[str, Any]]:

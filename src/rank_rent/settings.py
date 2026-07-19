@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     cloudflare_account_id: str = ""
     cloudflare_pages_project: str = ""
     max_scan_cost_usd: float = Field(default=10.0, ge=0)
-    max_scan_requests: int = Field(default=10, ge=0)
+    max_scan_requests: int = Field(default=15, ge=0)
     allow_live_api_calls: bool = False
     live_scan_depth: str = "testing"
     pelias_base_url: str = ""

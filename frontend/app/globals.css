@@ -740,6 +740,97 @@ h1 {
   overflow-x: auto;
 }
 
+.scoreTraces {
+  display: grid;
+}
+
+.scoreTrace {
+  min-width: 0;
+  padding: 16px 0;
+}
+
+.scoreTrace:first-child {
+  padding-top: 2px;
+}
+
+.scoreTrace + .scoreTrace {
+  border-top: 1px solid var(--line);
+}
+
+.scoreTraceHeading,
+.scoreTraceStep {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.scoreTraceHeading {
+  align-items: flex-start;
+}
+
+.scoreTraceHeading > div,
+.scoreTraceStep > span {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.scoreTraceHeading strong {
+  color: var(--ink);
+  font-size: 0.95rem;
+}
+
+.scoreTraceHeading span,
+.scoreTraceStep small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.scoreTraceHeading > b {
+  white-space: nowrap;
+  color: var(--brand-strong);
+  font-size: 1rem;
+}
+
+.scoreTraceSteps {
+  display: grid;
+  margin: 12px 0;
+}
+
+.scoreTraceStep {
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid #edf1ef;
+}
+
+.scoreTraceStep strong {
+  color: var(--ink);
+  font-size: 0.84rem;
+}
+
+.scoreTraceStep b {
+  min-width: 64px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.scoreTraceStep b.positive {
+  color: var(--brand-strong);
+}
+
+.scoreTraceStep b.negative {
+  color: var(--red);
+}
+
+.scoreTrace code {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  color: #4c5b56;
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -857,5 +948,10 @@ th {
   .detailHero {
     padding-left: 0;
     padding-right: 0;
+  }
+
+  .scoreTraceHeading,
+  .scoreTraceStep {
+    gap: 12px;
   }
 }

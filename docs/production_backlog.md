@@ -34,7 +34,7 @@ This file tracks work that should be completed before the Digital Real Estate En
 - [x] Select representative SERP queries after keyword metrics using value/intent ranking.
 - [x] Persist keyword inclusion, exclusion, grouping, and representative-selection decisions.
 - [ ] Promote preliminary scores in the UI separately from full scores so users do not confuse incomplete sandbox/testing scans with production-grade opportunities.
-- [ ] Add confidence bands based on source mode: fixture, sandbox, replay, and production live.
+- [x] Add confidence bands based on source mode: fixture, sandbox, replay, and production live.
 - [ ] Add relevance validation for sandbox/provider responses so obviously unrelated results are labeled as mock/noisy.
 - [ ] Improve competitor metric collection before promoting opportunities to full review.
 - [ ] Add score explainability panels that show which fields were missing and how much each missing component affected the score.

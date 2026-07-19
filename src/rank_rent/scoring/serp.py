@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 import yaml
 
-from rank_rent.domain.models import SerpResult
+from rank_rent.domain.models import Market, ProviderCandidate, SerpResult, ServiceFamily, slugify
 
 SERP_CLASSIFIER_CONFIG = Path("config/serp_classification.yaml")
 
@@ -20,7 +20,13 @@ def _classifier_config() -> dict[str, Any]:
     return cast(dict[str, Any], yaml.safe_load(path.read_text()))
 
 
-def classify_result(result: SerpResult) -> SerpResult:
+def classify_result(
+    result: SerpResult,
+    *,
+    service: ServiceFamily | None = None,
+    market: Market | None = None,
+    providers: list[ProviderCandidate] | None = None,
+) -> SerpResult:
     if result.manual_override:
         classification = result.manual_override
         return _with_classification(
@@ -34,9 +40,28 @@ def classify_result(result: SerpResult) -> SerpResult:
     config = _classifier_config()
     normalized_domain = _normalize_domain(result.domain or urlparse(result.url).netloc)
     path = urlparse(result.url).path.lower()
-    text = " ".join([result.title, result.description, path]).lower()
+    text = " ".join([result.title, result.description, path, normalized_domain]).lower()
 
     for rule in config.get("rules", []):
+        if str(rule.get("classification")) == "local_provider":
+            local_match = _local_provider_match(
+                rule,
+                result,
+                normalized_domain,
+                text,
+                service=service,
+                market=market,
+                providers=providers or [],
+            )
+            if local_match is None:
+                continue
+            return _with_classification(
+                result,
+                classification="local_provider",
+                confidence=float(rule.get("confidence") or 0.5),
+                matched_rules=[str(rule["id"])],
+                evidence=local_match,
+            )
         if _rule_matches(rule, normalized_domain, text):
             return _with_classification(
                 result,
@@ -70,6 +95,120 @@ def _rule_matches(rule: dict[str, Any], domain: str, text: str) -> bool:
 
     terms = [str(item).lower() for item in rule.get("text_contains", [])]
     return any(term in text for term in terms)
+
+
+def _local_provider_match(
+    rule: dict[str, Any],
+    result: SerpResult,
+    domain: str,
+    text: str,
+    *,
+    service: ServiceFamily | None,
+    market: Market | None,
+    providers: list[ProviderCandidate],
+) -> dict[str, Any] | None:
+    if service is None or market is None:
+        return None
+    service_tokens = _important_tokens(service.display_name)
+    service_tokens.update(token for query in service.seed_queries for token in _important_tokens(query))
+    market_tokens = _market_tokens(market)
+    result_tokens = _important_tokens(text)
+    configured_service_terms = {
+        str(item).lower() for item in rule.get("service_terms", []) if str(item).strip()
+    }
+    service_overlap = sorted(result_tokens & service_tokens)
+    service_term_overlap = sorted(result_tokens & configured_service_terms)
+    market_overlap = sorted(result_tokens & market_tokens)
+    provider_match = _provider_listing_match(domain, result, providers)
+    identity_terms = [str(item).lower() for item in rule.get("business_identity_terms", [])]
+    identity_matches = [term for term in identity_terms if term in text]
+    clear_business_identity = bool(identity_matches) or _business_like_domain(domain)
+
+    has_service_relevance = bool(service_overlap or service_term_overlap)
+    has_market_relevance = bool(market_overlap)
+    has_business_evidence = provider_match is not None or clear_business_identity
+    if not (has_service_relevance and has_market_relevance and has_business_evidence):
+        return None
+    return {
+        "domain": domain,
+        "title": result.title,
+        "service_overlap": service_overlap,
+        "service_term_overlap": service_term_overlap,
+        "market_overlap": market_overlap,
+        "provider_match": provider_match,
+        "business_identity_terms": identity_matches,
+        "business_like_domain": _business_like_domain(domain),
+        "rule": rule["id"],
+    }
+
+
+def _provider_listing_match(
+    domain: str,
+    result: SerpResult,
+    providers: list[ProviderCandidate],
+) -> dict[str, Any] | None:
+    result_tokens = _important_tokens(f"{result.title} {result.description} {domain}")
+    for provider in providers:
+        provider_domain = _provider_domain(provider)
+        if provider_domain and (domain == provider_domain or domain.endswith(f".{provider_domain}")):
+            return {"type": "website_domain", "provider_name": provider.name}
+        name_tokens = _important_tokens(provider.name)
+        if name_tokens and len(result_tokens & name_tokens) / max(1, len(name_tokens)) >= 0.6:
+            return {
+                "type": "business_name",
+                "provider_name": provider.name,
+                "matched_tokens": sorted(result_tokens & name_tokens),
+            }
+    return None
+
+
+def _provider_domain(provider: ProviderCandidate) -> str | None:
+    if not provider.website:
+        return None
+    return _normalize_domain(urlparse(provider.website).netloc or provider.website)
+
+
+def _market_tokens(market: Market) -> set[str]:
+    values = [market.display_name, market.state or "", market.country_code]
+    values.extend(market.cities)
+    values.extend(market.postal_codes)
+    return {token for value in values for token in _important_tokens(value)}
+
+
+def _important_tokens(value: str) -> set[str]:
+    stop = {
+        "a",
+        "and",
+        "at",
+        "best",
+        "for",
+        "in",
+        "near",
+        "of",
+        "the",
+        "to",
+        "us",
+        "usa",
+        "www",
+    }
+    return {token for token in slugify(value).replace("-", " ").split() if len(token) > 1 and token not in stop}
+
+
+def _business_like_domain(domain: str) -> bool:
+    tokens = set(domain.replace(".", " ").replace("-", " ").split())
+    business_terms = {
+        "co",
+        "company",
+        "contractors",
+        "pros",
+        "service",
+        "services",
+        "plumbing",
+        "roofing",
+        "hvac",
+        "repair",
+    }
+    return bool(tokens & business_terms)
 
 
 def _with_classification(

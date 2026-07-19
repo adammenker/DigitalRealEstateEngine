@@ -188,15 +188,20 @@ def save_scan_records(
                 address=provider.address,
                 service_area=provider.service_area,
                 category=provider.category,
+                categories=provider.categories,
+                latitude=provider.latitude,
+                longitude=provider.longitude,
                 rating=provider.rating,
                 review_count=provider.review_count,
                 business_status=provider.business_status,
                 contact_confidence=provider.contact_confidence,
                 source=provider.source,
+                source_timestamp=provider.source_timestamp,
                 raw_response_ref=provider.raw_response_ref,
                 outreach_status=provider.outreach_status,
                 suitability_score=provider.suitability_score,
                 suitability_reasons=provider.suitability_reasons,
+                suitability_signals=provider.suitability_signals,
             )
         )
     session.flush()

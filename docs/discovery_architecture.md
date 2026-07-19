@@ -13,7 +13,8 @@ The discovery process is the engine UI/backend path for deciding whether a servi
 7. Fetch competitor metrics for organic results when the scan profile allows it.
 8. Fetch local provider candidates and score provider suitability.
 9. Run Scoring V2.
-10. Persist typed records plus a JSON `discovery_report` artifact.
+10. Finalize scan status, completion time, and the actual API cost ledger.
+11. Persist typed records plus a JSON `discovery_report` artifact.
 
 ## Data Modes
 
@@ -24,3 +25,7 @@ The discovery process is the engine UI/backend path for deciding whether a servi
 ## Cost Attribution
 
 `scan_plan_calls` stores intended requests. `api_calls` stores actual cache hits, requests, failures, provider IDs, and actual cost by scan. Sandbox calls record zero actual cost.
+
+The discovery report is built only after all scan API calls have terminal statuses and the
+actual scan cost has been assigned. `scan_metadata.api_cost_ledger` contains reconciled call,
+cache-hit, failure, estimated-cost, and actual-cost totals plus the individual call rows.

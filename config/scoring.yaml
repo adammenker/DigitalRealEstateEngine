@@ -7,27 +7,106 @@ weights:
   provider_suitability: 14
   data_completeness: 8
 missing_data_penalty_max: 24
-thresholds:
-  high_confidence_missing_fields: 0
-  medium_confidence_missing_fields: 2
-  insufficient_confidence_missing_fields: 5
+data_completeness_expected_groups: 7
 demand:
-  strong_monthly_volume: 900
-  high_intent_share_bonus_cap: 0.35
+  strong_national_monthly_volume: 900
+  strong_market_monthly_volume: 900
+  service_attractiveness_share: 0.35
+  market_attractiveness_share: 0.65
+confidence:
+  thresholds:
+    high: 85
+    medium: 65
+    low: 40
+  keyword_max_age_days: 90
+  serp_max_age_days: 30
+  representative_serp_target: 3
+  competitor_sample_target: 3
+  provider_sample_target: 2
+  source_mode_penalties:
+    live: 0
+    replay: 5
+    sandbox: 15
+    fixture: 25
+    unknown: 10
+  deductions:
+    missing_field: 8
+    missing_local_demand: 20
+    low_confidence_market_estimate: 12
+    medium_confidence_market_evidence: 4
+    stale_keyword_metrics: 10
+    stale_serps: 15
+    limited_serp_sample: 10
+    limited_competitor_sample: 10
+    limited_provider_sample: 8
 commercial:
   strong_cpc: 28
   strong_paid_competition: 0.8
 competitors:
   weak_referring_domains: 35
   strong_referring_domains: 260
-  local_provider_bonus: 0.2
+  unknown_referring_domains_weakness: 0.45
+  relevance_threat_strength: 0.65
+  archetype_weakness_adjustments:
+    directory: 0.15
+    marketplace: 0.08
+    lead_generator: 0.04
+    national_brand: -0.1
+    local_provider: 0
+    informational_publisher: 0.08
+    government_or_nonprofit: 0
+    unknown: 0
 organic_click:
   directory_penalty: 0.35
+  marketplace_penalty: 0.3
   national_brand_penalty: 0.3
   lead_generator_penalty: 0.2
+  informational_publisher_penalty: 0.1
+  shopping_product_penalty: 0.16
+  shopping_product_result_types:
+    - shopping
+    - popular_products
+    - product_considerations
+    - refine_products
+    - explore_brands
   local_pack_penalty: 0.14
   ads_top_penalty: 0.12
 providers:
+  suitable_threshold: 55
+  inactive_score_cap: 40
+  signal_weights:
+    service_fit: 30
+    geographic_fit: 25
+    status_certainty: 15
+    contactability: 20
+    reputation: 10
+  status_scores:
+    open: 1
+    close: 1
+    active: 1
+    operational: 1
+    unknown: 0.25
+    temporarily_closed: 0
+    closed: 0
+    closed_forever: 0
+    permanently_closed: 0
+  geography:
+    full_credit_distance_km: 25
+    max_distance_km: 100
+    service_area_match_score: 1
+    address_match_score: 0.85
+  contactability:
+    channel_strengths:
+      website: 0.3
+      phone: 0.85
+      email: 1
+      contact_form: 0.9
+    unknown_confidence: 0.5
+    confidence_floor: 0.75
+  reputation:
+    rating_share: 0.7
+    review_count_share: 0.3
+    review_saturation_count: 100
   ideal_min: 2
   ideal_max: 8
   oversupply_count: 14

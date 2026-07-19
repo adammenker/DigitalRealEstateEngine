@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
+import httpx
 import pytest
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from rank_rent.db.base import Base, make_engine
@@ -32,8 +36,58 @@ from rank_rent.services.cache import (
 from rank_rent.settings import Settings
 
 
+class SlowDataForSEOClient:
+    def __init__(self, started: asyncio.Event, release: asyncio.Event) -> None:
+        self.started = started
+        self.release = release
+
+    async def __aenter__(self) -> SlowDataForSEOClient:
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        return None
+
+    async def post(self, path: str, json: list[dict[str, Any]]) -> httpx.Response:
+        self.started.set()
+        await self.release.wait()
+        return httpx.Response(
+            200,
+            json={
+                "status_code": 20000,
+                "tasks": [
+                    {
+                        "id": "slow-task",
+                        "status_code": 20000,
+                        "cost": 0,
+                        "result": [],
+                    }
+                ],
+            },
+        )
+
+    async def get(self, path: str) -> httpx.Response:
+        self.started.set()
+        await self.release.wait()
+        return httpx.Response(
+            200,
+            json={
+                "status_code": 20000,
+                "tasks": [{"id": "slow-task", "status_code": 20000, "cost": 0, "result": []}],
+            },
+        )
+
+
 def make_session() -> sessionmaker:
     engine = make_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine, expire_on_commit=False)
+
+
+def make_file_session(db_path: str) -> sessionmaker:
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False, "timeout": 0.1},
+    )
     Base.metadata.create_all(engine)
     return sessionmaker(bind=engine, expire_on_commit=False)
 
@@ -99,6 +153,110 @@ def test_sandbox_provider_stores_free_sandbox_cache_rows() -> None:
 
 
 @pytest.mark.asyncio
+async def test_live_call_ledger_does_not_hold_sqlite_write_lock_during_slow_http(
+    tmp_path, monkeypatch
+) -> None:
+    Session = make_file_session(str(tmp_path / "sqlite_lock.db"))
+    settings = Settings(
+        data_mode="live",
+        allow_live_api_calls=True,
+        dataforseo_login="user",
+        dataforseo_password="password",
+        dataforseo_environment="sandbox",
+    )
+    started = asyncio.Event()
+    release = asyncio.Event()
+    with Session() as session:
+        scan = ScanRunORM(source="manual", status="running")
+        session.add(scan)
+        session.commit()
+        provider = DataForSEOLiveProvider(settings=settings, session=session)
+        provider.current_scan_run_id = scan.id
+        monkeypatch.setattr(
+            provider,
+            "_client",
+            lambda: SlowDataForSEOClient(started, release),
+        )
+
+        request = asyncio.create_task(
+            provider._post(
+                "/v3/dataforseo_labs/google/keyword_suggestions/live",
+                [{"keyword": "drywall"}],
+            )
+        )
+        await asyncio.wait_for(started.wait(), timeout=1)
+
+        with Session() as other_session:
+            running_call = other_session.query(ApiCallORM).one()
+            assert running_call.status == "running"
+            same_scan = other_session.get(ScanRunORM, scan.id)
+            assert same_scan is not None
+            same_scan.heartbeat_at = datetime.now(UTC)
+            other_session.commit()
+
+        release.set()
+        payload = await asyncio.wait_for(request, timeout=1)
+        assert payload["tasks"][0]["id"] == "slow-task"
+        completed_call = session.query(ApiCallORM).one()
+
+    assert completed_call.status == "completed"
+
+
+def test_full_scan_plan_matches_executor_keyword_seed_requests() -> None:
+    service = ServiceFamily(id="drywall", display_name="Drywall", seed_queries=["drywall"])
+    market = Market(
+        id="st_louis",
+        display_name="St. Louis, MO",
+        provider_location_code="1015367",
+        provider_location_name="St. Louis,Missouri,United States",
+    )
+    settings = Settings(
+        data_mode="live",
+        allow_live_api_calls=True,
+        dataforseo_login="user",
+        dataforseo_password="password",
+        live_scan_depth="full",
+        dataforseo_environment="production",
+    )
+
+    plan = build_scan_plan(settings, DataMode.live, service, market)
+    keyword_calls = [
+        call
+        for call in plan.planned_calls
+        if call.endpoint == "/v3/dataforseo_labs/google/keyword_suggestions/live"
+    ]
+
+    assert plan.blocked is False
+    assert len(plan.planned_calls) == 13
+    assert len(keyword_calls) == 3
+    assert [call.request_parameters["tasks"][0]["keyword"] for call in keyword_calls] == [
+        "drywall",
+        "drywall repair",
+        "drywall replacement",
+    ]
+    assert len({call.planned_request_id for call in plan.planned_calls}) == len(plan.planned_calls)
+
+
+def test_full_scan_plan_with_location_resolution_fits_default_request_limit() -> None:
+    service = ServiceFamily(id="drywall", display_name="Drywall", seed_queries=["drywall"])
+    market = Market(id="st_louis", display_name="St. Louis, MO")
+    settings = Settings(
+        data_mode="live",
+        allow_live_api_calls=True,
+        dataforseo_login="user",
+        dataforseo_password="password",
+        live_scan_depth="full",
+        dataforseo_environment="production",
+    )
+
+    plan = build_scan_plan(settings, DataMode.live, service, market)
+
+    assert plan.blocked is False
+    assert len(plan.planned_calls) == 14
+    assert plan.maximum_request_count == 15
+
+
+@pytest.mark.asyncio
 async def test_dataforseo_cache_hit_writes_api_call_ledger_row() -> None:
     Session = make_session()
     settings = Settings(
@@ -120,6 +278,8 @@ async def test_dataforseo_cache_hit_writes_api_call_ledger_row() -> None:
                             "planned_request_id": "req-001",
                             "endpoint": "/endpoint",
                             "stage": "keyword_metrics",
+                            "cache_key": cache_key("dataforseo-sandbox", "/endpoint", params, "v3"),
+                            "request_known": True,
                             "estimated_cost_usd": "0",
                         }
                     ]
@@ -148,6 +308,57 @@ async def test_dataforseo_cache_hit_writes_api_call_ledger_row() -> None:
     assert row.status == "cache_hit"
     assert row.cache_hit is True
     assert row.actual_cost_usd == 0
+
+
+def test_unplanned_known_executor_call_does_not_reuse_final_planned_request_id() -> None:
+    Session = make_session()
+    settings = Settings(
+        data_mode="live",
+        allow_live_api_calls=True,
+        dataforseo_login="user",
+        dataforseo_password="password",
+        dataforseo_environment="sandbox",
+    )
+    path = "/v3/dataforseo_labs/google/keyword_suggestions/live"
+    planned_params = normalize_request({"tasks": [{"keyword": "drywall"}]})
+    unplanned_params = normalize_request({"tasks": [{"keyword": "drywall repair"}]})
+    with Session() as session:
+        provider = DataForSEOLiveProvider(settings=settings, session=session)
+        scan = ScanRunORM(
+            source="manual",
+            status="running",
+            request_parameters={
+                "scan_plan": {
+                    "planned_calls": [
+                        {
+                            "planned_request_id": "req-001",
+                            "endpoint": path,
+                            "stage": "keyword_discovery",
+                            "cache_key": provider._cache_key(path, planned_params),
+                            "request_known": True,
+                            "estimated_cost_usd": "0",
+                        }
+                    ]
+                }
+            },
+        )
+        session.add(scan)
+        session.flush()
+        provider.current_scan_run_id = scan.id
+        session.add(
+            ApiCallORM(
+                scan_run_id=scan.id,
+                planned_request_id="req-001",
+                provider="dataforseo-sandbox",
+                endpoint=path,
+                stage="keyword_discovery",
+                cache_key=provider._cache_key(path, planned_params),
+                status="completed",
+            )
+        )
+        session.flush()
+
+        assert provider._planned_call(path, unplanned_params) == {}
 
 
 @pytest.mark.asyncio
