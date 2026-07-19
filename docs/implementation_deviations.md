@@ -44,7 +44,8 @@ The offline remediation specification is intentionally broad. This implementatio
 - raw response storage extends the existing `raw_api_responses` table rather than renaming it to `stored_api_responses`;
 - scan planning uses maintained endpoint estimates rather than provider price-table extraction;
 - async scans use an in-process database-backed worker; an external queue service remains deferred;
-- geographic resolution still uses the existing market model plus limited offline coordinates rather than a complete U.S. city/ZIP dataset;
+- geographic resolution now uses a versioned offline U.S. city/ZCTA index; address-level and
+  international geography remain outside the selected production scope;
 - scoring is now version `v2`; remaining scoring work is real-market calibration after production
   DataForSEO evidence exists;
 - migrations are restored, but migration coverage is currently an upgrade-head smoke test rather than a large populated historical fixture matrix.

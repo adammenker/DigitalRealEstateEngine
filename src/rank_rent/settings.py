@@ -25,8 +25,7 @@ class Settings(BaseSettings):
     max_scan_requests: int = Field(default=15, ge=0)
     allow_live_api_calls: bool = False
     live_scan_depth: str = "testing"
-    pelias_base_url: str = ""
-    location_search_timeout_seconds: float = Field(default=1.5, ge=0.1)
+    us_geography_database_path: Path = Path("data/us_geography.sqlite3")
     scan_worker_enabled: bool = True
     scan_worker_poll_seconds: float = Field(default=1.0, ge=0.1)
     scan_worker_heartbeat_seconds: float = Field(default=5.0, ge=0.5)

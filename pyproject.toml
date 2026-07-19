@@ -25,6 +25,7 @@ dev = [
   "respx>=0.21",
   "ruff>=0.5",
   "mypy>=1.10",
+  "xlrd>=2.0",
 ]
 
 [project.scripts]

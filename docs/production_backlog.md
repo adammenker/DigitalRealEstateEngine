@@ -4,25 +4,29 @@ This file tracks work that should be completed before the Digital Real Estate En
 
 ## Geocoding And Market Resolution
 
-- [x] Add a first-pass local location dropdown with explicit city/state parsing and ambiguous city choices.
-- [x] Infer DataForSEO `location_name` values for selected U.S. city/state markets to avoid a separate location-catalog lookup when no provider code is cached.
-- [ ] Run Pelias as an optional Docker Compose profile with persistent volumes, health checks, and documented import/update commands.
-- [ ] Decide the first production geography scope: US-only, US plus Canada, or broader international.
-- [ ] Import the matching Pelias datasets for that scope, likely Who's On First for administrative areas, OpenStreetMap for places, and OpenAddresses/postal data where needed.
-- [ ] Add a provider-location concordance job that maps selected Pelias places to DataForSEO `location_code` / `location_name` values and caches those mappings.
-- [ ] Add an admin UI or CLI command to inspect unresolved market mappings before spending DataForSEO calls.
-- [ ] Add strict country/state validation so provider matches cannot silently cross from `US` to `GB` or any other mismatched country.
-- [ ] Improve ZIP-code resolution with city/state, lat/lng, and DataForSEO location mapping.
+- [x] Set the first production geography scope to U.S. populated cities and Census ZCTAs.
+- [x] Build a versioned offline index with city, state, ZIP, county, metro, coordinates,
+  population, reference population, aliases, and source provenance.
+- [x] Require exact canonical geography before live scan planning.
+- [x] Require explicit selection for ambiguous and fuzzy city matches.
+- [x] Reload selected records by canonical ID instead of trusting client coordinates.
+- [x] Persist canonical geography fields on markets and preserve them in scan payloads.
+- [x] Reject unsupported countries and unknown/non-geographic ZIPs.
+- [x] Require a verified coordinate radius for every provider-discovery request.
+- [x] Remove hard-coded city coordinates and paid runtime geography resolution.
 - [x] Add automated tests for ambiguous city names such as London.
-- [ ] Expand automated ambiguous-city tests to cover Springfield, Portland, and Columbus.
-- [ ] Add a user-facing "unsupported geography" state for locations outside the configured production scope.
+- [x] Expand automated ambiguous-city tests to Springfield, Portland, and Columbus.
+- [x] Add a user-facing unsupported-geography response outside the U.S. scope.
+- [ ] Add address-level or international geography only when the product scope requires it;
+  evaluate Pelias then rather than operating it for current city/ZIP discovery.
 
 ## DataForSEO Cost Controls
 
 - [ ] Keep sandbox as the default testing environment and require explicit production environment opt-in.
 - [ ] Add per-scan and per-day request/cost budgets surfaced in the UI.
 - [ ] Store estimated versus actual API call counts by stage and display them per scan.
-- [ ] Add cache warming for stable reference data such as provider locations.
+- [ ] Add provider-location-code concordance only if inferred canonical names prove unreliable;
+  it is not required for the current offline geography boundary.
 - [ ] Add a "full scan" confirmation step that lists the additional calls required beyond the testing profile.
 - [ ] Add alerts for repeated cache misses, unexpected paid endpoints, or provider responses with nonzero cost in testing.
 

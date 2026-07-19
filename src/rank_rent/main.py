@@ -65,6 +65,7 @@ from rank_rent.services.locations import (
 from rank_rent.services.records import save_scan_plan_calls
 from rank_rent.services.scan_worker import active_retry_for_scan, scan_worker_loop
 from rank_rent.services.scanner import ScanPipeline
+from rank_rent.services.us_geography import USGeographyError, USGeographyIndex
 from rank_rent.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -344,6 +345,21 @@ def healthz() -> dict[str, str]:
 def api_meta() -> dict[str, Any]:
     settings = get_settings()
     data_mode = validate_runtime_mode(settings)
+    try:
+        geography_metadata = USGeographyIndex.from_settings(settings).metadata()
+        geography_status: dict[str, Any] = {
+            "mode": "offline_us_geography",
+            "dataset_available": True,
+            "dataset_version": geography_metadata.get("dataset_version"),
+            "reference_year": geography_metadata.get("reference_year"),
+            "city_count": int(geography_metadata.get("city_count", 0)),
+            "zip_count": int(geography_metadata.get("zip_count", 0)),
+        }
+    except (USGeographyError, OSError, ValueError):
+        geography_status = {
+            "mode": "offline_us_geography",
+            "dataset_available": False,
+        }
     return {
         "data_mode": data_mode.value,
         "synthetic_fixture_data": data_mode.value == "fixture",
@@ -352,11 +368,7 @@ def api_meta() -> dict[str, Any]:
         "dataforseo_environment": settings.dataforseo_environment,
         "dataforseo_sandbox": settings.dataforseo_environment.strip().lower() == "sandbox",
         "requires_live_cost_confirmation": data_mode.value == "live",
-        "geocoder": {
-            "pelias_enabled": bool(settings.pelias_base_url.strip()),
-            "pelias_base_url_configured": bool(settings.pelias_base_url.strip()),
-            "fallback_sources": ["explicit", "seed", "database", "dataforseo-cache"],
-        },
+        "geocoder": geography_status,
     }
 
 
@@ -368,13 +380,16 @@ async def api_location_search(
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     settings = get_settings()
-    candidates = await search_locations(
-        session=session,
-        query=q,
-        country=country,
-        settings=settings,
-        limit=max(1, min(limit, 12)),
-    )
+    try:
+        candidates = await search_locations(
+            session=session,
+            query=q,
+            country=country,
+            settings=settings,
+            limit=max(1, min(limit, 12)),
+        )
+    except USGeographyError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"locations": [candidate.model_dump(mode="json") for candidate in candidates]}
 
 
@@ -930,6 +945,7 @@ def _queue_scan(
             "scan_plan": scan_plan,
             "service_payload": service.model_dump(mode="json"),
             "market_payload": market.model_dump(mode="json"),
+            "final_market_payload": market.model_dump(mode="json"),
         },
     )
     session.add(scan)

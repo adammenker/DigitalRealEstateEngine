@@ -111,30 +111,6 @@ class ScanPipeline:
 
         try:
             self._ensure_not_cancelled(scan)
-            if (
-                self.data_mode == DataMode.live
-                and not market.provider_location_code
-                and not market.provider_location_name
-            ):
-                self._ensure_not_cancelled(scan)
-                self._set_stage(scan, "resolving_location")
-                market = (await self.research_provider.resolve_location(market.display_name)).market
-                market_row = upsert_market(self.session, market)
-                opportunity = get_or_create_opportunity(self.session, service_row, market_row)
-                scan.opportunity_id = opportunity.id
-                scan.request_parameters = {
-                    **scan.request_parameters,
-                    "market": market.slug,
-                    "market_payload": market.model_dump(mode="json"),
-                    "final_market_payload": market.model_dump(mode="json"),
-                    "resolved_market": {
-                        "display_name": market.display_name,
-                        "provider_location_code": market.provider_location_code,
-                        "provider_location_name": market.provider_location_name,
-                        "granularity": market.type.value,
-                    },
-                }
-                self.session.commit()
             self._ensure_not_cancelled(scan)
             self._set_stage(scan, "discovering_keywords")
             candidates = await self.research_provider.discover_keywords(service, market)
@@ -435,6 +411,7 @@ class ScanPipeline:
             "scan_plan": plan.model_dump(mode="json"),
             "service_payload": service.model_dump(mode="json"),
             "market_payload": market.model_dump(mode="json"),
+            "final_market_payload": market.model_dump(mode="json"),
         }
         return scan
 
@@ -516,8 +493,17 @@ class ScanPipeline:
         )
         return {
             **evidence,
-            "localized_competition": bool(market.provider_location_code or market.provider_location_name or market.latitude),
-            "localized_provider_supply": bool(market.latitude and market.longitude),
+            "localized_competition": bool(
+                market.provider_location_code
+                or market.provider_location_name
+                or (market.latitude is not None and market.longitude is not None)
+            ),
+            "localized_provider_supply": bool(
+                market.latitude is not None
+                and market.longitude is not None
+                and market.boundary_radius_km is not None
+                and market.boundary_radius_km > 0
+            ),
             "warning": warning,
         }
 

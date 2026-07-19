@@ -66,8 +66,18 @@ class Market(BaseModel):
     state: str | None = None
     cities: list[str] = Field(default_factory=list)
     postal_codes: list[str] = Field(default_factory=list)
+    county: str | None = None
+    county_fips: str | None = None
+    metro: str | None = None
+    metro_code: str | None = None
     latitude: float | None = None
     longitude: float | None = None
+    population: int | None = None
+    reference_population: int | None = None
+    aliases: list[str] = Field(default_factory=list)
+    boundary_radius_km: float | None = None
+    geography_id: str | None = None
+    geography_dataset_version: str | None = None
     provider_location_code: str | None = None
     provider_location_name: str | None = None
     resolution_metadata: dict[str, Any] = Field(default_factory=dict)

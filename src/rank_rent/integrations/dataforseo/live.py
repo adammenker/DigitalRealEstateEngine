@@ -7,9 +7,10 @@ from urllib.parse import urlparse
 
 import httpx
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from rank_rent.db.orm import ApiCallORM, RawApiResponseORM, ScanRunORM
+from rank_rent.db.orm import ApiCallORM, RawApiResponseORM, ScanPlanCallORM
 from rank_rent.domain.models import (
     CompetitorMetric,
     KeywordCandidate,
@@ -26,10 +27,15 @@ from rank_rent.domain.models import (
 from rank_rent.runtime import DataMode, validate_runtime_mode
 from rank_rent.services.cache import RawResponseCache, cache_key, normalize_request
 from rank_rent.services.keywords import service_seed_keywords
+from rank_rent.services.us_geography import validate_market_against_index
 from rank_rent.settings import Settings, get_settings
 
 
 class DataForSEOError(RuntimeError):
+    pass
+
+
+class DataForSEOPlanError(DataForSEOError):
     pass
 
 
@@ -109,16 +115,6 @@ STATE_NAMES = {
     "wy": "wyoming",
 }
 
-CITY_COORDINATES = {
-    "st louis mo": (38.627003, -90.199404),
-    "st louis missouri": (38.627003, -90.199404),
-    "st. louis mo": (38.627003, -90.199404),
-    "st. louis missouri": (38.627003, -90.199404),
-    "stamford ct": (41.05343, -73.538734),
-    "stamford connecticut": (41.05343, -73.538734),
-}
-
-
 class DataForSEOLiveProvider:
     provider_name = "dataforseo-live"
     api_version = "v3"
@@ -132,6 +128,7 @@ class DataForSEOLiveProvider:
         timeout_seconds: float = 45.0,
         session: Session | None = None,
         force_refresh: bool = False,
+        allow_unplanned_requests: bool = False,
     ) -> None:
         self.settings = settings or get_settings()
         validate_runtime_mode(self.settings, DataMode.live)
@@ -142,6 +139,7 @@ class DataForSEOLiveProvider:
         self.session = session
         self.cache = RawResponseCache(session, self.provider_name, self.api_version) if session else None
         self.force_refresh = force_refresh
+        self.allow_unplanned_requests = allow_unplanned_requests
         self.current_scan_run_id: int | None = None
 
     async def check_account(self) -> dict[str, Any]:
@@ -335,14 +333,13 @@ class DataForSEOLiveProvider:
     async def find_providers(
         self, service: ServiceFamily, market: Market
     ) -> list[ProviderCandidate]:
+        validate_market_against_index(market, self.settings)
         task: dict[str, Any] = {
             "language_code": "en",
             "limit": self.business_listings_limit,
             "filters": ["address_info.country_code", "=", market.country_code.upper()],
+            "location_coordinate": self._location_coordinate(market),
         }
-        coordinate = self._location_coordinate(market)
-        if coordinate:
-            task["location_coordinate"] = coordinate
         if service.provider_categories:
             task["categories"] = service.provider_categories[:10]
             task["description"] = f"{service.display_name} {market.display_name}"
@@ -510,27 +507,13 @@ class DataForSEOLiveProvider:
     def _start_api_call(self, path: str, params: dict[str, Any]) -> ApiCallORM | None:
         if self.session is None:
             return None
-        plan = self._planned_call(path, params)
-        now = datetime.now(UTC)
-        row = ApiCallORM(
-            scan_run_id=self.current_scan_run_id,
-            planned_request_id=plan.get("planned_request_id"),
-            provider=self.provider_name,
-            endpoint=path,
-            stage=str(plan.get("stage") or self._stage_for_endpoint(path)),
-            cache_key=self._cache_key(path, params),
+        return self._reserve_api_call(
+            path,
+            params,
             cache_hit=False,
             force_refresh=self.force_refresh,
-            estimated_cost_usd=float(plan.get("estimated_cost_usd") or 0),
-            actual_cost_usd=0,
             status="running",
-            started_at=now,
         )
-        self.session.add(row)
-        if self.session is not None:
-            self.session.flush()
-            self.session.commit()
-        return row
 
     def _finish_api_call(
         self,
@@ -574,66 +557,144 @@ class DataForSEOLiveProvider:
     ) -> None:
         if self.session is None:
             return
-        plan = self._planned_call(path, params)
-        now = datetime.now(UTC)
-        self.session.add(
-            ApiCallORM(
-                scan_run_id=self.current_scan_run_id,
-                planned_request_id=plan.get("planned_request_id"),
-                raw_api_response_id=raw_response.id,
-                provider=self.provider_name,
-                endpoint=path,
-                stage=str(plan.get("stage") or self._stage_for_endpoint(path)),
-                cache_key=raw_response.cache_key,
-                cache_hit=True,
-                force_refresh=False,
-                estimated_cost_usd=float(plan.get("estimated_cost_usd") or 0),
-                actual_cost_usd=0,
-                status="cache_hit",
-                started_at=now,
-                completed_at=now,
-                provider_task_id=raw_response.provider_task_id,
-                provider_request_id=raw_response.provider_request_id,
-            )
+        self._reserve_api_call(
+            path,
+            params,
+            cache_hit=True,
+            force_refresh=False,
+            status="cache_hit",
+            raw_response=raw_response,
         )
-        self.session.flush()
-        self.session.commit()
 
     def _planned_call(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         if self.session is None or self.current_scan_run_id is None:
             return {}
-        scan = self.session.get(ScanRunORM, self.current_scan_run_id)
-        if scan is None:
-            return {}
-        calls = (scan.request_parameters or {}).get("scan_plan", {}).get("planned_calls", [])
-        if not isinstance(calls, list):
-            return {}
-        matching = [call for call in calls if isinstance(call, dict) and call.get("endpoint") == path]
+        matching = list(
+            self.session.scalars(
+                select(ScanPlanCallORM)
+                .where(
+                    ScanPlanCallORM.scan_run_id == self.current_scan_run_id,
+                    ScanPlanCallORM.provider == self.provider_name,
+                    ScanPlanCallORM.endpoint == path,
+                )
+                .order_by(ScanPlanCallORM.id)
+            ).all()
+        )
         if not matching:
             return {}
+        consumed_ids = set(
+            self.session.scalars(
+                select(ApiCallORM.planned_request_id).where(
+                    ApiCallORM.scan_run_id == self.current_scan_run_id,
+                    ApiCallORM.planned_request_id.is_not(None),
+                )
+            ).all()
+        )
+        unused = [
+            call
+            for call in matching
+            if call.planned_request_id is not None
+            and call.planned_request_id not in consumed_ids
+        ]
         if params is not None:
             request_cache_key = self._cache_key(path, params)
             exact = [
                 call
-                for call in matching
-                if call.get("request_known", True) and call.get("cache_key") == request_cache_key
+                for call in unused
+                if call.request_known and call.cache_key == request_cache_key
             ]
             if exact:
-                return cast(dict[str, Any], exact[0])
-            if any(call.get("request_known", True) for call in matching):
+                return self._planned_call_payload(exact[0])
+            if any(call.request_known for call in matching):
                 return {}
 
-        completed_for_endpoint = len(
-            self.session.scalars(
-                select(ApiCallORM.id).where(
-                    ApiCallORM.scan_run_id == self.current_scan_run_id,
-                    ApiCallORM.endpoint == path,
-                )
-            ).all()
-        )
-        if completed_for_endpoint >= len(matching):
+        unknown = [call for call in unused if not call.request_known]
+        if not unknown:
             return {}
-        return cast(dict[str, Any], matching[completed_for_endpoint])
+        return self._planned_call_payload(unknown[0])
+
+    def _reserve_api_call(
+        self,
+        path: str,
+        params: dict[str, Any],
+        *,
+        cache_hit: bool,
+        force_refresh: bool,
+        status: str,
+        raw_response: RawApiResponseORM | None = None,
+    ) -> ApiCallORM:
+        assert self.session is not None
+        plan = self._planned_call(path, params)
+        if (
+            self.current_scan_run_id is not None
+            and not plan
+            and not self.allow_unplanned_requests
+        ):
+            raise DataForSEOPlanError(
+                f"Scan {self.current_scan_run_id} has no unused planned request "
+                f"matching {path}; no external request was sent."
+            )
+        now = datetime.now(UTC)
+        row = ApiCallORM(
+            scan_run_id=self.current_scan_run_id,
+            planned_request_id=plan.get("planned_request_id"),
+            raw_api_response_id=raw_response.id if raw_response else None,
+            provider=self.provider_name,
+            endpoint=path,
+            stage=str(plan.get("stage") or self._stage_for_endpoint(path)),
+            cache_key=raw_response.cache_key
+            if raw_response
+            else self._cache_key(path, params),
+            cache_hit=cache_hit,
+            force_refresh=force_refresh,
+            estimated_cost_usd=float(plan.get("estimated_cost_usd") or 0),
+            actual_cost_usd=0,
+            status=status,
+            started_at=now,
+            completed_at=now if status == "cache_hit" else None,
+            provider_task_id=raw_response.provider_task_id if raw_response else None,
+            provider_request_id=raw_response.provider_request_id
+            if raw_response
+            else None,
+        )
+        self.session.add(row)
+        try:
+            self.session.flush()
+            self.session.commit()
+        except IntegrityError as exc:
+            self.session.rollback()
+            planned_request_id = plan.get("planned_request_id")
+            already_consumed = (
+                planned_request_id is not None
+                and self.current_scan_run_id is not None
+                and self.session.scalar(
+                    select(ApiCallORM.id).where(
+                        ApiCallORM.scan_run_id == self.current_scan_run_id,
+                        ApiCallORM.planned_request_id == planned_request_id,
+                    )
+                )
+                is not None
+            )
+            if already_consumed:
+                raise DataForSEOPlanError(
+                    f"Planned request {planned_request_id} for scan "
+                    f"{self.current_scan_run_id} was already consumed; no external "
+                    "request was sent."
+                ) from exc
+            raise
+        return row
+
+    @staticmethod
+    def _planned_call_payload(call: ScanPlanCallORM) -> dict[str, Any]:
+        return {
+            "planned_request_id": call.planned_request_id,
+            "provider": call.provider,
+            "endpoint": call.endpoint,
+            "stage": call.stage,
+            "cache_key": call.cache_key,
+            "request_known": call.request_known,
+            "estimated_cost_usd": call.estimated_cost_usd,
+        }
 
     def _cache_key(self, path: str, params: dict[str, Any]) -> str:
         return cache_key(
@@ -724,17 +785,18 @@ class DataForSEOLiveProvider:
             return "country"
         return market.type.value
 
-    def _location_coordinate(self, market: Market, radius_km: int = 50) -> str | None:
-        if market.latitude is not None and market.longitude is not None:
-            return f"{market.latitude:.6f},{market.longitude:.6f},{radius_km}"
-        key = self._normalize_location(market.display_name)
-        coordinates = CITY_COORDINATES.get(key)
-        if coordinates is None and market.cities:
-            city_key = self._normalize_location(f"{market.cities[0]} {market.state or ''}")
-            coordinates = CITY_COORDINATES.get(city_key)
-        if coordinates is None:
-            return None
-        return f"{coordinates[0]:.6f},{coordinates[1]:.6f},{radius_km}"
+    def _location_coordinate(self, market: Market) -> str:
+        if (
+            market.latitude is None
+            or market.longitude is None
+            or market.boundary_radius_km is None
+            or market.boundary_radius_km <= 0
+        ):
+            raise DataForSEOError(
+                "Provider discovery requires canonical coordinates and a positive boundary radius."
+            )
+        radius = f"{market.boundary_radius_km:g}"
+        return f"{market.latitude:.6f},{market.longitude:.6f},{radius}"
 
     def _keyword_seeds(self, service: ServiceFamily) -> list[str]:
         return service_seed_keywords(service)

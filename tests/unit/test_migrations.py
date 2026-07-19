@@ -49,6 +49,29 @@ def test_alembic_upgrade_head_creates_v1_schema(tmp_path, monkeypatch) -> None:
         "provider_request_id",
         "error_type",
     } <= api_call_columns
+    api_call_unique_constraints = {
+        tuple(constraint["column_names"])
+        for constraint in inspector.get_unique_constraints("api_calls")
+    }
+    plan_call_unique_constraints = {
+        tuple(constraint["column_names"])
+        for constraint in inspector.get_unique_constraints("scan_plan_calls")
+    }
+    assert ("scan_run_id", "planned_request_id") in api_call_unique_constraints
+    assert ("scan_run_id", "planned_request_id") in plan_call_unique_constraints
+    market_columns = {column["name"] for column in inspector.get_columns("markets")}
+    assert {
+        "county",
+        "county_fips",
+        "metro",
+        "metro_code",
+        "population",
+        "reference_population",
+        "aliases",
+        "boundary_radius_km",
+        "geography_id",
+        "geography_dataset_version",
+    } <= market_columns
     serp_columns = {column["name"] for column in inspector.get_columns("serp_results")}
     assert {
         "classification_confidence",

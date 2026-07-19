@@ -14,6 +14,7 @@ Baseline and remediation state notes.
 - `src/rank_rent/`: FastAPI backend, CLI, SQLAlchemy models, fixture scanner pipeline, scoring, adapters, and static site generation.
 - `frontend/`: Next.js dashboard for the scanner UI.
 - `config/`: scoring and outreach configuration.
+- `data/us_geography.sqlite3`: versioned offline U.S. city/ZCTA discovery index.
 - `seeds/`: example service and location seeds.
 - `tests/`: focused unit and end-to-end fixture tests.
 - `migrations/`: Alembic migration environment for local and Docker DB schema upgrades.
@@ -70,12 +71,20 @@ After discovery completion:
 
 ## Existing Live Adapters
 
-- `DataForSEOLiveProvider`: live DataForSEO adapter for account checks, Google location resolution, keyword suggestions, historical keyword volume, organic SERP snapshots, backlinks summaries, and business listings.
+- `DataForSEOLiveProvider`: live DataForSEO adapter for account checks, standalone provider
+  location qualification, keyword suggestions, historical keyword volume, organic SERP
+  snapshots, backlinks summaries, and business listings.
 - Live scans are guarded by `DATA_MODE=live` and `ALLOW_LIVE_API_CALLS=true` because several DataForSEO endpoints are paid.
 - DataForSEO live-mode traffic targets `DATAFORSEO_ENVIRONMENT=sandbox` by default, using `https://sandbox.dataforseo.com/v3/...` for free dummy responses. Production calls require `DATAFORSEO_ENVIRONMENT=production`.
 - Live calls are cached in `raw_api_responses` when a DB session is available.
 - Live calls are also logged in `api_calls`, including sandbox zero-cost calls and cache hits.
 - Live scan plans now include exact request payloads where possible, cache-hit state, and explicit unknown request payloads where later calls depend on purchased upstream results.
+- Attached live market scans reserve exactly one unused persisted plan row per call and reject unmatched, exhausted, or concurrently reused requests before opening the HTTP client.
+- Market scans resolve against the checked-in offline U.S. geography index before planning.
+  Every accepted market carries canonical county, metro, coordinates, population, aliases,
+  and a provider-search radius; ambiguous markets require dropdown selection.
+- Live planning validates canonical market values against the index and provider discovery
+  refuses to run without a verified boundary.
 - `LIVE_SCAN_DEPTH=testing` limits paid-call fan-out and produces a preliminary assessment instead of a full ranked score.
 - DataForSEO account verification passed during prior smoke checks; current live scans may fail if DataForSEO balance is insufficient.
 
@@ -109,6 +118,7 @@ After discovery completion:
 ## Known Broken or Prototype Paths
 
 - Full live qualification reports are not implemented yet; `rank-rent qualify --live` performs a low-cost account and location smoke check.
-- Geography is still intentionally lightweight; Pelias/database geocoding remains a production backlog item.
+- Current geography is intentionally U.S. city/ZCTA scoped. Address-level and international
+  resolution are deferred product-scope additions, not silent fallbacks.
 - Site generation, domain generation, and outreach are no longer part of the default scan pipeline, but full approval workflow actions are not implemented yet.
 - Startup initialization runs Alembic migrations for normal file-backed DBs. In-memory SQLite tests still use direct SQLAlchemy table creation.

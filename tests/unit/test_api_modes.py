@@ -95,13 +95,13 @@ def test_scan_rejects_ambiguous_unselected_location() -> None:
     assert any(candidate["label"] == "London, KY, US" for candidate in payload["candidates"])
 
 
-def test_location_search_returns_seeded_market_options() -> None:
+def test_location_search_returns_offline_geography_options() -> None:
     client = TestClient(app)
     response = client.get("/api/locations/search", params={"q": "Stamford", "country": "US"})
 
     assert response.status_code == 200
     labels = [item["label"] for item in response.json()["locations"]]
-    assert "Stamford, CT" in labels
+    assert "Stamford, CT, US" in labels
 
 
 def test_fixture_scan_detail_and_rescore_use_stored_discovery_evidence() -> None:

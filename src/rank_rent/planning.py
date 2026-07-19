@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from rank_rent.db.orm import RawApiResponseORM
 from rank_rent.domain.models import Market, ServiceFamily
 from rank_rent.integrations.dataforseo.live import (
-    CITY_COORDINATES,
     DataForSEOLiveProvider,
     dataforseo_provider_name,
     normalize_dataforseo_environment,
@@ -18,6 +17,7 @@ from rank_rent.integrations.dataforseo.live import (
 from rank_rent.runtime import DataMode
 from rank_rent.services.cache import cache_key, normalize_request
 from rank_rent.services.keywords import service_seed_keywords
+from rank_rent.services.us_geography import validate_market_against_index
 from rank_rent.settings import Settings
 
 
@@ -63,22 +63,11 @@ def build_scan_plan(
             maximum_request_count=settings.max_scan_requests,
         )
 
+    validate_market_against_index(market, settings)
     profile = settings.live_scan_depth.lower().strip()
     provider = dataforseo_provider_name(settings)
     free_sandbox = normalize_dataforseo_environment(settings) == "sandbox"
     planned: list[PlannedApiCall] = []
-
-    if not market.provider_location_code and not market.provider_location_name:
-        _append_call(
-            planned,
-            session=session,
-            provider=provider,
-            endpoint="/v3/serp/google/locations/us",
-            stage="location_resolution",
-            params={},
-            cost="0",
-            required=True,
-        )
 
     keyword_seed_limit = 1 if profile == "testing" else 3
     keyword_suggestion_limit = 10 if profile == "testing" else 20
@@ -170,10 +159,8 @@ def build_scan_plan(
         "limit": 5 if profile == "testing" else 10,
         "filters": ["address_info.country_code", "=", market.country_code.upper()],
         "description": f"{service.display_name} {market.display_name}",
+        "location_coordinate": _location_coordinate(market),
     }
-    coordinate = _location_coordinate(market)
-    if coordinate:
-        provider_task["location_coordinate"] = coordinate
     if service.provider_categories:
         provider_task["categories"] = service.provider_categories[:10]
     _append_call(
@@ -276,19 +263,15 @@ def _labs_location_payload(market: Market) -> dict[str, Any]:
     return {"location_name": market.country_code.upper()}
 
 
-def _location_coordinate(market: Market, radius_km: int = 50) -> str | None:
-    if market.latitude is not None and market.longitude is not None:
-        return f"{market.latitude:.6f},{market.longitude:.6f},{radius_km}"
-    normalized = _normalize_location(market.display_name)
-    coordinates = CITY_COORDINATES.get(normalized)
-    if coordinates is None and market.cities:
-        coordinates = CITY_COORDINATES.get(
-            _normalize_location(f"{market.cities[0]} {market.state or ''}")
+def _location_coordinate(market: Market) -> str:
+    if (
+        market.latitude is None
+        or market.longitude is None
+        or market.boundary_radius_km is None
+        or market.boundary_radius_km <= 0
+    ):
+        raise ValueError(
+            "Provider discovery requires canonical coordinates and a positive boundary radius."
         )
-    if coordinates is None:
-        return None
-    return f"{coordinates[0]:.6f},{coordinates[1]:.6f},{radius_km}"
-
-
-def _normalize_location(value: str) -> str:
-    return " ".join(value.lower().replace(".", "").replace(",", " ").replace("-", " ").split())
+    radius = f"{market.boundary_radius_km:g}"
+    return f"{market.latitude:.6f},{market.longitude:.6f},{radius}"

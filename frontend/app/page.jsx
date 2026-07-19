@@ -111,6 +111,11 @@ function number(value, fallback = "n/a") {
   return Number(value).toFixed(1);
 }
 
+function integer(value, fallback = "n/a") {
+  if (value === null || value === undefined) return fallback;
+  return Number(value).toLocaleString("en-US", { maximumFractionDigits: 0 });
+}
+
 function money(value) {
   if (value === null || value === undefined) return "$0.000";
   return `$${Number(value).toFixed(3)}`;
@@ -411,7 +416,7 @@ export default function Dashboard() {
                     setLocationOpen(true);
                   }}
                   onChange={(event) => updateLocationText(event.target.value)}
-                  placeholder="City, state, ZIP, or country"
+                  placeholder="U.S. city, state, or ZIP"
                 />
                 <button
                   type="button"
@@ -426,8 +431,8 @@ export default function Dashboard() {
               {selectedLocation && (
                 <div className="selectedLocation">
                   <MapPin size={14} />
-                  <span>{selectedLocation.source}</span>
-                  <span>{Math.round((selectedLocation.confidence || 0) * 100)}%</span>
+                  <span>{selectedLocation.county}</span>
+                  <span>Pop. {integer(selectedLocation.population)}</span>
                 </div>
               )}
               {locationOpen && (
@@ -450,10 +455,10 @@ export default function Dashboard() {
                         <span>
                           <strong>{option.label}</strong>
                           <small>
-                            {option.type} · {option.source} · {option.match_reason}
+                            {option.county} · {option.metro}
                           </small>
                         </span>
-                        <span>{Math.round((option.confidence || 0) * 100)}%</span>
+                        <span>Pop. {integer(option.population)}</span>
                       </button>
                     ))
                   )}
@@ -463,13 +468,9 @@ export default function Dashboard() {
           </label>
           <label className="countryField">
             <span>Country</span>
-            <input
-              value={form.country}
-              onChange={(event) => {
-                setSelectedLocation(null);
-                setForm({ ...form, country: event.target.value.toUpperCase() });
-              }}
-            />
+            <select value={form.country} disabled>
+              <option value="US">United States</option>
+            </select>
           </label>
           <label className="toggle">
             <input
@@ -681,6 +682,15 @@ export default function Dashboard() {
                     rows={[
                       ["Market", report?.market_interpretation?.input_market || detail.opportunity.market],
                       ["Type", report?.market_interpretation?.market_type || "unknown"],
+                      ["County", report?.market_interpretation?.county || "n/a"],
+                      ["Metro", report?.market_interpretation?.metro || "n/a"],
+                      ["Population", integer(report?.market_interpretation?.population)],
+                      [
+                        "Provider radius",
+                        report?.market_interpretation?.boundary_radius_km
+                          ? `${report.market_interpretation.boundary_radius_km} km`
+                          : "n/a"
+                      ],
                       ["Provider location", report?.market_interpretation?.provider_location_name || "n/a"],
                       ["Data mode", detail.latest_scan?.data_mode || detail.data_mode || "fixture"],
                       ["Actual API cost", money(detail.latest_scan?.actual_cost_usd || 0)]

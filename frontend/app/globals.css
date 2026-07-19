@@ -234,7 +234,7 @@ h1 {
   z-index: 1000;
   top: calc(100% + 4px);
   left: 0;
-  right: 0;
+  width: min(480px, calc(100vw - 56px));
   max-height: 292px;
   overflow: auto;
   border: 1px solid var(--line);
@@ -271,6 +271,7 @@ h1 {
 .locationOption span:first-child {
   display: grid;
   gap: 3px;
+  min-width: 0;
 }
 
 .locationOption small,
@@ -283,6 +284,8 @@ h1 {
   color: var(--brand);
   font-size: 0.78rem;
   font-weight: 850;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .locationEmpty {
@@ -290,7 +293,7 @@ h1 {
 }
 
 .scanForm .countryField {
-  max-width: 110px;
+  max-width: 145px;
 }
 
 .toggle {

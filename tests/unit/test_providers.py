@@ -7,10 +7,12 @@ import yaml
 
 from rank_rent.domain.models import Market, ProviderCandidate, ServiceFamily
 from rank_rent.integrations.dataforseo.live import DataForSEOLiveProvider
+from rank_rent.services.locations import market_from_geography_record
 from rank_rent.services.providers import (
     provider_suitability_summary,
     score_provider_suitability,
 )
+from rank_rent.services.us_geography import USGeographyIndex
 from rank_rent.settings import Settings
 
 
@@ -28,15 +30,8 @@ def _service() -> ServiceFamily:
 
 
 def _market() -> Market:
-    return Market(
-        id="stamford-ct",
-        display_name="Stamford, CT",
-        state="CT",
-        cities=["Stamford"],
-        postal_codes=["06901"],
-        latitude=41.0534,
-        longitude=-73.5387,
-    )
+    index = USGeographyIndex(Path("data/us_geography.sqlite3"))
+    return market_from_geography_record(index.search("06901", limit=1)[0].record)
 
 
 def _provider(**updates) -> ProviderCandidate:

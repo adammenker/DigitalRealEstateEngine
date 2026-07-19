@@ -121,11 +121,15 @@ def _seasonality(history: list[list[int]]) -> dict[str, Any]:
 
 
 def _population(market: Market) -> float | None:
+    if market.population is not None and market.population > 0:
+        return float(market.population)
     value = market.resolution_metadata.get("population")
     return float(value) if isinstance(value, int | float) and value > 0 else None
 
 
 def _reference_population(market: Market) -> float | None:
+    if market.reference_population is not None and market.reference_population > 0:
+        return float(market.reference_population)
     for key in ("country_population", "reference_population", "national_population"):
         value = market.resolution_metadata.get(key)
         if isinstance(value, int | float) and value > 0:

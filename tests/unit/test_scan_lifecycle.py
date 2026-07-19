@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import pytest
 from sqlalchemy import select
@@ -11,7 +12,6 @@ from rank_rent.db.orm import (
     KeywordClusterORM,
     KeywordDecisionORM,
     KeywordMetricORM,
-    OpportunityORM,
     ProviderCandidateORM,
     ScanPlanCallORM,
     ScanRunORM,
@@ -31,7 +31,9 @@ from rank_rent.domain.models import (
     ServiceFamily,
 )
 from rank_rent.repositories import get_or_create_opportunity, upsert_market, upsert_service
+from rank_rent.services.locations import market_from_geography_record
 from rank_rent.services.scanner import ScanCancelled, ScanPipeline
+from rank_rent.services.us_geography import USGeographyError, USGeographyIndex
 from rank_rent.settings import get_settings
 
 
@@ -91,9 +93,9 @@ class StaticDomainProvider:
         return DomainAvailabilityResult(domain=domain, status=AvailabilityStatus.unknown)
 
 
-class FailingLocationProvider(MinimalResearchProvider):
-    async def resolve_location(self, query: str) -> ResolvedLocation:
-        raise RuntimeError("location unavailable")
+def canonical_market() -> Market:
+    index = USGeographyIndex(Path(__file__).parents[2] / "data" / "us_geography.sqlite3")
+    return market_from_geography_record(index.search("St. Louis MO", limit=1)[0].record)
 
 
 def test_preliminary_scan_does_not_clear_existing_full_score(monkeypatch) -> None:
@@ -103,7 +105,7 @@ def test_preliminary_scan_does_not_clear_existing_full_score(monkeypatch) -> Non
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     service = ServiceFamily(id="drywall", display_name="Drywall", seed_queries=["drywall"])
-    market = Market(id="st_louis_mo", display_name="St. Louis, MO")
+    market = canonical_market()
 
     with Session() as session:
         service_row = upsert_service(session, service)
@@ -128,7 +130,7 @@ def test_preliminary_scan_does_not_clear_existing_full_score(monkeypatch) -> Non
         assert opportunity.confidence == "high"
 
 
-def test_failed_live_location_resolution_is_persisted(monkeypatch) -> None:
+def test_unresolved_live_market_fails_before_creating_scan(monkeypatch) -> None:
     monkeypatch.setenv("LIVE_SCAN_DEPTH", "testing")
     get_settings.cache_clear()
     engine = make_engine("sqlite:///:memory:")
@@ -138,24 +140,17 @@ def test_failed_live_location_resolution_is_persisted(monkeypatch) -> None:
     market = Market(id="st_louis_mo", display_name="St. Louis, MO")
 
     with Session() as session:
-        with pytest.raises(RuntimeError, match="location unavailable"):
+        with pytest.raises(USGeographyError, match="not linked"):
             asyncio.run(
                 ScanPipeline(
                     session,
-                    research_provider=FailingLocationProvider(),
+                    research_provider=MinimalResearchProvider(),
                     domain_provider=StaticDomainProvider(),
                     data_mode="live",
                 ).run(service, market, source="manual")
             )
 
-        scan = session.scalar(select(ScanRunORM))
-        assert scan is not None
-        assert scan.status == "failed"
-        assert scan.error_summary == "location unavailable"
-        assert scan.opportunity_id is not None
-        opportunity = session.get(OpportunityORM, scan.opportunity_id)
-        assert opportunity is not None
-        assert opportunity.status == "scan_failed"
+        assert session.scalar(select(ScanRunORM)) is None
 
 
 def test_scan_reuses_queued_row_and_writes_typed_records(monkeypatch) -> None:
@@ -165,7 +160,7 @@ def test_scan_reuses_queued_row_and_writes_typed_records(monkeypatch) -> None:
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     service = ServiceFamily(id="drywall", display_name="Drywall", seed_queries=["drywall"])
-    market = Market(id="st_louis_mo", display_name="St. Louis, MO")
+    market = canonical_market()
 
     with Session() as session:
         queued = ScanRunORM(source="manual_async", status="queued")
@@ -192,9 +187,9 @@ def test_scan_reuses_queued_row_and_writes_typed_records(monkeypatch) -> None:
         assert scan.cache_policy_version == "v2"
         assert scan.planned_cost_usd == scan.estimated_cost_usd
         assert scan.scoring_version == "v2"
-        assert scan.request_parameters["market_payload"]["provider_location_code"] == "test-location"
-        assert scan.request_parameters["final_market_payload"]["provider_location_code"] == "test-location"
-        assert len(session.scalars(select(ScanPlanCallORM)).all()) == 5
+        assert scan.request_parameters["market_payload"]["geography_id"] == "place:2965000"
+        assert scan.request_parameters["final_market_payload"]["geography_id"] == "place:2965000"
+        assert len(session.scalars(select(ScanPlanCallORM)).all()) == 4
         assert len(session.scalars(select(KeywordClusterORM)).all()) == 1
         assert len(session.scalars(select(KeywordDecisionORM)).all()) >= 2
         assert len(session.scalars(select(KeywordMetricORM)).all()) == 1
@@ -209,7 +204,7 @@ def test_cancelled_queued_scan_does_not_run_provider_calls(monkeypatch) -> None:
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     service = ServiceFamily(id="drywall", display_name="Drywall", seed_queries=["drywall"])
-    market = Market(id="st_louis_mo", display_name="St. Louis, MO")
+    market = canonical_market()
 
     with Session() as session:
         queued = ScanRunORM(source="manual_async", status="queued", cancel_requested=True)

@@ -48,8 +48,18 @@ class MarketORM(TimestampMixin, Base):
     state: Mapped[str | None] = mapped_column(String(20), nullable=True)
     cities: Mapped[list[str]] = mapped_column(JSON, default=list)
     postal_codes: Mapped[list[str]] = mapped_column(JSON, default=list)
+    county: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    county_fips: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    metro: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    metro_code: Mapped[str | None] = mapped_column(String(5), nullable=True)
     latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    population: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reference_population: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    aliases: Mapped[list[str]] = mapped_column(JSON, default=list)
+    boundary_radius_km: Mapped[float | None] = mapped_column(Float, nullable=True)
+    geography_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    geography_dataset_version: Mapped[str | None] = mapped_column(String(80), nullable=True)
     provider_location_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     provider_location_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     resolution_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
@@ -109,6 +119,13 @@ class ScanRunORM(TimestampMixin, Base):
 
 class ScanPlanCallORM(TimestampMixin, Base):
     __tablename__ = "scan_plan_calls"
+    __table_args__ = (
+        UniqueConstraint(
+            "scan_run_id",
+            "planned_request_id",
+            name="uq_scan_plan_calls_scan_planned_request",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id"))
@@ -149,6 +166,13 @@ class RawApiResponseORM(TimestampMixin, Base):
 
 class ApiCallORM(TimestampMixin, Base):
     __tablename__ = "api_calls"
+    __table_args__ = (
+        UniqueConstraint(
+            "scan_run_id",
+            "planned_request_id",
+            name="uq_api_calls_scan_planned_request",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     scan_run_id: Mapped[int | None] = mapped_column(ForeignKey("scan_runs.id"), nullable=True)
