@@ -27,6 +27,12 @@ class KeywordDecision:
     reason: str | None = None
     rank: int | None = None
     representative: bool = False
+    cluster_id: str | None = None
+    intent: str | None = None
+    search_volume: int | None = None
+    cpc: float | None = None
+    granularity: str | None = None
+    ranking_score: float | None = None
 
 
 @dataclass(frozen=True)
@@ -87,7 +93,7 @@ def plan_keyword_candidates(
                 )
             )
             decisions.append(
-                KeywordDecision(candidate.keyword, canonical, "excluded", "empty_keyword")
+                KeywordDecision(candidate.keyword, canonical, "excluded_negative", "empty_keyword")
             )
             continue
         negative = _matching_negative(canonical, negatives)
@@ -98,7 +104,12 @@ def plan_keyword_candidates(
                 )
             )
             decisions.append(
-                KeywordDecision(candidate.keyword, canonical, "excluded", f"negative_term:{negative}")
+                KeywordDecision(
+                    candidate.keyword,
+                    canonical,
+                    "excluded_negative",
+                    f"negative_term:{negative}",
+                )
             )
             continue
         if canonical in seen:
@@ -108,12 +119,12 @@ def plan_keyword_candidates(
                 )
             )
             decisions.append(
-                KeywordDecision(candidate.keyword, canonical, "excluded", "duplicate_exact")
+                KeywordDecision(candidate.keyword, canonical, "excluded_duplicate", "duplicate_exact")
             )
             continue
         seen.add(canonical)
         output.append(candidate.model_copy(update={"included": True, "excluded_reason": None}))
-        decisions.append(KeywordDecision(candidate.keyword, canonical, "included", "candidate"))
+        decisions.append(KeywordDecision(candidate.keyword, canonical, "candidate", "included_candidate"))
 
     included_keywords = [candidate.keyword for candidate in output if candidate.included]
     return KeywordCandidatePlan(output, included_keywords, decisions)
@@ -168,12 +179,19 @@ def rank_and_cluster_keyword_metrics(
                     }
                 )
             )
+            duplicate_score = _metric_value_score(duplicate, service, market)
             decisions.append(
                 KeywordDecision(
                     keyword=duplicate.keyword,
                     canonical_keyword=_normalize_keyword(duplicate.canonical_keyword),
-                    decision="grouped",
+                    decision="grouped_variant",
                     reason=f"grouped_with:{representative.keyword}",
+                    cluster_id=_cluster_id(representative.keyword),
+                    intent=duplicate.intent,
+                    search_volume=duplicate.search_volume,
+                    cpc=duplicate.cpc,
+                    granularity=duplicate.market_granularity,
+                    ranking_score=round(duplicate_score, 2),
                 )
             )
 
@@ -188,14 +206,21 @@ def rank_and_cluster_keyword_metrics(
     for rank, metric in enumerate(ranked_scoring, start=1):
         is_representative = metric.keyword in selected_keywords
         ranked_metrics.append(metric.model_copy(update={"included": True}))
+        score = _metric_value_score(metric, service, market)
         decisions.append(
             KeywordDecision(
                 keyword=metric.keyword,
                 canonical_keyword=_normalize_keyword(metric.canonical_keyword),
-                decision="selected_for_serp" if is_representative else "included",
+                decision="representative" if is_representative else "included_scoring",
                 reason=_decision_reason(metric, service, market),
                 rank=rank,
                 representative=is_representative,
+                cluster_id=_cluster_id(metric.keyword),
+                intent=metric.intent,
+                search_volume=metric.search_volume,
+                cpc=metric.cpc,
+                granularity=metric.market_granularity,
+                ranking_score=round(score, 2),
             )
         )
 
@@ -305,3 +330,7 @@ def _decision_reason(metric: KeywordMetric, service: ServiceFamily, market: Mark
         f"value_score:{score:.1f}; intent:{metric.intent}; "
         f"cpc:{metric.cpc or 0}; volume:{metric.search_volume or 0}"
     )
+
+
+def _cluster_id(keyword: str) -> str:
+    return f"kw:{slugify(keyword)}"

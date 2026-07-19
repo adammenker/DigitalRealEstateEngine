@@ -204,10 +204,10 @@ def test_stronger_local_competitors_do_not_improve_organic_score() -> None:
         [_provider()],
     )
 
-    assert strong.component_scores["organic_accessibility"] <= weak.component_scores["organic_accessibility"]
+    assert strong.component_scores["competitor_weakness"] <= weak.component_scores["competitor_weakness"]
 
 
-def test_local_pack_and_ads_do_not_improve_serp_accessibility() -> None:
+def test_local_pack_and_ads_do_not_improve_click_availability() -> None:
     scorer = OpportunityScorer()
     base = scorer.score([_metric()], [_snapshot()], [], [_provider()])
     displaced = scorer.score(
@@ -217,7 +217,7 @@ def test_local_pack_and_ads_do_not_improve_serp_accessibility() -> None:
         [_provider()],
     )
 
-    assert displaced.component_scores["serp_accessibility"] <= base.component_scores["serp_accessibility"]
+    assert displaced.component_scores["organic_click_availability"] <= base.component_scores["organic_click_availability"]
 
 
 def test_missing_competitor_metrics_prevents_high_confidence() -> None:
@@ -235,6 +235,6 @@ def test_country_level_keyword_volume_is_labeled_as_national_demand() -> None:
     score = OpportunityScorer().score([metric], [_snapshot()], [], [_provider()])
 
     assert score.input_measurements["keyword_metric_granularities"] == ["country"]
-    assert score.input_measurements["raw_national_service_demand"] == 100
+    assert score.input_measurements["national_service_demand"] == 100
     assert score.input_measurements["estimated_market_demand"] is None
-    assert "country granularity" in score.assumptions[0]
+    assert "national granularity" in score.assumptions[0]

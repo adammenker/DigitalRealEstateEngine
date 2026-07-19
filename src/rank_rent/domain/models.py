@@ -28,6 +28,7 @@ class Confidence(StrEnum):
     high = "high"
     medium = "medium"
     low = "low"
+    insufficient = "insufficient"
 
 
 class AvailabilityStatus(StrEnum):
@@ -120,6 +121,12 @@ class SerpResult(BaseModel):
     is_directory: bool = False
     is_national_brand: bool = False
     is_lead_generation_site: bool = False
+    classification_confidence: float | None = None
+    classifier_version: str = "v2"
+    matched_rules: list[str] = Field(default_factory=list)
+    classification_evidence: dict[str, Any] = Field(default_factory=dict)
+    manual_override: str | None = None
+    override_reason: str | None = None
 
 
 class SerpSnapshot(BaseModel):
@@ -141,6 +148,7 @@ class CompetitorMetric(BaseModel):
     page_relevance_score: float | None = None
     local_relevance: float | None = None
     page_type: str = "unknown"
+    relevance_signals: dict[str, Any] = Field(default_factory=dict)
     captured_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -160,6 +168,8 @@ class ProviderCandidate(BaseModel):
     source: str = "fixture"
     raw_response_ref: str | None = None
     outreach_status: str = "not_contacted"
+    suitability_score: float | None = None
+    suitability_reasons: list[str] = Field(default_factory=list)
 
 
 class DomainAvailabilityResult(BaseModel):
@@ -188,8 +198,10 @@ class OpportunityScore(BaseModel):
     input_measurements: dict[str, Any]
     missing_data_penalties: dict[str, float]
     scoring_version: str
+    scoring_config_hash: str | None = None
     explanation: str
     confidence: Confidence
+    component_explanations: dict[str, str] = Field(default_factory=dict)
     missing_fields: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))

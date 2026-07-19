@@ -17,10 +17,12 @@ from rank_rent.integrations.dataforseo.live import (
 )
 from rank_rent.runtime import DataMode
 from rank_rent.services.cache import cache_key, normalize_request
+from rank_rent.services.keywords import service_seed_keywords
 from rank_rent.settings import Settings
 
 
 class PlannedApiCall(BaseModel):
+    planned_request_id: str
     provider: str
     endpoint: str
     request_parameters: dict[str, Any]
@@ -231,8 +233,10 @@ def _append_call(
     normalized = normalize_request(params)
     key = cache_key(provider, endpoint, normalized, "v3")
     hit = _cache_hit(session, key) if request_known else False
+    request_id = f"req-{len(planned) + 1:03d}"
     planned.append(
         PlannedApiCall(
+            planned_request_id=request_id,
             provider=provider,
             endpoint=endpoint,
             request_parameters=normalized,
@@ -253,15 +257,7 @@ def _cache_hit(session: Session | None, key: str) -> bool:
 
 
 def _keyword_seeds(service: ServiceFamily) -> list[str]:
-    base = service.display_name.lower()
-    seeds = list(service.seed_queries or [])
-    seeds.extend([f"{base} contractor", f"{base} repair", f"{base} installation", base])
-    deduped: list[str] = []
-    for seed in seeds:
-        normalized = " ".join(seed.lower().split())
-        if normalized and normalized not in deduped:
-            deduped.append(normalized)
-    return deduped or [base]
+    return service_seed_keywords(service)
 
 
 def _location_payload(market: Market) -> dict[str, Any]:

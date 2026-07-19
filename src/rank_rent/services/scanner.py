@@ -8,9 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from rank_rent.db.orm import (
+    ApiCallORM,
     FullOpportunityScoreORM,
     PreliminaryAssessmentORM,
-    RawApiResponseORM,
     ScanRunORM,
     ScoreComponentORM,
 )
@@ -31,6 +31,8 @@ from rank_rent.repositories import (
 from rank_rent.runtime import DataMode, resolve_data_mode
 from rank_rent.scoring.score import OpportunityScorer
 from rank_rent.scoring.serp import classify_result
+from rank_rent.services.competitors import enrich_competitors
+from rank_rent.services.discovery_report import build_discovery_report
 from rank_rent.services.domains import generate_domain_candidates
 from rank_rent.services.keywords import (
     plan_keyword_candidates,
@@ -38,6 +40,7 @@ from rank_rent.services.keywords import (
     service_keyword_terms,
 )
 from rank_rent.services.outreach import generate_initial_email
+from rank_rent.services.providers import score_provider_suitability
 from rank_rent.services.records import save_scan_plan_calls, save_scan_records
 from rank_rent.settings import get_settings
 from rank_rent.site_generator.generator import build_site_config, generate_static_site
@@ -112,7 +115,7 @@ class ScanPipeline:
                 and not market.provider_location_name
             ):
                 self._ensure_not_cancelled(scan)
-                scan.progress_stage = "resolving_location"
+                self._set_stage(scan, "resolving_location")
                 market = (await self.research_provider.resolve_location(market.display_name)).market
                 market_row = upsert_market(self.session, market)
                 opportunity = get_or_create_opportunity(self.session, service_row, market_row)
@@ -128,13 +131,13 @@ class ScanPipeline:
                     },
                 }
             self._ensure_not_cancelled(scan)
-            scan.progress_stage = "discovering_keywords"
+            self._set_stage(scan, "discovering_keywords")
             candidates = await self.research_provider.discover_keywords(service, market)
             _, negative_terms = service_keyword_terms(service)
             keyword_candidates = plan_keyword_candidates(candidates, negative_terms)
             included_keywords = keyword_candidates.included_keywords
             self._ensure_not_cancelled(scan)
-            scan.progress_stage = "fetching_metrics"
+            self._set_stage(scan, "fetching_metrics")
             raw_metrics = await self.research_provider.get_keyword_metrics(included_keywords, market)
             keyword_metrics = rank_and_cluster_keyword_metrics(
                 raw_metrics,
@@ -147,7 +150,7 @@ class ScanPipeline:
             representative = keyword_metrics.selected_serp_keywords
             serp_snapshots = []
             self._ensure_not_cancelled(scan)
-            scan.progress_stage = "fetching_serps"
+            self._set_stage(scan, "fetching_serps")
             for keyword in representative:
                 self._ensure_not_cancelled(scan)
                 snapshot = await self.research_provider.get_serp_snapshot(keyword, market)
@@ -157,18 +160,29 @@ class ScanPipeline:
                 r.url for s in serp_snapshots for r in s.results if r.result_type == "organic"
             ][: self.backlink_competitor_limit]
             self._ensure_not_cancelled(scan)
-            scan.progress_stage = "fetching_competitors"
-            competitors = (
+            self._set_stage(scan, "fetching_competitors")
+            raw_competitors = (
                 await self.research_provider.get_competitor_metrics(competitor_urls)
                 if competitor_urls
                 else []
             )
+            competitors = enrich_competitors(raw_competitors, serp_snapshots, service, market)
             self._ensure_not_cancelled(scan)
-            scan.progress_stage = "fetching_providers"
-            providers = await self.research_provider.find_providers(service, market)
+            self._set_stage(scan, "fetching_providers")
+            providers = score_provider_suitability(
+                await self.research_provider.find_providers(service, market),
+                service,
+                market,
+            )
             self._ensure_not_cancelled(scan)
-            scan.progress_stage = "scoring"
-            score = self.scorer.score(keyword_metrics.scoring_metrics, serp_snapshots, competitors, providers)
+            self._set_stage(scan, "scoring")
+            score = self.scorer.score(
+                keyword_metrics.scoring_metrics,
+                serp_snapshots,
+                competitors,
+                providers,
+                market,
+            )
             is_preliminary = self.is_preliminary_assessment
             save_scan_records(
                 self.session,
@@ -197,6 +211,29 @@ class ScanPipeline:
             site_config = build_site_config(service, market, domains[0].domain if domains else None) if build_site else None
             site_path: Path | None = generate_static_site(site_config) if build_site and site_config else None
 
+            scan_metadata = {
+                "scan_run_id": scan.id,
+                "data_mode": self.data_mode.value,
+                "scan_profile": scan.scan_profile,
+                "planned_cost_usd": scan.planned_cost_usd,
+                "estimated_paid_api_calls": self.estimated_paid_api_calls,
+                "started_at": scan.started_at.isoformat() if scan.started_at else None,
+                "adapter_names": scan.adapter_names,
+                "adapter_versions": scan.adapter_versions,
+                "normalization_version": scan.normalization_version,
+                "cache_policy_version": scan.cache_policy_version,
+            }
+            discovery_report = build_discovery_report(
+                service=service,
+                market=market,
+                metrics=keyword_metrics.scoring_metrics,
+                serp_snapshots=serp_snapshots,
+                competitors=competitors,
+                providers=providers,
+                score=score,
+                scan_metadata=scan_metadata,
+            )
+
             save_artifact(
                 self.session,
                 opportunity.id,
@@ -223,8 +260,10 @@ class ScanPipeline:
                     "competitors": [c.model_dump(mode="json") for c in competitors],
                     "providers": [p.model_dump(mode="json") for p in providers],
                     "score": score.model_dump(mode="json"),
+                    "discovery_report": discovery_report,
                 },
             )
+            save_artifact(self.session, opportunity.id, "discovery_report", discovery_report)
             self._save_assessment_records(scan, opportunity.id, score, is_preliminary)
             if build_site and site_config:
                 save_artifact(
@@ -256,7 +295,7 @@ class ScanPipeline:
             scan.status = "completed"
             scan.progress_stage = "completed"
             scan.completed_at = datetime.now(UTC)
-            scan.actual_cost_usd = self._actual_api_cost_between(scan.started_at, scan.completed_at)
+            scan.actual_cost_usd = self._actual_api_cost_for_scan(scan.id)
             scan.scoring_version = score.scoring_version
             self.session.commit()
             return {
@@ -274,7 +313,7 @@ class ScanPipeline:
             scan.status = "cancelled"
             scan.progress_stage = "cancelled"
             scan.completed_at = datetime.now(UTC)
-            scan.actual_cost_usd = self._actual_api_cost_between(scan.started_at, scan.completed_at)
+            scan.actual_cost_usd = self._actual_api_cost_for_scan(scan.id)
             scan.partial_outputs = {
                 **(scan.partial_outputs or {}),
                 "cancelled": True,
@@ -282,15 +321,16 @@ class ScanPipeline:
             self.session.commit()
             raise
         except Exception as exc:
+            failed_stage = scan.progress_stage
             scan.status = "failed"
             scan.progress_stage = "failed"
             scan.error_summary = str(exc)
             scan.completed_at = datetime.now(UTC)
-            scan.actual_cost_usd = self._actual_api_cost_between(scan.started_at, scan.completed_at)
+            scan.actual_cost_usd = self._actual_api_cost_for_scan(scan.id)
             opportunity.status = "scan_failed"
             scan.partial_outputs = {
                 **(scan.partial_outputs or {}),
-                "failed_stage": scan.progress_stage,
+                "failed_stage": failed_stage,
                 "error": str(exc),
             }
             self.session.commit()
@@ -362,6 +402,14 @@ class ScanPipeline:
         self.session.refresh(scan)
         if scan.cancel_requested:
             raise ScanCancelled(f"Scan {scan.id} was cancelled.")
+
+    def _set_stage(self, scan: ScanRunORM, stage: str) -> None:
+        scan.progress_stage = stage
+        scan.partial_outputs = {
+            **(scan.partial_outputs or {}),
+            "last_successful_stage": stage,
+        }
+        self.session.commit()
 
     def _save_assessment_records(
         self,
@@ -469,22 +517,15 @@ class ScanPipeline:
     def additional_calls_required_for_full_scan(self) -> int:
         return 7 if self.is_preliminary_assessment else 0
 
-    def _actual_api_cost_between(
-        self,
-        started_at: datetime | None,
-        completed_at: datetime | None,
-    ) -> float:
-        if self.data_mode != DataMode.live or started_at is None:
+    def _actual_api_cost_for_scan(self, scan_run_id: int | None) -> float:
+        if self.data_mode != DataMode.live or scan_run_id is None:
             return 0.0
         total = 0.0
-        upper_bound = completed_at or datetime.now(UTC)
         rows = self.session.scalars(
-            select(RawApiResponseORM)
-            .where(RawApiResponseORM.response_time >= started_at)
-            .where(RawApiResponseORM.response_time <= upper_bound)
+            select(ApiCallORM).where(ApiCallORM.scan_run_id == scan_run_id)
         ).all()
         for row in rows:
-            total += row.cost_usd or 0.0
+            total += row.actual_cost_usd or 0.0
         return round(total, 6)
 
 

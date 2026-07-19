@@ -94,6 +94,12 @@ h1 {
   flex-wrap: wrap;
 }
 
+.heroActions {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+}
+
 .ghostButton,
 .primaryButton {
   min-height: 40px;

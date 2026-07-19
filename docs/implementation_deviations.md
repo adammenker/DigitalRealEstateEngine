@@ -22,13 +22,14 @@ The steering document is a multi-milestone remediation plan. This implementation
   and representative SERP selection;
 - database-backed queued scan jobs with status, cancellation, retry, atomic claim, heartbeat,
   and stale-worker recovery;
+- discovery completion with scoring `v2`, demand modeling, SERP classification evidence,
+  competitor relevance, provider suitability, no-cost rescoring, and comparison/report APIs;
 - API/UI data-mode exposure, fixture-data banner, cost confirmation, and recent scan status;
 - Milestone 0 verification command and current-state documentation.
 
 The following later milestones are not complete yet:
 
 - full real qualification framework;
-- full scoring rewrite beyond the V1 close-variant demand and keyword-selection fixes;
 - external queue workers beyond the V1 in-process database worker;
 - approval-gated site generation;
 - registrar-grade domain availability;
@@ -44,8 +45,8 @@ The offline remediation specification is intentionally broad. This implementatio
 - scan planning uses maintained endpoint estimates rather than provider price-table extraction;
 - async scans use an in-process database-backed worker; an external queue service remains deferred;
 - geographic resolution still uses the existing market model plus limited offline coordinates rather than a complete U.S. city/ZIP dataset;
-- scoring remains version `v1` with targeted live/preliminary labeling, close-variant demand
-  deduping, and representative keyword selection rather than a full version-2 scoring rewrite;
+- scoring is now version `v2`; remaining scoring work is real-market calibration after production
+  DataForSEO evidence exists;
 - migrations are restored, but migration coverage is currently an upgrade-head smoke test rather than a large populated historical fixture matrix.
 
 ## Data Mode Persistence

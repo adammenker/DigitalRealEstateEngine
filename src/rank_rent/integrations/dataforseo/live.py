@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from typing import Any, cast
 from urllib.parse import urlparse
 
 import httpx
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from rank_rent.db.orm import ApiCallORM, RawApiResponseORM, ScanRunORM
 from rank_rent.domain.models import (
     CompetitorMetric,
     KeywordCandidate,
@@ -21,7 +24,7 @@ from rank_rent.domain.models import (
     slugify,
 )
 from rank_rent.runtime import DataMode, validate_runtime_mode
-from rank_rent.services.cache import RawResponseCache, normalize_request
+from rank_rent.services.cache import RawResponseCache, cache_key, normalize_request
 from rank_rent.services.keywords import service_seed_keywords
 from rank_rent.settings import Settings, get_settings
 
@@ -136,6 +139,7 @@ class DataForSEOLiveProvider:
         self.provider_name = dataforseo_provider_name(self.settings)
         self.base_url = dataforseo_base_url(self.settings)
         self.timeout_seconds = timeout_seconds
+        self.session = session
         self.cache = RawResponseCache(session, self.provider_name, self.api_version) if session else None
         self.force_refresh = force_refresh
         self.current_scan_run_id: int | None = None
@@ -402,30 +406,54 @@ class DataForSEOLiveProvider:
         return 5 if self.scan_depth == "testing" else 10
 
     async def _get(self, path: str) -> dict[str, Any]:
-        cached = self._cache_get(path, {})
-        if cached is not None:
-            return cached
-        async with self._client() as client:
-            response = await client.get(path)
-        payload = self._parse_response(response)
-        self._cache_set(path, {}, payload, status_code=response.status_code)
-        return payload
+        return await self._request("GET", path, {})
 
     async def _post(self, path: str, tasks: list[dict[str, Any]]) -> dict[str, Any]:
         params = {"tasks": tasks}
-        cached = self._cache_get(path, params)
-        if cached is not None:
-            return cached
-        async with self._client() as client:
-            response = await client.post(path, json=tasks)
-        payload = self._parse_response(response)
-        self._cache_set(path, params, payload, status_code=response.status_code)
+        return await self._request("POST", path, params)
+
+    async def _request(self, method: str, path: str, params: dict[str, Any]) -> dict[str, Any]:
+        normalized = normalize_request(params)
+        cached_payload = self._cache_get(path, normalized)
+        row = self._cache_row(path, normalized)
+        if cached_payload is not None and row is not None and not self.force_refresh:
+            self._record_cache_hit(path, normalized, row)
+            return cached_payload
+
+        api_call = self._start_api_call(path, normalized)
+        try:
+            async with self._client() as client:
+                if method == "GET":
+                    response = await client.get(path)
+                else:
+                    tasks = cast(list[dict[str, Any]], normalized.get("tasks") or [])
+                    response = await client.post(path, json=tasks)
+            payload = self._parse_response(response)
+        except Exception as exc:
+            self._finish_api_call(api_call, status="failed", error=exc)
+            raise
+
+        key = self._cache_set(path, normalized, payload, status_code=response.status_code)
+        cached_row = self._cache_row(path, normalized)
+        self._finish_api_call(
+            api_call,
+            status="completed",
+            payload=payload,
+            raw_response_id=cached_row.id if cached_row else None,
+            cache_key_override=key,
+        )
         return payload
 
     def _cache_get(self, path: str, params: dict[str, Any]) -> dict[str, Any] | None:
-        if self.cache is None or self.force_refresh:
+        row = self._cache_row(path, normalize_request(params))
+        if row is None or self.force_refresh:
             return None
-        return self.cache.get(path, normalize_request(params))
+        return row.response_json
+
+    def _cache_row(self, path: str, params: dict[str, Any]) -> RawApiResponseORM | None:
+        if self.cache is None:
+            return None
+        return self.cache.get_row(path, normalize_request(params))
 
     def _cache_set(
         self,
@@ -434,16 +462,16 @@ class DataForSEOLiveProvider:
         payload: dict[str, Any],
         *,
         status_code: int,
-    ) -> None:
+    ) -> str:
         if self.cache is None:
-            return
+            return self._cache_key(path, params)
         task = self._first_task(payload) if payload.get("tasks") else {}
         cost = 0.0 if self.api_environment == "sandbox" else self._to_float(task.get("cost")) or 0.0
         task_id = self._clean_optional_str(task.get("id"))
         request_id = self._clean_optional_str(
             payload.get("request_id") or payload.get("id") or task.get("request_id")
         )
-        self.cache.set(
+        return self.cache.set(
             path,
             normalize_request(params),
             payload,
@@ -453,6 +481,141 @@ class DataForSEOLiveProvider:
             provider_request_id=request_id,
             source_scan_run_id=self.current_scan_run_id,
         )
+
+    def _start_api_call(self, path: str, params: dict[str, Any]) -> ApiCallORM | None:
+        if self.session is None:
+            return None
+        plan = self._planned_call(path)
+        now = datetime.now(UTC)
+        row = ApiCallORM(
+            scan_run_id=self.current_scan_run_id,
+            planned_request_id=plan.get("planned_request_id"),
+            provider=self.provider_name,
+            endpoint=path,
+            stage=str(plan.get("stage") or self._stage_for_endpoint(path)),
+            cache_key=self._cache_key(path, params),
+            cache_hit=False,
+            force_refresh=self.force_refresh,
+            estimated_cost_usd=float(plan.get("estimated_cost_usd") or 0),
+            actual_cost_usd=0,
+            status="running",
+            started_at=now,
+        )
+        self.session.add(row)
+        if self.session is not None:
+            self.session.flush()
+        return row
+
+    def _finish_api_call(
+        self,
+        row: ApiCallORM | None,
+        *,
+        status: str,
+        payload: dict[str, Any] | None = None,
+        raw_response_id: int | None = None,
+        cache_key_override: str | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        if row is None:
+            return
+        row.status = status
+        row.completed_at = datetime.now(UTC)
+        if cache_key_override:
+            row.cache_key = cache_key_override
+        if raw_response_id is not None:
+            row.raw_api_response_id = raw_response_id
+        if payload is not None:
+            task = self._first_task(payload) if payload.get("tasks") else {}
+            row.actual_cost_usd = (
+                0.0 if self.api_environment == "sandbox" else self._to_float(task.get("cost")) or 0.0
+            )
+            row.provider_task_id = self._clean_optional_str(task.get("id"))
+            row.provider_request_id = self._clean_optional_str(
+                payload.get("request_id") or payload.get("id") or task.get("request_id")
+            )
+        if error is not None:
+            row.error_type = type(error).__name__
+            row.error_summary = str(error)
+        if self.session is not None:
+            self.session.flush()
+
+    def _record_cache_hit(
+        self,
+        path: str,
+        params: dict[str, Any],
+        raw_response: RawApiResponseORM,
+    ) -> None:
+        if self.session is None:
+            return
+        plan = self._planned_call(path)
+        now = datetime.now(UTC)
+        self.session.add(
+            ApiCallORM(
+                scan_run_id=self.current_scan_run_id,
+                planned_request_id=plan.get("planned_request_id"),
+                raw_api_response_id=raw_response.id,
+                provider=self.provider_name,
+                endpoint=path,
+                stage=str(plan.get("stage") or self._stage_for_endpoint(path)),
+                cache_key=raw_response.cache_key,
+                cache_hit=True,
+                force_refresh=False,
+                estimated_cost_usd=float(plan.get("estimated_cost_usd") or 0),
+                actual_cost_usd=0,
+                status="cache_hit",
+                started_at=now,
+                completed_at=now,
+                provider_task_id=raw_response.provider_task_id,
+                provider_request_id=raw_response.provider_request_id,
+            )
+        )
+        self.session.flush()
+
+    def _planned_call(self, path: str) -> dict[str, Any]:
+        if self.session is None or self.current_scan_run_id is None:
+            return {}
+        scan = self.session.get(ScanRunORM, self.current_scan_run_id)
+        if scan is None:
+            return {}
+        calls = (scan.request_parameters or {}).get("scan_plan", {}).get("planned_calls", [])
+        if not isinstance(calls, list):
+            return {}
+        completed_for_endpoint = len(
+            self.session.scalars(
+                select(ApiCallORM.id).where(
+                    ApiCallORM.scan_run_id == self.current_scan_run_id,
+                    ApiCallORM.endpoint == path,
+                )
+            ).all()
+        )
+        matching = [call for call in calls if isinstance(call, dict) and call.get("endpoint") == path]
+        if matching:
+            return cast(dict[str, Any], matching[min(completed_for_endpoint, len(matching) - 1)])
+        return {}
+
+    def _cache_key(self, path: str, params: dict[str, Any]) -> str:
+        return cache_key(
+            self.provider_name,
+            path,
+            normalize_request(params),
+            self.api_version,
+            self.response_shape_version,
+        )
+
+    def _stage_for_endpoint(self, path: str) -> str:
+        if "locations" in path:
+            return "location_resolution"
+        if "keyword_suggestions" in path:
+            return "keyword_discovery"
+        if "historical_search_volume" in path:
+            return "keyword_metrics"
+        if "/serp/" in path:
+            return "serp"
+        if "backlinks" in path:
+            return "competitors"
+        if "business_listings" in path:
+            return "provider_discovery"
+        return "unknown"
 
     def _client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(

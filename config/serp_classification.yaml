@@ -1,0 +1,60 @@
+version: "v2"
+rules:
+  - id: directory_known_domain
+    classification: directory
+    confidence: 0.96
+    domains:
+      - yelp.com
+      - angi.com
+      - homeadvisor.com
+      - thumbtack.com
+      - houzz.com
+      - porch.com
+  - id: marketplace_known_domain
+    classification: marketplace
+    confidence: 0.94
+    domains:
+      - thumbtack.com
+      - taskrabbit.com
+  - id: national_brand_known_domain
+    classification: national_brand
+    confidence: 0.94
+    domains:
+      - homedepot.com
+      - lowes.com
+      - acehardware.com
+  - id: government_or_nonprofit_domain
+    classification: government_or_nonprofit
+    confidence: 0.9
+    domain_suffixes:
+      - .gov
+      - .org
+  - id: lead_generator_language
+    classification: lead_generator
+    confidence: 0.78
+    text_contains:
+      - get quotes
+      - compare quotes
+      - free quote
+      - referral
+      - matched with
+      - near-me
+  - id: informational_language
+    classification: informational_publisher
+    confidence: 0.72
+    text_contains:
+      - how to
+      - guide
+      - cost guide
+      - diy
+      - average cost
+  - id: local_provider_language
+    classification: local_provider
+    confidence: 0.68
+    text_contains:
+      - repair
+      - service
+      - installation
+      - contractor
+      - emergency
+      - locally owned

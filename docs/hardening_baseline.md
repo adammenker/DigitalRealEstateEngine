@@ -49,7 +49,7 @@ It runs Ruff, mypy, pytest, frontend production build with `npm ci`, and Docker 
 ## Known Baseline Gaps
 
 - Full live qualification is not implemented.
-- Scoring is still version `v1`; the full scoring rewrite is documented as a remaining deviation.
+- Scoring was version `v1` at this baseline. Discovery completion has since moved scoring to `v2`.
 - Offline geography is limited to existing model fields and a small coordinate lookup.
 - Async jobs are in-process and not a durable external worker queue.
 - Site/deployment hardening remains approval-gated future work.

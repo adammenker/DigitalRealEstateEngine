@@ -44,6 +44,7 @@ def save_scan_plan_calls(session: Session, scan_run_id: int, plan: ScanPlan) -> 
         session.add(
             ScanPlanCallORM(
                 scan_run_id=scan_run_id,
+                planned_request_id=call.planned_request_id,
                 provider=call.provider,
                 endpoint=call.endpoint,
                 stage=call.stage,
@@ -91,6 +92,12 @@ def save_scan_records(
                 reason=decision.reason,
                 rank=decision.rank,
                 representative=decision.representative,
+                cluster_id=decision.cluster_id,
+                intent=decision.intent,
+                search_volume=decision.search_volume,
+                cpc=decision.cpc,
+                granularity=decision.granularity,
+                ranking_score=decision.ranking_score,
             )
         )
     for metric in metrics:
@@ -141,6 +148,12 @@ def save_scan_records(
                     is_directory=result.is_directory,
                     is_national_brand=result.is_national_brand,
                     is_lead_generation_site=result.is_lead_generation_site,
+                    classification_confidence=result.classification_confidence,
+                    classifier_version=result.classifier_version,
+                    matched_rules=result.matched_rules,
+                    classification_evidence=result.classification_evidence,
+                    manual_override=result.manual_override,
+                    override_reason=result.override_reason,
                 )
             )
 
@@ -157,6 +170,7 @@ def save_scan_records(
                 page_relevance_score=competitor.page_relevance_score,
                 local_relevance=competitor.local_relevance,
                 page_type=competitor.page_type,
+                relevance_signals=competitor.relevance_signals,
                 captured_at=competitor.captured_at,
             )
         )
@@ -181,6 +195,8 @@ def save_scan_records(
                 source=provider.source,
                 raw_response_ref=provider.raw_response_ref,
                 outreach_status=provider.outreach_status,
+                suitability_score=provider.suitability_score,
+                suitability_reasons=provider.suitability_reasons,
             )
         )
     session.flush()

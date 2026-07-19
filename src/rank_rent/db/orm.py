@@ -112,6 +112,7 @@ class ScanPlanCallORM(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id"))
+    planned_request_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     provider: Mapped[str] = mapped_column(String(80))
     endpoint: Mapped[str] = mapped_column(String(160))
     stage: Mapped[str] = mapped_column(String(80))
@@ -151,6 +152,7 @@ class ApiCallORM(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     scan_run_id: Mapped[int | None] = mapped_column(ForeignKey("scan_runs.id"), nullable=True)
+    planned_request_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     raw_api_response_id: Mapped[int | None] = mapped_column(
         ForeignKey("raw_api_responses.id"), nullable=True
     )
@@ -163,7 +165,12 @@ class ApiCallORM(TimestampMixin, Base):
     estimated_cost_usd: Mapped[float] = mapped_column(Float, default=0)
     actual_cost_usd: Mapped[float] = mapped_column(Float, default=0)
     status: Mapped[str] = mapped_column(String(80), default="planned")
+    error_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
     error_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    provider_task_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    provider_request_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
 
 class ScanPlanORM(TimestampMixin, Base):
@@ -203,6 +210,12 @@ class KeywordDecisionORM(TimestampMixin, Base):
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
     representative: Mapped[bool] = mapped_column(Boolean, default=False)
+    cluster_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    intent: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    search_volume: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cpc: Mapped[float | None] = mapped_column(Float, nullable=True)
+    granularity: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    ranking_score: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class JsonArtifactORM(TimestampMixin, Base):
@@ -264,6 +277,12 @@ class SerpResultORM(TimestampMixin, Base):
     is_directory: Mapped[bool] = mapped_column(Boolean, default=False)
     is_national_brand: Mapped[bool] = mapped_column(Boolean, default=False)
     is_lead_generation_site: Mapped[bool] = mapped_column(Boolean, default=False)
+    classification_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    classifier_version: Mapped[str] = mapped_column(String(40), default="v2")
+    matched_rules: Mapped[list[str]] = mapped_column(JSON, default=list)
+    classification_evidence: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    manual_override: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    override_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class CompetitorMetricORM(TimestampMixin, Base):
@@ -280,6 +299,7 @@ class CompetitorMetricORM(TimestampMixin, Base):
     page_relevance_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     local_relevance: Mapped[float | None] = mapped_column(Float, nullable=True)
     page_type: Mapped[str] = mapped_column(String(80))
+    relevance_signals: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -304,6 +324,8 @@ class ProviderCandidateORM(TimestampMixin, Base):
     source: Mapped[str] = mapped_column(String(120))
     raw_response_ref: Mapped[str | None] = mapped_column(String(160), nullable=True)
     outreach_status: Mapped[str] = mapped_column(String(80))
+    suitability_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    suitability_reasons: Mapped[list[str]] = mapped_column(JSON, default=list)
 
 
 class PreliminaryAssessmentORM(TimestampMixin, Base):

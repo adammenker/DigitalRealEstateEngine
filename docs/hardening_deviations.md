@@ -19,10 +19,13 @@ This file records intentional deviations from `specs/DigitalRealEstateEngine_V1_
 
 ## Deferred
 
-- The full scoring rewrite remains deferred; current scoring is still `v1`, now with
-  close-variant deduped demand inputs and existing directionality tests.
+- The full scoring rewrite is no longer deferred. Discovery completion implements scoring `v2`
+  with demand evidence, commercial value, competitor weakness, organic click availability,
+  provider suitability, and data completeness.
 - Offline geographic resolution is not a complete U.S. city/ZIP/county dataset yet.
-- Demand granularity is partially represented through metric granularity fields, but full national-versus-local estimation models are deferred.
+- Demand granularity is represented in scoring/reporting. Local demand estimation is deliberately
+  conservative and only uses transparent provider-local volume or population-share estimation
+  when population metadata exists.
 - Qualification harness is still a smoke/fixture/replay foundation rather than a complete capability matrix.
 - A separate external queue service is deferred; V1 intentionally uses the backend process worker.
 - Site generator hardening is deferred beyond preserving the existing workflow separation.

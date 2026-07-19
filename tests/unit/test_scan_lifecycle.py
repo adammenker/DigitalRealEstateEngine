@@ -191,7 +191,7 @@ def test_scan_reuses_queued_row_and_writes_typed_records(monkeypatch) -> None:
         assert scan.adapter_names["market_research"] == "minimal-test-provider"
         assert scan.cache_policy_version == "v2"
         assert scan.planned_cost_usd == scan.estimated_cost_usd
-        assert scan.scoring_version == "v1"
+        assert scan.scoring_version == "v2"
         assert len(session.scalars(select(ScanPlanCallORM)).all()) == 5
         assert len(session.scalars(select(KeywordClusterORM)).all()) == 1
         assert len(session.scalars(select(KeywordDecisionORM)).all()) >= 2

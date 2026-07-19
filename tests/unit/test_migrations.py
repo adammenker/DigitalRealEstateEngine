@@ -40,3 +40,19 @@ def test_alembic_upgrade_head_creates_v1_schema(tmp_path, monkeypatch) -> None:
     assert {"response_shape_version", "sanitized", "checksum", "expires_at"} <= response_columns
     service_columns = {column["name"] for column in inspector.get_columns("service_families")}
     assert {"intent_modifiers", "negative_product_terms"} <= service_columns
+    api_call_columns = {column["name"] for column in inspector.get_columns("api_calls")}
+    assert {
+        "planned_request_id",
+        "started_at",
+        "completed_at",
+        "provider_task_id",
+        "provider_request_id",
+        "error_type",
+    } <= api_call_columns
+    serp_columns = {column["name"] for column in inspector.get_columns("serp_results")}
+    assert {
+        "classification_confidence",
+        "classifier_version",
+        "matched_rules",
+        "classification_evidence",
+    } <= serp_columns

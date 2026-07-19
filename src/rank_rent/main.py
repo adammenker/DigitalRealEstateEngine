@@ -5,7 +5,7 @@ import logging
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from rank_rent.db.base import get_session, init_db
 from rank_rent.db.orm import (
+    ApiCallORM,
     CompetitorMetricORM,
     JsonArtifactORM,
     KeywordClusterORM,
@@ -29,12 +30,21 @@ from rank_rent.db.orm import (
     ScanRunORM,
     SerpSnapshotORM,
 )
-from rank_rent.domain.models import Market, ServiceFamily
+from rank_rent.domain.models import (
+    CompetitorMetric,
+    KeywordMetric,
+    Market,
+    ProviderCandidate,
+    SerpSnapshot,
+    ServiceFamily,
+)
 from rank_rent.integrations.dataforseo.live import DataForSEOError
 from rank_rent.planning import build_scan_plan
 from rank_rent.repositories import get_or_create_opportunity, upsert_market, upsert_service
 from rank_rent.runtime import resolve_data_mode, validate_runtime_mode
+from rank_rent.scoring.score import OpportunityScorer
 from rank_rent.services.data_audit import audit_data
+from rank_rent.services.discovery_report import build_discovery_report
 from rank_rent.services.keywords import (
     DEFAULT_AD_HOC_INTENT_MODIFIERS,
     DEFAULT_NEGATIVE_PRODUCT_TERMS,
@@ -198,6 +208,7 @@ def _scan_plan_call_rows(session: Session, scan_id: int) -> list[dict[str, Any]]
     ).all()
     return [
         {
+            "planned_request_id": row.planned_request_id,
             "provider": row.provider,
             "endpoint": row.endpoint,
             "stage": row.stage,
@@ -212,6 +223,33 @@ def _scan_plan_call_rows(session: Session, scan_id: int) -> list[dict[str, Any]]
     ]
 
 
+def _api_call_rows(session: Session, scan_id: int) -> list[dict[str, Any]]:
+    rows = session.scalars(
+        select(ApiCallORM).where(ApiCallORM.scan_run_id == scan_id).order_by(ApiCallORM.id)
+    ).all()
+    return [
+        {
+            "id": row.id,
+            "planned_request_id": row.planned_request_id,
+            "provider": row.provider,
+            "endpoint": row.endpoint,
+            "stage": row.stage,
+            "cache_hit": row.cache_hit,
+            "force_refresh": row.force_refresh,
+            "estimated_cost_usd": row.estimated_cost_usd,
+            "actual_cost_usd": row.actual_cost_usd,
+            "status": row.status,
+            "error_type": row.error_type,
+            "error_summary": row.error_summary,
+            "started_at": row.started_at.isoformat() if row.started_at else None,
+            "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+            "provider_task_id": row.provider_task_id,
+            "provider_request_id": row.provider_request_id,
+        }
+        for row in rows
+    ]
+
+
 def _artifact_data_mode(artifacts: Sequence[JsonArtifactORM]) -> str:
     for artifact in artifacts:
         if artifact.kind in {"scan_result", "preliminary_assessment"}:
@@ -219,6 +257,41 @@ def _artifact_data_mode(artifacts: Sequence[JsonArtifactORM]) -> str:
             if isinstance(mode, str):
                 return mode
     return validate_runtime_mode(get_settings()).value
+
+
+def _latest_artifact_payload(
+    session: Session, opportunity_id: int, kind: str
+) -> dict[str, Any] | None:
+    artifact = session.scalar(
+        select(JsonArtifactORM)
+        .where(JsonArtifactORM.opportunity_id == opportunity_id, JsonArtifactORM.kind == kind)
+        .order_by(JsonArtifactORM.id.desc())
+        .limit(1)
+    )
+    return artifact.payload if artifact else None
+
+
+def _latest_scan_payload(session: Session, opportunity_id: int) -> dict[str, Any] | None:
+    artifact = session.scalar(
+        select(JsonArtifactORM)
+        .where(
+            JsonArtifactORM.opportunity_id == opportunity_id,
+            JsonArtifactORM.kind.in_(["scan_result", "preliminary_assessment"]),
+        )
+        .order_by(JsonArtifactORM.id.desc())
+        .limit(1)
+    )
+    return artifact.payload if artifact else None
+
+
+def _latest_score_payload(session: Session, opportunity_id: int) -> dict[str, Any] | None:
+    payload = _latest_scan_payload(session, opportunity_id)
+    if payload and isinstance(payload.get("score"), dict):
+        return cast(dict[str, Any], payload["score"])
+    rescore = _latest_artifact_payload(session, opportunity_id, "rescore_result")
+    if rescore and isinstance(rescore.get("score"), dict):
+        return cast(dict[str, Any], rescore["score"])
+    return None
 
 
 @app.get("/healthz")
@@ -278,6 +351,26 @@ def api_opportunities(session: Session = Depends(get_session)) -> dict[str, Any]
     }
 
 
+@app.get("/api/opportunities/compare")
+def api_opportunity_compare(ids: str, session: Session = Depends(get_session)) -> dict[str, Any]:
+    opportunity_ids = [int(item.strip()) for item in ids.split(",") if item.strip().isdigit()]
+    if not opportunity_ids:
+        raise HTTPException(status_code=400, detail="Provide one or more numeric opportunity ids.")
+    rows = session.scalars(
+        select(OpportunityORM).where(OpportunityORM.id.in_(opportunity_ids)).order_by(OpportunityORM.id)
+    ).all()
+    return {
+        "opportunities": [
+            {
+                "opportunity": _opportunity_summary(row),
+                "latest_report": _latest_artifact_payload(session, row.id, "discovery_report"),
+                "latest_score": _latest_score_payload(session, row.id),
+            }
+            for row in rows
+        ]
+    }
+
+
 @app.get("/api/opportunities/{opportunity_id}")
 def api_opportunity_detail(
     opportunity_id: int, session: Session = Depends(get_session)
@@ -301,6 +394,8 @@ def api_opportunity_detail(
         "opportunity": _opportunity_summary(opportunity),
         "keyword_decisions": _keyword_decision_rows(session, latest_scan.id) if latest_scan else [],
         "keyword_clusters": _keyword_cluster_rows(session, latest_scan.id) if latest_scan else [],
+        "latest_scan": _scan_summary(latest_scan, session) if latest_scan else None,
+        "api_calls": _api_call_rows(session, latest_scan.id) if latest_scan else [],
         "artifacts": [
             {
                 "id": artifact.id,
@@ -310,6 +405,81 @@ def api_opportunity_detail(
             }
             for artifact in artifacts
         ],
+    }
+
+
+@app.post("/api/opportunities/{opportunity_id}/rescore")
+def api_opportunity_rescore(
+    opportunity_id: int, session: Session = Depends(get_session)
+) -> dict[str, Any]:
+    opportunity = session.get(OpportunityORM, opportunity_id)
+    if opportunity is None:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+    artifact = _latest_scan_payload(session, opportunity_id)
+    latest_scan = session.scalar(
+        select(ScanRunORM)
+        .where(ScanRunORM.opportunity_id == opportunity_id)
+        .order_by(ScanRunORM.id.desc())
+        .limit(1)
+    )
+    if artifact is None or latest_scan is None:
+        raise HTTPException(status_code=400, detail="No stored scan evidence is available to rescore.")
+    request = latest_scan.request_parameters or {}
+    service_payload = request.get("service_payload")
+    market_payload = request.get("market_payload")
+    if not isinstance(service_payload, dict) or not isinstance(market_payload, dict):
+        raise HTTPException(status_code=400, detail="Latest scan is missing structured service/market data.")
+    service = ServiceFamily(**service_payload)
+    market = Market(**market_payload)
+    metrics = [KeywordMetric(**item) for item in artifact.get("metrics", []) if isinstance(item, dict)]
+    serp_snapshots = [
+        SerpSnapshot(**item) for item in artifact.get("serp_snapshots", []) if isinstance(item, dict)
+    ]
+    competitors = [
+        CompetitorMetric(**item) for item in artifact.get("competitors", []) if isinstance(item, dict)
+    ]
+    providers = [
+        ProviderCandidate(**item) for item in artifact.get("providers", []) if isinstance(item, dict)
+    ]
+    score = OpportunityScorer().score(metrics, serp_snapshots, competitors, providers, market)
+    report = build_discovery_report(
+        service=service,
+        market=market,
+        metrics=metrics,
+        serp_snapshots=serp_snapshots,
+        competitors=competitors,
+        providers=providers,
+        score=score,
+        scan_metadata={
+            "scan_run_id": latest_scan.id,
+            "rescored_from_stored_data": True,
+            "data_mode": latest_scan.data_mode,
+            "scan_profile": latest_scan.scan_profile,
+            "planned_cost_usd": latest_scan.planned_cost_usd,
+            "actual_cost_usd": latest_scan.actual_cost_usd,
+        },
+    )
+    opportunity.latest_score = score.total_score
+    opportunity.score_version = score.scoring_version
+    opportunity.confidence = score.confidence.value
+    opportunity.missing_data_flags = score.missing_fields
+    session.add(
+        JsonArtifactORM(
+            opportunity_id=opportunity_id,
+            kind="rescore_result",
+            payload={
+                "score": score.model_dump(mode="json"),
+                "discovery_report": report,
+                "source_scan_run_id": latest_scan.id,
+            },
+        )
+    )
+    session.commit()
+    return {
+        "rescored": True,
+        "opportunity": _opportunity_summary(opportunity),
+        "score": score.model_dump(mode="json"),
+        "discovery_report": report,
     }
 
 
@@ -327,6 +497,12 @@ def _keyword_decision_rows(session: Session, scan_id: int) -> list[dict[str, Any
             "reason": row.reason,
             "rank": row.rank,
             "representative": row.representative,
+            "cluster_id": row.cluster_id,
+            "intent": row.intent,
+            "search_volume": row.search_volume,
+            "cpc": row.cpc,
+            "granularity": row.granularity,
+            "ranking_score": row.ranking_score,
         }
         for row in rows
     ]

@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 
 from rank_rent.db.base import Base, make_engine
-from rank_rent.db.orm import RawApiResponseORM, ScanRunORM
+from rank_rent.db.orm import ApiCallORM, RawApiResponseORM, ScanRunORM
 from rank_rent.domain.models import Market, ServiceFamily
 from rank_rent.integrations.dataforseo.live import DataForSEOLiveProvider
 from rank_rent.integrations.dataforseo.replay import DataForSEOReplayProvider
@@ -96,6 +96,58 @@ def test_sandbox_provider_stores_free_sandbox_cache_rows() -> None:
     assert row.cost_usd == 0
     assert row.provider_task_id == "task-id"
     assert row.provider_request_id == "request-id"
+
+
+@pytest.mark.asyncio
+async def test_dataforseo_cache_hit_writes_api_call_ledger_row() -> None:
+    Session = make_session()
+    settings = Settings(
+        data_mode="live",
+        allow_live_api_calls=True,
+        dataforseo_login="user",
+        dataforseo_password="password",
+        dataforseo_environment="sandbox",
+    )
+    params = normalize_request({"tasks": [{"keyword": "drywall"}]})
+    with Session() as session:
+        scan = ScanRunORM(
+            source="manual",
+            status="running",
+            request_parameters={
+                "scan_plan": {
+                    "planned_calls": [
+                        {
+                            "planned_request_id": "req-001",
+                            "endpoint": "/endpoint",
+                            "stage": "keyword_metrics",
+                            "estimated_cost_usd": "0",
+                        }
+                    ]
+                }
+            },
+        )
+        session.add(scan)
+        session.flush()
+        cache = RawResponseCache(session, "dataforseo-sandbox", "v3")
+        cache.set(
+            "/endpoint",
+            params,
+            {"tasks": [{"status_code": 20000, "result": []}]},
+            cost_usd=0,
+            source_scan_run_id=scan.id,
+        )
+        provider = DataForSEOLiveProvider(settings=settings, session=session)
+        provider.current_scan_run_id = scan.id
+
+        assert await provider._post("/endpoint", [{"keyword": "drywall"}]) == {
+            "tasks": [{"status_code": 20000, "result": []}]
+        }
+        row = session.query(ApiCallORM).one()
+
+    assert row.planned_request_id == "req-001"
+    assert row.status == "cache_hit"
+    assert row.cache_hit is True
+    assert row.actual_cost_usd == 0
 
 
 @pytest.mark.asyncio

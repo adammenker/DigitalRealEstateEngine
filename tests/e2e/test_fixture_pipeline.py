@@ -14,17 +14,37 @@ def test_fixture_pipeline_records_scan_without_site_side_effects(tmp_path, monke
     (tmp_path / "config/outreach_templates").mkdir(parents=True)
     (tmp_path / "config/scoring.yaml").write_text(
         """
-version: v1
+version: v2
 weights:
-  demand: 25
-  commercial_intent: 15
-  organic_accessibility: 30
-  serp_accessibility: 15
-  provider_supply: 15
-missing_data_penalty_max: 30
+  demand_evidence: 24
+  commercial_value: 16
+  competitor_weakness: 22
+  organic_click_availability: 16
+  provider_suitability: 14
+  data_completeness: 8
+missing_data_penalty_max: 24
 thresholds:
-  high_confidence_missing_fields: 1
-  medium_confidence_missing_fields: 4
+  high_confidence_missing_fields: 0
+  medium_confidence_missing_fields: 2
+  insufficient_confidence_missing_fields: 5
+demand:
+  strong_monthly_volume: 900
+commercial:
+  strong_cpc: 28
+  strong_paid_competition: 0.8
+competitors:
+  weak_referring_domains: 35
+  strong_referring_domains: 260
+organic_click:
+  directory_penalty: 0.35
+  national_brand_penalty: 0.3
+  lead_generator_penalty: 0.2
+  local_pack_penalty: 0.14
+  ads_top_penalty: 0.12
+providers:
+  ideal_min: 2
+  ideal_max: 8
+  oversupply_count: 14
 """
     )
     (tmp_path / "config/outreach_templates/initial_email.txt").write_text(

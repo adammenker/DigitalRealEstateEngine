@@ -96,6 +96,13 @@ const api = {
       throw new Error(message);
     }
     return response.json();
+  },
+  async rescoreOpportunity(id) {
+    const response = await fetch(`/api/backend/api/opportunities/${id}/rescore`, {
+      method: "POST"
+    });
+    if (!response.ok) throw new Error("Could not rescore opportunity");
+    return response.json();
   }
 };
 
@@ -272,6 +279,21 @@ export default function Dashboard() {
     }
   }
 
+  async function rescoreSelected() {
+    if (!selectedId) return;
+    setDetailLoading(true);
+    try {
+      const result = await api.rescoreOpportunity(selectedId);
+      setNotice({ type: "success", message: `Rescored opportunity ${result.opportunity.id}` });
+      await refresh(false);
+      setDetail(await api.getOpportunity(selectedId));
+    } catch (error) {
+      setNotice({ type: "error", message: error.message });
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
   const filtered = useMemo(() => {
     const text = query.trim().toLowerCase();
     const rows = opportunities.filter((item) => {
@@ -287,11 +309,9 @@ export default function Dashboard() {
 
   const artifacts = detail?.artifacts || [];
   const scan = artifactByKind(artifacts, "scan_result") || artifactByKind(artifacts, "preliminary_assessment");
-  const domains = artifactByKind(artifacts, "domain_candidates")?.domains || [];
-  const outreach = artifactByKind(artifacts, "outreach_drafts")?.drafts || [];
-  const site = artifactByKind(artifacts, "site_config");
+  const report = artifactByKind(artifacts, "discovery_report") || scan?.discovery_report || null;
   const components = scan?.score?.component_scores || {};
-  const demandEvidence = scan?.demand_evidence || null;
+  const demandEvidence = report?.demand || scan?.demand_evidence || null;
   const providers = scan?.providers || [];
   const competitors = scan?.competitors || [];
   const keywords = scan?.metrics || [];
@@ -578,7 +598,7 @@ export default function Dashboard() {
             <div className="blankDetail">
               <Sparkles size={28} />
               <h2>Select an opportunity</h2>
-              <p>Scores, domains, providers, outreach drafts, and site config will appear here.</p>
+              <p>Scores, demand, SERP composition, providers, and competitor evidence will appear here.</p>
             </div>
           ) : detailLoading ? (
             <div className="blankDetail">
@@ -608,19 +628,38 @@ export default function Dashboard() {
                     <p className="syntheticNote">{demandEvidence.warning}</p>
                   )}
                 </div>
-                <ScoreDial score={detail.opportunity.score} confidence={detail.opportunity.confidence} />
+                <div className="heroActions">
+                  <ScoreDial score={detail.opportunity.score} confidence={detail.opportunity.confidence} />
+                  <button className="ghostButton" onClick={rescoreSelected}>
+                    <RefreshCw size={16} />
+                    Rescore
+                  </button>
+                </div>
               </div>
 
               <div className="componentGrid">
-                <ComponentScore label="Demand" value={components.demand} max={25} />
-                <ComponentScore label="Intent" value={components.commercial_intent} max={15} />
-                <ComponentScore label="Organic" value={components.organic_accessibility} max={30} />
-                <ComponentScore label="SERP" value={components.serp_accessibility} max={15} />
-                <ComponentScore label="Supply" value={components.provider_supply} max={15} />
+                <ComponentScore label="Demand Evidence" value={components.demand_evidence} max={24} />
+                <ComponentScore label="Commercial Value" value={components.commercial_value} max={16} />
+                <ComponentScore label="Competitor Weakness" value={components.competitor_weakness} max={22} />
+                <ComponentScore label="Click Availability" value={components.organic_click_availability} max={16} />
+                <ComponentScore label="Provider Fit" value={components.provider_suitability} max={14} />
+                <ComponentScore label="Completeness" value={components.data_completeness} max={8} />
               </div>
 
               <div className="detailGrid">
-                <Panel title="Keyword Cluster" icon={Search}>
+                <Panel title="Market Interpretation" icon={MapPin}>
+                  <Table
+                    columns={["Field", "Value"]}
+                    rows={[
+                      ["Market", report?.market_interpretation?.input_market || detail.opportunity.market],
+                      ["Type", report?.market_interpretation?.market_type || "unknown"],
+                      ["Provider location", report?.market_interpretation?.provider_location_name || "n/a"],
+                      ["Data mode", detail.latest_scan?.data_mode || detail.data_mode || "fixture"],
+                      ["Actual API cost", money(detail.latest_scan?.actual_cost_usd || 0)]
+                    ]}
+                  />
+                </Panel>
+                <Panel title="Keyword Demand" icon={Search}>
                   <Table
                     columns={["Keyword", "Intent", "Volume", "Granularity", "CPC"]}
                     rows={keywords.slice(0, 8).map((item) => [
@@ -633,8 +672,8 @@ export default function Dashboard() {
                   />
                   {demandEvidence && (
                     <p className="muted">
-                      Metric source: {demandEvidence.provider_reported_metric_granularity}.
-                      Local demand estimate: {demandEvidence.market_estimation_method}.
+                      Raw granularity: {demandEvidence.raw_volume_granularity || demandEvidence.provider_reported_metric_granularity}.
+                      Local estimate: {demandEvidence.market_estimation_method}.
                     </p>
                   )}
                 </Panel>
@@ -645,7 +684,7 @@ export default function Dashboard() {
                       item.keyword,
                       item.representative ? "SERP representative" : item.decision,
                       item.rank || "n/a",
-                      item.reason || "n/a"
+                      item.ranking_score ? `${item.reason || "n/a"} (${item.ranking_score})` : item.reason || "n/a"
                     ])}
                   />
                   {keywordClusters.length > 0 && (
@@ -655,22 +694,20 @@ export default function Dashboard() {
                     </p>
                   )}
                 </Panel>
-                <Panel title="Domain Candidates" icon={Globe2}>
+                <Panel title="SERP Composition" icon={Globe2}>
                   <Table
-                    columns={["Domain", "Status", "Rank"]}
-                    rows={domains.slice(0, 6).map((item) => [
-                      item.domain,
-                      item.availability_status,
-                      item.rank
-                    ])}
+                    columns={["Type", "Count"]}
+                    rows={Object.entries(report?.serp_composition?.classification_counts || {}).map(
+                      ([label, value]) => [label, value]
+                    )}
                   />
                 </Panel>
-                <Panel title="Provider Candidates" icon={Building2}>
+                <Panel title="Provider Suitability" icon={Building2}>
                   <Table
-                    columns={["Provider", "Rating", "Contact"]}
+                    columns={["Provider", "Score", "Contact"]}
                     rows={providers.map((item) => [
                       item.name,
-                      item.rating || "n/a",
+                      item.suitability_score || "n/a",
                       item.website ? "website" : item.phone ? "phone" : "unknown"
                     ])}
                   />
@@ -685,29 +722,13 @@ export default function Dashboard() {
                     ])}
                   />
                 </Panel>
-                <Panel title="Outreach Drafts" icon={FileText} wide>
-                  {outreach.length ? (
-                    <div className="draftList">
-                      {outreach.slice(0, 2).map((draft, index) => (
-                        <article key={`${draft.provider_name}-${index}`} className="draft">
-                          <strong>{draft.subject}</strong>
-                          <p>{draft.generated_body}</p>
-                        </article>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="muted">No outreach drafts saved yet.</p>
-                  )}
-                </Panel>
-                <Panel title="Site Build" icon={Globe2}>
-                  <p className="muted">
-                    {site?.generated_path
-                      ? `Generated at ${site.generated_path}`
-                      : "No generated site path saved yet."}
-                  </p>
-                  <p className="muted">
-                    Provider identity is kept separate from the public property configuration.
-                  </p>
+                <Panel title="Score Evidence" icon={FileText} wide>
+                  <Table
+                    columns={["Component", "Explanation"]}
+                    rows={Object.entries(scan?.score?.component_explanations || {}).map(
+                      ([label, value]) => [label, value]
+                    )}
+                  />
                 </Panel>
               </div>
             </>

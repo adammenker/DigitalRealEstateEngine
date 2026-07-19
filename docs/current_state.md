@@ -59,12 +59,22 @@ After V1 hardening:
 - `make frontend-build`: passing on Next.js 16 with a clean production `npm audit --omit=dev`.
 - `make docker-build`: passing in the current local verification flow.
 
+After discovery completion:
+
+- Opportunity discovery now stores a `discovery_report` artifact with summary, market interpretation, demand, SERP composition, competitors, providers, score breakdown, and scan metadata.
+- Scoring is version `v2` and uses demand evidence, commercial value, competitor weakness, organic click availability, provider suitability, and data completeness.
+- DataForSEO live/sandbox requests write per-scan `api_calls` ledger rows for cache hits, completed calls, failures, planned request IDs, provider IDs, and actual cost attribution.
+- `POST /api/opportunities/{id}/rescore` reruns scoring from stored scan evidence without provider calls.
+- `GET /api/opportunities/compare?ids=1,2` returns comparable latest reports and scores.
+- `make verify` passes after discovery completion. Local Node is too old for direct frontend builds, so frontend verification should continue through Docker-backed `make frontend-build`.
+
 ## Existing Live Adapters
 
 - `DataForSEOLiveProvider`: live DataForSEO adapter for account checks, Google location resolution, keyword suggestions, historical keyword volume, organic SERP snapshots, backlinks summaries, and business listings.
 - Live scans are guarded by `DATA_MODE=live` and `ALLOW_LIVE_API_CALLS=true` because several DataForSEO endpoints are paid.
 - DataForSEO live-mode traffic targets `DATAFORSEO_ENVIRONMENT=sandbox` by default, using `https://sandbox.dataforseo.com/v3/...` for free dummy responses. Production calls require `DATAFORSEO_ENVIRONMENT=production`.
 - Live calls are cached in `raw_api_responses` when a DB session is available.
+- Live calls are also logged in `api_calls`, including sandbox zero-cost calls and cache hits.
 - Live scan plans now include exact request payloads where possible, cache-hit state, and explicit unknown request payloads where later calls depend on purchased upstream results.
 - `LIVE_SCAN_DEPTH=testing` limits paid-call fan-out and produces a preliminary assessment instead of a full ranked score.
 - DataForSEO account verification passed during prior smoke checks; current live scans may fail if DataForSEO balance is insufficient.
@@ -99,5 +109,6 @@ After V1 hardening:
 ## Known Broken or Prototype Paths
 
 - Full live qualification reports are not implemented yet; `rank-rent qualify --live` performs a low-cost account and location smoke check.
+- Geography is still intentionally lightweight; Pelias/database geocoding remains a production backlog item.
 - Site generation, domain generation, and outreach are no longer part of the default scan pipeline, but full approval workflow actions are not implemented yet.
 - Startup initialization runs Alembic migrations for normal file-backed DBs. In-memory SQLite tests still use direct SQLAlchemy table creation.
