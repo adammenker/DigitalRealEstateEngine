@@ -1,0 +1,154 @@
+schema_version: 1
+version: "2026.07.1"
+cases:
+  - case_id: exact_fit_active_in_market_contactable_strong_reviews
+    service_family_id: water_heater_services
+    market: &market
+      id: benchmark_nashville_tn
+      display_name: Nashville, TN
+      state: TN
+      cities: [Nashville]
+      latitude: 36.1627
+      longitude: -86.7816
+      population: 689447
+      reference_population: 335893238
+      boundary_radius_km: 45
+    provider:
+      name: Cumberland Water Heater Co
+      category: Plumber
+      categories: [Plumber, Water heater installation service]
+      latitude: 36.17
+      longitude: -86.78
+      business_status: open
+      website: https://cumberlandwater.example
+      phone: 615-555-0100
+      email: owner@cumberlandwater.example
+      contact_confidence: 0.95
+      rating: 4.9
+      review_count: 180
+    expected_score_range: [93, 100]
+    expected_suitable: true
+
+  - case_id: adjacent_service_only
+    market: *market
+    provider:
+      name: Nashville Home Comfort
+      category: HVAC contractor
+      categories: [HVAC contractor]
+      latitude: 36.17
+      longitude: -86.78
+      business_status: open
+      website: https://homecomfort.example
+      rating: 4.0
+      review_count: 10
+    expected_score_range: [40, 54.99]
+    expected_suitable: false
+
+  - case_id: confirmed_active
+    market: *market
+    provider: &standard_provider
+      name: Nashville Plumbing
+      category: Plumber
+      categories: [Plumber]
+      latitude: 36.17
+      longitude: -86.78
+      business_status: open
+      phone: 615-555-0101
+      contact_confidence: 0.8
+      rating: 4.4
+      review_count: 45
+    expected_score_range: [85, 100]
+    expected_suitable: true
+
+  - case_id: unknown_status
+    market: *market
+    provider:
+      <<: *standard_provider
+      name: Status Unknown Plumbing
+      business_status: unknown
+    expected_score_range: [70, 90]
+    expected_suitable: true
+
+  - case_id: closed_business
+    market: *market
+    provider:
+      <<: *standard_provider
+      name: Closed Plumbing
+      business_status: permanently_closed
+    expected_score_range: [0, 40]
+    expected_suitable: false
+
+  - case_id: in_market
+    market: *market
+    provider:
+      <<: *standard_provider
+      name: In Market Plumbing
+    expected_score_range: [85, 100]
+    expected_suitable: true
+
+  - case_id: outside_market
+    market: *market
+    provider:
+      <<: *standard_provider
+      name: Knoxville Plumbing
+      latitude: 35.9606
+      longitude: -83.9207
+      address: Knoxville, TN
+    expected_score_range: [55, 80]
+    expected_suitable: true
+
+  - case_id: directly_contactable
+    market: *market
+    provider:
+      <<: *standard_provider
+      name: Contactable Plumbing
+      email: owner@contactable.example
+      contact_confidence: 1
+    expected_score_range: [88, 100]
+    expected_suitable: true
+
+  - case_id: non_contactable
+    market: *market
+    provider:
+      <<: *standard_provider
+      name: No Contact Plumbing
+      phone: null
+      website: null
+      email: null
+      contact_form_url: null
+    expected_score_range: [65, 85]
+    expected_suitable: true
+
+  - case_id: strong_review_evidence
+    market: *market
+    provider:
+      <<: *standard_provider
+      name: Reviewed Plumbing
+      rating: 5
+      review_count: 250
+    expected_score_range: [88, 100]
+    expected_suitable: true
+
+  - case_id: sparse_review_evidence
+    market: *market
+    provider:
+      <<: *standard_provider
+      name: New Plumbing
+      rating: 4
+      review_count: 2
+    expected_score_range: [80, 95]
+    expected_suitable: true
+
+pairwise_expectations:
+  - preferred: confirmed_active
+    over: unknown_status
+    reason: Confirmed operating status must outrank uncertain status.
+  - preferred: in_market
+    over: outside_market
+    reason: Verified geographic proximity must improve suitability.
+  - preferred: directly_contactable
+    over: non_contactable
+    reason: A direct contact channel must improve tenant reachability.
+  - preferred: strong_review_evidence
+    over: sparse_review_evidence
+    reason: Stronger review evidence must improve the reputation signal.

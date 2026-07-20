@@ -1,0 +1,74 @@
+# Offline calibration
+
+The calibration harness protects the discovery score's business direction before paid
+production scanning. It is synthetic underwriting evidence, not a profitability model and
+not a substitute for future outcome calibration.
+
+## What runs
+
+`config/benchmarks/manifest.yaml` pins the suite, active scoring snapshot, and all fixture
+libraries. Suite `2026.07.1` contains:
+
+- 26 versioned opportunity scenarios covering demand, competition, SERP displacement,
+  provider supply, evidence freshness, evidence-gate failure, and preliminary assessments.
+- 12 pairwise business-direction assertions.
+- 12 labeled SERP classification cases, including ambiguous results.
+- 11 labeled provider cases and 4 provider pairwise assertions.
+
+The runner sends the fixture evidence through the production `ServiceCatalog`,
+`classify_result`, `enrich_competitors`, `score_provider_suitability`,
+`EvidenceQualityEvaluator`, and `OpportunityScorer` paths. Relative freshness values are
+resolved against run time so a fresh scenario does not become stale merely because the
+fixture is old.
+
+Socket connections are denied for the complete run and comparison. A network attempt raises
+an error instead of falling through to DataForSEO or another provider. Reports record the
+attempt count, which must remain zero.
+
+## Commands
+
+```bash
+rank-rent calibrate validate-config
+rank-rent calibrate run
+rank-rent calibrate report
+rank-rent calibrate compare v2.12 v2.12
+```
+
+`calibrate run` writes an immutable JSON artifact to `benchmarks/reports` by default. Use
+`--no-save` for CI, `--format json` for machine-readable stdout, or `--output-dir PATH` for a
+different archive. `calibrate report [PATH]` reads an artifact without rerunning calibration;
+without a path it selects the latest archived calibration report.
+
+`calibrate compare A B` reruns the same offline corpus under both scoring snapshots and
+reports score, rankability, and component deltas. Both versions must be registered in the
+manifest. Passing the same version is a useful determinism and zero-network smoke test.
+
+The Make target `calibration` validates configuration and runs the suite without writing an
+artifact. CI runs the same two commands before pytest.
+
+## Version discipline
+
+1. Change configuration instead of adding exceptions for a named scenario.
+2. Increment `config/scoring.yaml`'s version for every scoring behavior change.
+3. Copy the complete configuration to `config/benchmarks/scoring/<version>.yaml`.
+4. Register the snapshot in `config/benchmarks/manifest.yaml`.
+5. Add or adjust directional scenarios and document the business rationale in the change.
+6. Run `rank-rent calibrate validate-config`; it rejects a default snapshot that differs from
+   the active scoring config, weights that do not total 100, or sub-signal shares that do not
+   total 1.
+7. Run and review `rank-rent calibrate compare OLD NEW`.
+8. Preserve the generated JSON report. Historical artifacts are never overwritten.
+
+The benchmark hash covers the manifest, all scenario and label libraries, the service
+catalog, classifier and evidence-quality configuration, the active scoring config, and every
+registered scoring snapshot. The scorer's own hash is recorded separately.
+
+## Reading a report
+
+The JSON report includes scenario checks, failed pairwise expectations, component
+distributions, expected-versus-observed rankability counts, classification confusion,
+provider signal results, scoring identity, suite identity, and configuration hashes.
+
+A passing synthetic suite proves directional invariants only. It does not establish expected
+revenue, lead volume, ranking time, or return on investment. Those require observed outcomes
+linked to the exact historical score and evidence.

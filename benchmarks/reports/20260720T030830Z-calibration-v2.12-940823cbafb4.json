@@ -1,0 +1,4302 @@
+{
+  "report_schema_version": 1,
+  "report_id": "940823cbafb4",
+  "created_at": "2026-07-20T03:08:30.396487Z",
+  "suite_version": "2026.07.1",
+  "scoring_version": "v2.12",
+  "scoring_config_hash": "745675e93d8623dc",
+  "benchmark_config_hash": "147676090119c140d5a150ef35b862d8fed02c85f1aa880c646d7bc3e4054e0c",
+  "success": true,
+  "network_attempt_count": 0,
+  "scenario_summary": {
+    "total": 26,
+    "passed": 26,
+    "failed": 0
+  },
+  "scenario_results": [
+    {
+      "scenario_id": "strong_demand_weak_competition",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": true,
+      "assessment_type": "full",
+      "score": 82.77,
+      "confidence": "medium",
+      "evidence_status": "complete",
+      "evidence_quality_status": "pass",
+      "component_scores": {
+        "demand_evidence": 17.55,
+        "commercial_value": 16.0,
+        "competitor_weakness": 11.4,
+        "organic_click_availability": 16.0,
+        "provider_suitability": 13.82,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "actual": "medium",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "pass",
+            "warning"
+          ],
+          "actual": "pass",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 82.77,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "complete"
+          ],
+          "actual": "complete",
+          "message": ""
+        },
+        {
+          "check": "demand_evidence",
+          "passed": true,
+          "expected": [
+            15.0,
+            24.0
+          ],
+          "actual": 17.55,
+          "message": ""
+        },
+        {
+          "check": "competitor_weakness",
+          "passed": true,
+          "expected": [
+            8.0,
+            22.0
+          ],
+          "actual": 11.4,
+          "message": ""
+        },
+        {
+          "check": "provider_suitability",
+          "passed": true,
+          "expected": [
+            8.0,
+            14.0
+          ],
+          "actual": 13.82,
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 82.77,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "strong_demand_strong_competition",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": true,
+      "assessment_type": "full",
+      "score": 71.37,
+      "confidence": "medium",
+      "evidence_status": "complete",
+      "evidence_quality_status": "pass",
+      "component_scores": {
+        "demand_evidence": 17.55,
+        "commercial_value": 16.0,
+        "competitor_weakness": 0.0,
+        "organic_click_availability": 16.0,
+        "provider_suitability": 13.82,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "actual": "medium",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "pass",
+            "warning"
+          ],
+          "actual": "pass",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 71.37,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "complete"
+          ],
+          "actual": "complete",
+          "message": ""
+        },
+        {
+          "check": "competitor_weakness",
+          "passed": true,
+          "expected": [
+            0.0,
+            8.0
+          ],
+          "actual": 0.0,
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 71.37,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "weak_demand_weak_competition",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": true,
+      "assessment_type": "full",
+      "score": 57.89,
+      "confidence": "medium",
+      "evidence_status": "complete",
+      "evidence_quality_status": "pass",
+      "component_scores": {
+        "demand_evidence": 1.48,
+        "commercial_value": 7.19,
+        "competitor_weakness": 11.4,
+        "organic_click_availability": 16.0,
+        "provider_suitability": 13.82,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "actual": "medium",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "pass",
+            "warning"
+          ],
+          "actual": "pass",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 57.89,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "complete"
+          ],
+          "actual": "complete",
+          "message": ""
+        },
+        {
+          "check": "demand_evidence",
+          "passed": true,
+          "expected": [
+            0.0,
+            8.0
+          ],
+          "actual": 1.48,
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 57.89,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "weak_demand_strong_competition",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": true,
+      "assessment_type": "full",
+      "score": 46.49,
+      "confidence": "medium",
+      "evidence_status": "complete",
+      "evidence_quality_status": "pass",
+      "component_scores": {
+        "demand_evidence": 1.48,
+        "commercial_value": 7.19,
+        "competitor_weakness": 0.0,
+        "organic_click_availability": 16.0,
+        "provider_suitability": 13.82,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "actual": "medium",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "pass",
+            "warning"
+          ],
+          "actual": "pass",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 46.49,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "complete"
+          ],
+          "actual": "complete",
+          "message": ""
+        },
+        {
+          "check": "demand_evidence",
+          "passed": true,
+          "expected": [
+            0.0,
+            8.0
+          ],
+          "actual": 1.48,
+          "message": ""
+        },
+        {
+          "check": "competitor_weakness",
+          "passed": true,
+          "expected": [
+            0.0,
+            8.0
+          ],
+          "actual": 0.0,
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 46.49,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "directory_dominated_top_results",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": true,
+      "assessment_type": "full",
+      "score": 68.95,
+      "confidence": "medium",
+      "evidence_status": "complete",
+      "evidence_quality_status": "pass",
+      "component_scores": {
+        "demand_evidence": 17.55,
+        "commercial_value": 16.0,
+        "competitor_weakness": 3.3,
+        "organic_click_availability": 10.28,
+        "provider_suitability": 13.82,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "actual": "medium",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "pass",
+            "warning"
+          ],
+          "actual": "pass",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 68.95,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "complete"
+          ],
+          "actual": "complete",
+          "message": ""
+        },
+        {
+          "check": "organic_click_availability",
+          "passed": true,
+          "expected": [
+            0.0,
+            14.0
+          ],
+          "actual": 10.28,
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 68.95,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "marketplace_dominated_top_results",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": true,
+      "assessment_type": "full",
+      "score": 72.41,
+      "confidence": "medium",
+      "evidence_status": "complete",
+      "evidence_quality_status": "pass",
+      "component_scores": {
+        "demand_evidence": 17.55,
+        "commercial_value": 16.0,
+        "competitor_weakness": 3.52,
+        "organic_click_availability": 13.52,
+        "provider_suitability": 13.82,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "actual": "medium",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "pass",
+            "warning"
+          ],
+          "actual": "pass",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 72.41,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "complete"
+          ],
+          "actual": "complete",
+          "message": ""
+        },
+        {
+          "check": "organic_click_availability",
+          "passed": true,
+          "expected": [
+            0.0,
+            15.0
+          ],
+          "actual": 13.52,
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 72.41,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "national_brand_dominated_results",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": true,
+      "assessment_type": "full",
+      "score": 65.8,
+      "confidence": "medium",
+      "evidence_status": "complete",
+      "evidence_quality_status": "pass",
+      "component_scores": {
+        "demand_evidence": 17.55,
+        "commercial_value": 16.0,
+        "competitor_weakness": 0.0,
+        "organic_click_availability": 10.43,
+        "provider_suitability": 13.82,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "actual": "medium",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "pass",
+            "warning"
+          ],
+          "actual": "pass",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 65.8,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "complete"
+          ],
+          "actual": "complete",
+          "message": ""
+        },
+        {
+          "check": "competitor_weakness",
+          "passed": true,
+          "expected": [
+            0.0,
+            5.0
+          ],
+          "actual": 0.0,
+          "message": ""
+        },
+        {
+          "check": "organic_click_availability",
+          "passed": true,
+          "expected": [
+            0.0,
+            14.0
+          ],
+          "actual": 10.43,
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 65.8,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "strong_local_providers_top_positions",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": true,
+      "assessment_type": "full",
+      "score": 71.37,
+      "confidence": "medium",
+      "evidence_status": "complete",
+      "evidence_quality_status": "pass",
+      "component_scores": {
+        "demand_evidence": 17.55,
+        "commercial_value": 16.0,
+        "competitor_weakness": 0.0,
+        "organic_click_availability": 16.0,
+        "provider_suitability": 13.82,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "actual": "medium",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "pass",
+            "warning"
+          ],
+          "actual": "pass",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 71.37,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "complete"
+          ],
+          "actual": "complete",
+          "message": ""
+        },
+        {
+          "check": "competitor_weakness",
+          "passed": true,
+          "expected": [
+            0.0,
+            8.0
+          ],
+          "actual": 0.0,
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 71.37,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "multiple_weak_generic_pages",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": true,
+      "assessment_type": "full",
+      "score": 84.74,
+      "confidence": "medium",
+      "evidence_status": "complete",
+      "evidence_quality_status": "warning",
+      "component_scores": {
+        "demand_evidence": 17.55,
+        "commercial_value": 16.0,
+        "competitor_weakness": 14.01,
+        "organic_click_availability": 15.36,
+        "provider_suitability": 13.82,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "actual": "medium",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "warning"
+          ],
+          "actual": "warning",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 84.74,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "complete"
+          ],
+          "actual": "complete",
+          "message": ""
+        },
+        {
+          "check": "competitor_weakness",
+          "passed": true,
+          "expected": [
+            10.0,
+            22.0
+          ],
+          "actual": 14.01,
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 84.74,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "too_few_providers",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": true,
+      "assessment_type": "full",
+      "score": 78.37,
+      "confidence": "medium",
+      "evidence_status": "complete",
+      "evidence_quality_status": "pass",
+      "component_scores": {
+        "demand_evidence": 17.55,
+        "commercial_value": 16.0,
+        "competitor_weakness": 11.4,
+        "organic_click_availability": 16.0,
+        "provider_suitability": 9.42,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "actual": "medium",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "pass",
+            "warning"
+          ],
+          "actual": "pass",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 78.37,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "complete"
+          ],
+          "actual": "complete",
+          "message": ""
+        },
+        {
+          "check": "provider_suitability",
+          "passed": true,
+          "expected": [
+            0.0,
+            10.0
+          ],
+          "actual": 9.42,
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 78.37,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "provider_oversupply",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": true,
+      "assessment_type": "full",
+      "score": 80.38,
+      "confidence": "medium",
+      "evidence_status": "complete",
+      "evidence_quality_status": "pass",
+      "component_scores": {
+        "demand_evidence": 17.55,
+        "commercial_value": 16.0,
+        "competitor_weakness": 11.4,
+        "organic_click_availability": 16.0,
+        "provider_suitability": 11.43,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "actual": "medium",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "pass",
+            "warning"
+          ],
+          "actual": "pass",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 80.38,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "complete"
+          ],
+          "actual": "complete",
+          "message": ""
+        },
+        {
+          "check": "provider_suitability",
+          "passed": true,
+          "expected": [
+            0.0,
+            13.0
+          ],
+          "actual": 11.43,
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 80.38,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "providers_mostly_irrelevant",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": false,
+      "assessment_type": "full",
+      "score": 35.0,
+      "confidence": "insufficient",
+      "evidence_status": "unusable",
+      "evidence_quality_status": "fail",
+      "component_scores": {
+        "demand_evidence": 17.55,
+        "commercial_value": 16.0,
+        "competitor_weakness": 11.4,
+        "organic_click_availability": 16.0,
+        "provider_suitability": 0.0,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": false,
+          "actual": false,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "insufficient"
+          ],
+          "actual": "insufficient",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "fail"
+          ],
+          "actual": "fail",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            35.0
+          ],
+          "actual": 35.0,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "unusable"
+          ],
+          "actual": "unusable",
+          "message": ""
+        },
+        {
+          "check": "provider_suitability",
+          "passed": true,
+          "expected": [
+            0.0,
+            5.0
+          ],
+          "actual": 0.0,
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 35.0,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "providers_outside_boundary",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": true,
+      "assessment_type": "full",
+      "score": 81.54,
+      "confidence": "medium",
+      "evidence_status": "complete",
+      "evidence_quality_status": "warning",
+      "component_scores": {
+        "demand_evidence": 17.55,
+        "commercial_value": 16.0,
+        "competitor_weakness": 11.4,
+        "organic_click_availability": 16.0,
+        "provider_suitability": 12.59,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "actual": "medium",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "warning"
+          ],
+          "actual": "warning",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 81.54,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "complete"
+          ],
+          "actual": "complete",
+          "message": ""
+        },
+        {
+          "check": "provider_suitability",
+          "passed": true,
+          "expected": [
+            0.0,
+            13.0
+          ],
+          "actual": 12.59,
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 81.54,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "mostly_unknown_serp_classifications",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": true,
+      "assessment_type": "full",
+      "score": 84.74,
+      "confidence": "medium",
+      "evidence_status": "complete",
+      "evidence_quality_status": "warning",
+      "component_scores": {
+        "demand_evidence": 17.55,
+        "commercial_value": 16.0,
+        "competitor_weakness": 14.01,
+        "organic_click_availability": 15.36,
+        "provider_suitability": 13.82,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium"
+          ],
+          "actual": "medium",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "warning"
+          ],
+          "actual": "warning",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 84.74,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "complete"
+          ],
+          "actual": "complete",
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 84.74,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "national_demand_only",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": true,
+      "assessment_type": "full",
+      "score": 82.77,
+      "confidence": "medium",
+      "evidence_status": "complete",
+      "evidence_quality_status": "pass",
+      "component_scores": {
+        "demand_evidence": 17.55,
+        "commercial_value": 16.0,
+        "competitor_weakness": 11.4,
+        "organic_click_availability": 16.0,
+        "provider_suitability": 13.82,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "actual": "medium",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "pass",
+            "warning"
+          ],
+          "actual": "pass",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 82.77,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "complete"
+          ],
+          "actual": "complete",
+          "message": ""
+        },
+        {
+          "check": "demand_evidence",
+          "passed": true,
+          "expected": [
+            15.0,
+            24.0
+          ],
+          "actual": 17.55,
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 82.77,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "measured_local_demand",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": true,
+      "assessment_type": "full",
+      "score": 89.22,
+      "confidence": "high",
+      "evidence_status": "complete",
+      "evidence_quality_status": "pass",
+      "component_scores": {
+        "demand_evidence": 24.0,
+        "commercial_value": 16.0,
+        "competitor_weakness": 11.4,
+        "organic_click_availability": 16.0,
+        "provider_suitability": 13.82,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "actual": "high",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "pass",
+            "warning"
+          ],
+          "actual": "pass",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 89.22,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "complete"
+          ],
+          "actual": "complete",
+          "message": ""
+        },
+        {
+          "check": "demand_evidence",
+          "passed": true,
+          "expected": [
+            20.0,
+            24.0
+          ],
+          "actual": 24.0,
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 89.22,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "population_estimated_local_demand",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": true,
+      "assessment_type": "full",
+      "score": 82.77,
+      "confidence": "medium",
+      "evidence_status": "complete",
+      "evidence_quality_status": "pass",
+      "component_scores": {
+        "demand_evidence": 17.55,
+        "commercial_value": 16.0,
+        "competitor_weakness": 11.4,
+        "organic_click_availability": 16.0,
+        "provider_suitability": 13.82,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "actual": "medium",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "pass",
+            "warning"
+          ],
+          "actual": "pass",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 82.77,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "complete"
+          ],
+          "actual": "complete",
+          "message": ""
+        },
+        {
+          "check": "demand_evidence",
+          "passed": true,
+          "expected": [
+            15.0,
+            24.0
+          ],
+          "actual": 17.55,
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 82.77,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "stale_serps",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": true,
+      "assessment_type": "full",
+      "score": 82.77,
+      "confidence": "low",
+      "evidence_status": "complete",
+      "evidence_quality_status": "pass",
+      "component_scores": {
+        "demand_evidence": 17.55,
+        "commercial_value": 16.0,
+        "competitor_weakness": 11.4,
+        "organic_click_availability": 16.0,
+        "provider_suitability": 13.82,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium"
+          ],
+          "actual": "low",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "pass",
+            "warning"
+          ],
+          "actual": "pass",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 82.77,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "complete"
+          ],
+          "actual": "complete",
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 82.77,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "missing_backlink_evidence",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": true,
+      "assessment_type": "full",
+      "score": 76.5,
+      "confidence": "medium",
+      "evidence_status": "complete",
+      "evidence_quality_status": "pass",
+      "component_scores": {
+        "demand_evidence": 17.55,
+        "commercial_value": 16.0,
+        "competitor_weakness": 5.13,
+        "organic_click_availability": 16.0,
+        "provider_suitability": 13.82,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "actual": "medium",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "pass",
+            "warning"
+          ],
+          "actual": "pass",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 76.5,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "complete"
+          ],
+          "actual": "complete",
+          "message": ""
+        },
+        {
+          "check": "competitor_weakness",
+          "passed": true,
+          "expected": [
+            0.0,
+            18.0
+          ],
+          "actual": 5.13,
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 76.5,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "partial_provider_evidence",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": true,
+      "assessment_type": "full",
+      "score": 80.93,
+      "confidence": "medium",
+      "evidence_status": "complete",
+      "evidence_quality_status": "pass",
+      "component_scores": {
+        "demand_evidence": 17.55,
+        "commercial_value": 16.0,
+        "competitor_weakness": 11.4,
+        "organic_click_availability": 16.0,
+        "provider_suitability": 11.98,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "actual": "medium",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "pass",
+            "warning"
+          ],
+          "actual": "pass",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 80.93,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "complete"
+          ],
+          "actual": "complete",
+          "message": ""
+        },
+        {
+          "check": "provider_suitability",
+          "passed": true,
+          "expected": [
+            0.0,
+            12.0
+          ],
+          "actual": 11.98,
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 80.93,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "failed_evidence_gate",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": false,
+      "assessment_type": "full",
+      "score": 35.0,
+      "confidence": "insufficient",
+      "evidence_status": "unusable",
+      "evidence_quality_status": "fail",
+      "component_scores": {
+        "demand_evidence": 18.96,
+        "commercial_value": 7.91,
+        "competitor_weakness": 20.06,
+        "organic_click_availability": 15.76,
+        "provider_suitability": 0.0,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": false,
+          "actual": false,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "insufficient"
+          ],
+          "actual": "insufficient",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "fail"
+          ],
+          "actual": "fail",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            35.0
+          ],
+          "actual": 35.0,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "unusable"
+          ],
+          "actual": "unusable",
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 35.0,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "testing_preliminary_assessment",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": false,
+      "assessment_type": "preliminary",
+      "score": 82.77,
+      "confidence": "medium",
+      "evidence_status": "preliminary",
+      "evidence_quality_status": "pass",
+      "component_scores": {
+        "demand_evidence": 17.55,
+        "commercial_value": 16.0,
+        "competitor_weakness": 11.4,
+        "organic_click_availability": 16.0,
+        "provider_suitability": 13.82,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": false,
+          "actual": false,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "preliminary",
+          "actual": "preliminary",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "actual": "medium",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "pass",
+            "warning"
+          ],
+          "actual": "pass",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 82.77,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "preliminary"
+          ],
+          "actual": "preliminary",
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 82.77,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "preliminary_not_rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "same_competitor_several_valuable_queries",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": true,
+      "assessment_type": "full",
+      "score": 79.05,
+      "confidence": "medium",
+      "evidence_status": "complete",
+      "evidence_quality_status": "pass",
+      "component_scores": {
+        "demand_evidence": 17.55,
+        "commercial_value": 16.0,
+        "competitor_weakness": 7.68,
+        "organic_click_availability": 16.0,
+        "provider_suitability": 13.82,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "actual": "medium",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "pass",
+            "warning"
+          ],
+          "actual": "pass",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 79.05,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "complete"
+          ],
+          "actual": "complete",
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 79.05,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "strong_competitor_single_valuable_query",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": true,
+      "assessment_type": "full",
+      "score": 81.1,
+      "confidence": "medium",
+      "evidence_status": "complete",
+      "evidence_quality_status": "pass",
+      "component_scores": {
+        "demand_evidence": 17.55,
+        "commercial_value": 16.0,
+        "competitor_weakness": 9.73,
+        "organic_click_availability": 16.0,
+        "provider_suitability": 13.82,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "actual": "medium",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "pass",
+            "warning"
+          ],
+          "actual": "pass",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 81.1,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "complete"
+          ],
+          "actual": "complete",
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 81.1,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "strong_competitor_position_one",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": true,
+      "assessment_type": "full",
+      "score": 79.46,
+      "confidence": "medium",
+      "evidence_status": "complete",
+      "evidence_quality_status": "pass",
+      "component_scores": {
+        "demand_evidence": 17.55,
+        "commercial_value": 16.0,
+        "competitor_weakness": 8.09,
+        "organic_click_availability": 16.0,
+        "provider_suitability": 13.82,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "actual": "medium",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "pass",
+            "warning"
+          ],
+          "actual": "pass",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 79.46,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "complete"
+          ],
+          "actual": "complete",
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 79.46,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    },
+    {
+      "scenario_id": "strong_competitor_position_ten",
+      "scenario_version": 1,
+      "passed": true,
+      "rankable": true,
+      "assessment_type": "full",
+      "score": 83.06,
+      "confidence": "medium",
+      "evidence_status": "complete",
+      "evidence_quality_status": "pass",
+      "component_scores": {
+        "demand_evidence": 17.55,
+        "commercial_value": 16.0,
+        "competitor_weakness": 11.69,
+        "organic_click_availability": 16.0,
+        "provider_suitability": 13.82,
+        "data_completeness": 8.0
+      },
+      "checks": [
+        {
+          "check": "rankable",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        },
+        {
+          "check": "assessment_type",
+          "passed": true,
+          "expected": "full",
+          "actual": "full",
+          "message": ""
+        },
+        {
+          "check": "confidence",
+          "passed": true,
+          "expected": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "actual": "medium",
+          "message": ""
+        },
+        {
+          "check": "quality_status",
+          "passed": true,
+          "expected": [
+            "pass",
+            "warning"
+          ],
+          "actual": "pass",
+          "message": ""
+        },
+        {
+          "check": "score",
+          "passed": true,
+          "expected": [
+            0.0,
+            100.0
+          ],
+          "actual": 83.06,
+          "message": ""
+        },
+        {
+          "check": "evidence_status",
+          "passed": true,
+          "expected": [
+            "complete"
+          ],
+          "actual": "complete",
+          "message": ""
+        },
+        {
+          "check": "score_between_0_and_100",
+          "passed": true,
+          "expected": "0..100",
+          "actual": 83.06,
+          "message": ""
+        },
+        {
+          "check": "components_within_weights",
+          "passed": true,
+          "expected": {},
+          "actual": {},
+          "message": ""
+        },
+        {
+          "check": "config_identity_matches",
+          "passed": true,
+          "expected": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "actual": [
+            "v2.12",
+            "745675e93d8623dc"
+          ],
+          "message": ""
+        },
+        {
+          "check": "full_rankable_requires_quality",
+          "passed": true,
+          "expected": true,
+          "actual": true,
+          "message": ""
+        }
+      ]
+    }
+  ],
+  "pairwise_summary": {
+    "total": 12,
+    "passed": 12,
+    "failed": 0
+  },
+  "pairwise_results": [
+    {
+      "preferred": "strong_demand_weak_competition",
+      "over": "strong_demand_strong_competition",
+      "reason": "Weaker competition must improve opportunity attractiveness.",
+      "component": "competitor_weakness",
+      "minimum_margin": 1.0,
+      "preferred_value": 11.4,
+      "other_value": 0.0,
+      "passed": true
+    },
+    {
+      "preferred": "weak_demand_weak_competition",
+      "over": "weak_demand_strong_competition",
+      "reason": "Competition direction must remain correct when demand is weak.",
+      "component": "competitor_weakness",
+      "minimum_margin": 1.0,
+      "preferred_value": 11.4,
+      "other_value": 0.0,
+      "passed": true
+    },
+    {
+      "preferred": "strong_demand_weak_competition",
+      "over": "weak_demand_weak_competition",
+      "reason": "Stronger demand must improve the demand component.",
+      "component": "demand_evidence",
+      "minimum_margin": 1.0,
+      "preferred_value": 17.55,
+      "other_value": 1.48,
+      "passed": true
+    },
+    {
+      "preferred": "measured_local_demand",
+      "over": "national_demand_only",
+      "reason": "Measured local demand must earn more demand credit than a population estimate.",
+      "component": "demand_evidence",
+      "minimum_margin": 1.0,
+      "preferred_value": 24.0,
+      "other_value": 17.55,
+      "passed": true
+    },
+    {
+      "preferred": "strong_demand_weak_competition",
+      "over": "too_few_providers",
+      "reason": "Healthy suitable-provider supply must improve provider suitability.",
+      "component": "provider_suitability",
+      "minimum_margin": 1.0,
+      "preferred_value": 13.82,
+      "other_value": 9.42,
+      "passed": true
+    },
+    {
+      "preferred": "strong_demand_weak_competition",
+      "over": "provider_oversupply",
+      "reason": "Healthy supply must outrank a demonstrably oversupplied market.",
+      "component": "provider_suitability",
+      "minimum_margin": 0.5,
+      "preferred_value": 13.82,
+      "other_value": 11.43,
+      "passed": true
+    },
+    {
+      "preferred": "strong_demand_weak_competition",
+      "over": "providers_outside_boundary",
+      "reason": "In-market providers must improve tenant suitability.",
+      "component": "provider_suitability",
+      "minimum_margin": 1.0,
+      "preferred_value": 13.82,
+      "other_value": 12.59,
+      "passed": true
+    },
+    {
+      "preferred": "strong_demand_weak_competition",
+      "over": "directory_dominated_top_results",
+      "reason": "Directory displacement must reduce organic click availability.",
+      "component": "organic_click_availability",
+      "minimum_margin": 0.5,
+      "preferred_value": 16.0,
+      "other_value": 10.28,
+      "passed": true
+    },
+    {
+      "preferred": "strong_demand_weak_competition",
+      "over": "marketplace_dominated_top_results",
+      "reason": "Marketplace displacement must reduce organic click availability.",
+      "component": "organic_click_availability",
+      "minimum_margin": 0.25,
+      "preferred_value": 16.0,
+      "other_value": 13.52,
+      "passed": true
+    },
+    {
+      "preferred": "strong_demand_weak_competition",
+      "over": "national_brand_dominated_results",
+      "reason": "National-brand and shopping displacement must reduce organic clicks.",
+      "component": "organic_click_availability",
+      "minimum_margin": 0.5,
+      "preferred_value": 16.0,
+      "other_value": 10.43,
+      "passed": true
+    },
+    {
+      "preferred": "strong_competitor_single_valuable_query",
+      "over": "same_competitor_several_valuable_queries",
+      "reason": "A domain dominating several valuable queries is a larger ranking obstacle.",
+      "component": "competitor_weakness",
+      "minimum_margin": 0.25,
+      "preferred_value": 9.73,
+      "other_value": 7.68,
+      "passed": true
+    },
+    {
+      "preferred": "strong_competitor_position_ten",
+      "over": "strong_competitor_position_one",
+      "reason": "A strong competitor at position ten is less threatening than at position one.",
+      "component": "competitor_weakness",
+      "minimum_margin": 0.25,
+      "preferred_value": 11.69,
+      "other_value": 8.09,
+      "passed": true
+    }
+  ],
+  "component_distributions": {
+    "commercial_value": {
+      "minimum": 7.19,
+      "maximum": 16.0,
+      "mean": 15.01,
+      "median": 16.0
+    },
+    "competitor_weakness": {
+      "minimum": 0.0,
+      "maximum": 20.06,
+      "mean": 9.0,
+      "median": 11.4
+    },
+    "data_completeness": {
+      "minimum": 8.0,
+      "maximum": 8.0,
+      "mean": 8.0,
+      "median": 8.0
+    },
+    "demand_evidence": {
+      "minimum": 1.48,
+      "maximum": 24.0,
+      "mean": 16.62,
+      "median": 17.55
+    },
+    "organic_click_availability": {
+      "minimum": 10.28,
+      "maximum": 16.0,
+      "mean": 15.41,
+      "median": 16.0
+    },
+    "provider_suitability": {
+      "minimum": 0.0,
+      "maximum": 13.82,
+      "mean": 12.38,
+      "median": 13.82
+    }
+  },
+  "evidence_gate_confusion": {
+    "expected_rankable_predicted_rankable": 23,
+    "expected_rankable_predicted_unrankable": 0,
+    "expected_unrankable_predicted_rankable": 0,
+    "expected_unrankable_predicted_unrankable": 3
+  },
+  "classification_summary": {
+    "version": "2026.07.1",
+    "total": 12,
+    "passed": 12,
+    "failed": 0,
+    "accuracy": 1.0,
+    "confusion": {
+      "local_provider": {
+        "local_provider": 2
+      },
+      "directory": {
+        "directory": 1
+      },
+      "marketplace": {
+        "marketplace": 1
+      },
+      "lead_generator": {
+        "lead_generator": 1
+      },
+      "national_brand": {
+        "national_brand": 1
+      },
+      "informational_publisher": {
+        "informational_publisher": 1
+      },
+      "government_or_nonprofit": {
+        "government_or_nonprofit": 1
+      },
+      "unknown": {
+        "unknown": 4
+      }
+    },
+    "cases": [
+      {
+        "case_id": "local_provider_clear_identity",
+        "expected": "local_provider",
+        "actual": "local_provider",
+        "confidence": 0.68,
+        "confidence_range": [
+          0.68,
+          0.68
+        ],
+        "passed": true
+      },
+      {
+        "case_id": "directory_known_domain",
+        "expected": "directory",
+        "actual": "directory",
+        "confidence": 0.96,
+        "confidence_range": [
+          0.96,
+          0.96
+        ],
+        "passed": true
+      },
+      {
+        "case_id": "marketplace_known_domain",
+        "expected": "marketplace",
+        "actual": "marketplace",
+        "confidence": 0.94,
+        "confidence_range": [
+          0.94,
+          0.94
+        ],
+        "passed": true
+      },
+      {
+        "case_id": "lead_generator_language",
+        "expected": "lead_generator",
+        "actual": "lead_generator",
+        "confidence": 0.78,
+        "confidence_range": [
+          0.78,
+          0.78
+        ],
+        "passed": true
+      },
+      {
+        "case_id": "national_brand_known_domain",
+        "expected": "national_brand",
+        "actual": "national_brand",
+        "confidence": 0.94,
+        "confidence_range": [
+          0.94,
+          0.94
+        ],
+        "passed": true
+      },
+      {
+        "case_id": "informational_publisher_language",
+        "expected": "informational_publisher",
+        "actual": "informational_publisher",
+        "confidence": 0.72,
+        "confidence_range": [
+          0.72,
+          0.72
+        ],
+        "passed": true
+      },
+      {
+        "case_id": "government_domain",
+        "expected": "government_or_nonprofit",
+        "actual": "government_or_nonprofit",
+        "confidence": 0.9,
+        "confidence_range": [
+          0.9,
+          0.9
+        ],
+        "passed": true
+      },
+      {
+        "case_id": "unknown_ambiguous_org",
+        "expected": "unknown",
+        "actual": "unknown",
+        "confidence": 0.35,
+        "confidence_range": [
+          0.35,
+          0.35
+        ],
+        "passed": true
+      },
+      {
+        "case_id": "unknown_generic_service_language",
+        "expected": "unknown",
+        "actual": "unknown",
+        "confidence": 0.35,
+        "confidence_range": [
+          0.35,
+          0.35
+        ],
+        "passed": true
+      },
+      {
+        "case_id": "local_provider_listing_domain_match",
+        "expected": "local_provider",
+        "actual": "local_provider",
+        "confidence": 0.68,
+        "confidence_range": [
+          0.68,
+          0.68
+        ],
+        "passed": true
+      },
+      {
+        "case_id": "unknown_service_without_market",
+        "expected": "unknown",
+        "actual": "unknown",
+        "confidence": 0.35,
+        "confidence_range": [
+          0.35,
+          0.35
+        ],
+        "passed": true
+      },
+      {
+        "case_id": "unknown_market_without_service",
+        "expected": "unknown",
+        "actual": "unknown",
+        "confidence": 0.35,
+        "confidence_range": [
+          0.35,
+          0.35
+        ],
+        "passed": true
+      }
+    ]
+  },
+  "provider_summary": {
+    "version": "2026.07.1",
+    "total": 15,
+    "passed": 15,
+    "failed": 0,
+    "accuracy": 1.0,
+    "suitable_threshold": 55.0,
+    "cases": [
+      {
+        "case_id": "exact_fit_active_in_market_contactable_strong_reviews",
+        "score": 99.62,
+        "expected_score_range": [
+          93.0,
+          100.0
+        ],
+        "suitable": true,
+        "expected_suitable": true,
+        "passed": true,
+        "signals": {
+          "service_fit": {
+            "normalized": 1.0,
+            "method": "configured_provider_category_exact",
+            "matched_categories": [
+              "Plumber",
+              "Water heater installation service"
+            ],
+            "provider_categories": [
+              "Plumber",
+              "Water heater installation service"
+            ],
+            "configured_categories": [
+              "plumber",
+              "water heater installation service"
+            ],
+            "weight": 30.0,
+            "weighted_score": 30.0
+          },
+          "geographic_fit": {
+            "normalized": 1.0,
+            "method": "coordinate_distance",
+            "distance_km": 0.82,
+            "service_area_match": 0.0,
+            "address_match": 0.0,
+            "provider_coordinates": [
+              36.17,
+              -86.78
+            ],
+            "market_coordinates": [
+              36.1627,
+              -86.7816
+            ],
+            "weight": 25.0,
+            "weighted_score": 25.0
+          },
+          "status_certainty": {
+            "normalized": 1.0,
+            "method": "confirmed_operating",
+            "reported_status": "open",
+            "weight": 15.0,
+            "weighted_score": 15.0
+          },
+          "contactability": {
+            "normalized": 0.988,
+            "method": "strongest_channel_adjusted_by_confidence",
+            "channels": {
+              "website": true,
+              "phone": true,
+              "email": true,
+              "contact_form": false
+            },
+            "channel_strength": 1.0,
+            "contact_confidence": 0.95,
+            "reliability_multiplier": 0.988,
+            "weight": 20.0,
+            "weighted_score": 19.76
+          },
+          "reputation": {
+            "normalized": 0.986,
+            "method": "rating_and_review_evidence",
+            "rating": 4.9,
+            "review_count": 180,
+            "rating_normalized": 0.98,
+            "review_count_normalized": 1.0,
+            "weight": 10.0,
+            "weighted_score": 9.86
+          }
+        }
+      },
+      {
+        "case_id": "adjacent_service_only",
+        "score": 51.16,
+        "expected_score_range": [
+          40.0,
+          54.99
+        ],
+        "suitable": false,
+        "expected_suitable": false,
+        "passed": true,
+        "signals": {
+          "service_fit": {
+            "normalized": 0.0,
+            "method": "no_service_evidence",
+            "configured_category_similarity": 0.0,
+            "service_language_similarity": 0.0,
+            "provider_categories": [
+              "HVAC contractor"
+            ],
+            "configured_categories": [
+              "plumber",
+              "water heater installation service"
+            ],
+            "weight": 30.0,
+            "weighted_score": 0.0
+          },
+          "geographic_fit": {
+            "normalized": 1.0,
+            "method": "coordinate_distance",
+            "distance_km": 0.82,
+            "service_area_match": 0.0,
+            "address_match": 0.0,
+            "provider_coordinates": [
+              36.17,
+              -86.78
+            ],
+            "market_coordinates": [
+              36.1627,
+              -86.7816
+            ],
+            "weight": 25.0,
+            "weighted_score": 25.0
+          },
+          "status_certainty": {
+            "normalized": 1.0,
+            "method": "confirmed_operating",
+            "reported_status": "open",
+            "weight": 15.0,
+            "weighted_score": 15.0
+          },
+          "contactability": {
+            "normalized": 0.263,
+            "method": "strongest_channel_adjusted_by_confidence",
+            "channels": {
+              "website": true,
+              "phone": false,
+              "email": false,
+              "contact_form": false
+            },
+            "channel_strength": 0.3,
+            "contact_confidence": 0.5,
+            "reliability_multiplier": 0.875,
+            "weight": 20.0,
+            "weighted_score": 5.26
+          },
+          "reputation": {
+            "normalized": 0.59,
+            "method": "rating_and_review_evidence",
+            "rating": 4.0,
+            "review_count": 10,
+            "rating_normalized": 0.8,
+            "review_count_normalized": 0.1,
+            "weight": 10.0,
+            "weighted_score": 5.9
+          }
+        }
+      },
+      {
+        "case_id": "confirmed_active",
+        "score": 93.65,
+        "expected_score_range": [
+          85.0,
+          100.0
+        ],
+        "suitable": true,
+        "expected_suitable": true,
+        "passed": true,
+        "signals": {
+          "service_fit": {
+            "normalized": 1.0,
+            "method": "configured_provider_category_exact",
+            "matched_categories": [
+              "Plumber"
+            ],
+            "provider_categories": [
+              "Plumber"
+            ],
+            "configured_categories": [
+              "plumber",
+              "water heater installation service"
+            ],
+            "weight": 30.0,
+            "weighted_score": 30.0
+          },
+          "geographic_fit": {
+            "normalized": 1.0,
+            "method": "coordinate_distance",
+            "distance_km": 0.82,
+            "service_area_match": 0.0,
+            "address_match": 0.0,
+            "provider_coordinates": [
+              36.17,
+              -86.78
+            ],
+            "market_coordinates": [
+              36.1627,
+              -86.7816
+            ],
+            "weight": 25.0,
+            "weighted_score": 25.0
+          },
+          "status_certainty": {
+            "normalized": 1.0,
+            "method": "confirmed_operating",
+            "reported_status": "open",
+            "weight": 15.0,
+            "weighted_score": 15.0
+          },
+          "contactability": {
+            "normalized": 0.807,
+            "method": "strongest_channel_adjusted_by_confidence",
+            "channels": {
+              "website": false,
+              "phone": true,
+              "email": false,
+              "contact_form": false
+            },
+            "channel_strength": 0.85,
+            "contact_confidence": 0.8,
+            "reliability_multiplier": 0.95,
+            "weight": 20.0,
+            "weighted_score": 16.14
+          },
+          "reputation": {
+            "normalized": 0.751,
+            "method": "rating_and_review_evidence",
+            "rating": 4.4,
+            "review_count": 45,
+            "rating_normalized": 0.88,
+            "review_count_normalized": 0.45,
+            "weight": 10.0,
+            "weighted_score": 7.51
+          }
+        }
+      },
+      {
+        "case_id": "unknown_status",
+        "score": 82.4,
+        "expected_score_range": [
+          70.0,
+          90.0
+        ],
+        "suitable": true,
+        "expected_suitable": true,
+        "passed": true,
+        "signals": {
+          "service_fit": {
+            "normalized": 1.0,
+            "method": "configured_provider_category_exact",
+            "matched_categories": [
+              "Plumber"
+            ],
+            "provider_categories": [
+              "Plumber"
+            ],
+            "configured_categories": [
+              "plumber",
+              "water heater installation service"
+            ],
+            "weight": 30.0,
+            "weighted_score": 30.0
+          },
+          "geographic_fit": {
+            "normalized": 1.0,
+            "method": "coordinate_distance",
+            "distance_km": 0.82,
+            "service_area_match": 0.0,
+            "address_match": 0.0,
+            "provider_coordinates": [
+              36.17,
+              -86.78
+            ],
+            "market_coordinates": [
+              36.1627,
+              -86.7816
+            ],
+            "weight": 25.0,
+            "weighted_score": 25.0
+          },
+          "status_certainty": {
+            "normalized": 0.25,
+            "method": "status_uncertain",
+            "reported_status": "unknown",
+            "weight": 15.0,
+            "weighted_score": 3.75
+          },
+          "contactability": {
+            "normalized": 0.807,
+            "method": "strongest_channel_adjusted_by_confidence",
+            "channels": {
+              "website": false,
+              "phone": true,
+              "email": false,
+              "contact_form": false
+            },
+            "channel_strength": 0.85,
+            "contact_confidence": 0.8,
+            "reliability_multiplier": 0.95,
+            "weight": 20.0,
+            "weighted_score": 16.14
+          },
+          "reputation": {
+            "normalized": 0.751,
+            "method": "rating_and_review_evidence",
+            "rating": 4.4,
+            "review_count": 45,
+            "rating_normalized": 0.88,
+            "review_count_normalized": 0.45,
+            "weight": 10.0,
+            "weighted_score": 7.51
+          }
+        }
+      },
+      {
+        "case_id": "closed_business",
+        "score": 40.0,
+        "expected_score_range": [
+          0.0,
+          40.0
+        ],
+        "suitable": false,
+        "expected_suitable": false,
+        "passed": true,
+        "signals": {
+          "service_fit": {
+            "normalized": 1.0,
+            "method": "configured_provider_category_exact",
+            "matched_categories": [
+              "Plumber"
+            ],
+            "provider_categories": [
+              "Plumber"
+            ],
+            "configured_categories": [
+              "plumber",
+              "water heater installation service"
+            ],
+            "weight": 30.0,
+            "weighted_score": 30.0
+          },
+          "geographic_fit": {
+            "normalized": 1.0,
+            "method": "coordinate_distance",
+            "distance_km": 0.82,
+            "service_area_match": 0.0,
+            "address_match": 0.0,
+            "provider_coordinates": [
+              36.17,
+              -86.78
+            ],
+            "market_coordinates": [
+              36.1627,
+              -86.7816
+            ],
+            "weight": 25.0,
+            "weighted_score": 25.0
+          },
+          "status_certainty": {
+            "normalized": 0.0,
+            "method": "inactive_or_closed",
+            "reported_status": "permanently_closed",
+            "weight": 15.0,
+            "weighted_score": 0.0
+          },
+          "contactability": {
+            "normalized": 0.807,
+            "method": "strongest_channel_adjusted_by_confidence",
+            "channels": {
+              "website": false,
+              "phone": true,
+              "email": false,
+              "contact_form": false
+            },
+            "channel_strength": 0.85,
+            "contact_confidence": 0.8,
+            "reliability_multiplier": 0.95,
+            "weight": 20.0,
+            "weighted_score": 16.14
+          },
+          "reputation": {
+            "normalized": 0.751,
+            "method": "rating_and_review_evidence",
+            "rating": 4.4,
+            "review_count": 45,
+            "rating_normalized": 0.88,
+            "review_count_normalized": 0.45,
+            "weight": 10.0,
+            "weighted_score": 7.51
+          }
+        }
+      },
+      {
+        "case_id": "in_market",
+        "score": 93.65,
+        "expected_score_range": [
+          85.0,
+          100.0
+        ],
+        "suitable": true,
+        "expected_suitable": true,
+        "passed": true,
+        "signals": {
+          "service_fit": {
+            "normalized": 1.0,
+            "method": "configured_provider_category_exact",
+            "matched_categories": [
+              "Plumber"
+            ],
+            "provider_categories": [
+              "Plumber"
+            ],
+            "configured_categories": [
+              "plumber",
+              "water heater installation service"
+            ],
+            "weight": 30.0,
+            "weighted_score": 30.0
+          },
+          "geographic_fit": {
+            "normalized": 1.0,
+            "method": "coordinate_distance",
+            "distance_km": 0.82,
+            "service_area_match": 0.0,
+            "address_match": 0.0,
+            "provider_coordinates": [
+              36.17,
+              -86.78
+            ],
+            "market_coordinates": [
+              36.1627,
+              -86.7816
+            ],
+            "weight": 25.0,
+            "weighted_score": 25.0
+          },
+          "status_certainty": {
+            "normalized": 1.0,
+            "method": "confirmed_operating",
+            "reported_status": "open",
+            "weight": 15.0,
+            "weighted_score": 15.0
+          },
+          "contactability": {
+            "normalized": 0.807,
+            "method": "strongest_channel_adjusted_by_confidence",
+            "channels": {
+              "website": false,
+              "phone": true,
+              "email": false,
+              "contact_form": false
+            },
+            "channel_strength": 0.85,
+            "contact_confidence": 0.8,
+            "reliability_multiplier": 0.95,
+            "weight": 20.0,
+            "weighted_score": 16.14
+          },
+          "reputation": {
+            "normalized": 0.751,
+            "method": "rating_and_review_evidence",
+            "rating": 4.4,
+            "review_count": 45,
+            "rating_normalized": 0.88,
+            "review_count_normalized": 0.45,
+            "weight": 10.0,
+            "weighted_score": 7.51
+          }
+        }
+      },
+      {
+        "case_id": "outside_market",
+        "score": 68.65,
+        "expected_score_range": [
+          55.0,
+          80.0
+        ],
+        "suitable": true,
+        "expected_suitable": true,
+        "passed": true,
+        "signals": {
+          "service_fit": {
+            "normalized": 1.0,
+            "method": "configured_provider_category_exact",
+            "matched_categories": [
+              "Plumber"
+            ],
+            "provider_categories": [
+              "Plumber"
+            ],
+            "configured_categories": [
+              "plumber",
+              "water heater installation service"
+            ],
+            "weight": 30.0,
+            "weighted_score": 30.0
+          },
+          "geographic_fit": {
+            "normalized": 0.0,
+            "method": "coordinate_distance",
+            "distance_km": 258.13,
+            "service_area_match": 0.0,
+            "address_match": 0.0,
+            "provider_coordinates": [
+              35.9606,
+              -83.9207
+            ],
+            "market_coordinates": [
+              36.1627,
+              -86.7816
+            ],
+            "weight": 25.0,
+            "weighted_score": 0.0
+          },
+          "status_certainty": {
+            "normalized": 1.0,
+            "method": "confirmed_operating",
+            "reported_status": "open",
+            "weight": 15.0,
+            "weighted_score": 15.0
+          },
+          "contactability": {
+            "normalized": 0.807,
+            "method": "strongest_channel_adjusted_by_confidence",
+            "channels": {
+              "website": false,
+              "phone": true,
+              "email": false,
+              "contact_form": false
+            },
+            "channel_strength": 0.85,
+            "contact_confidence": 0.8,
+            "reliability_multiplier": 0.95,
+            "weight": 20.0,
+            "weighted_score": 16.14
+          },
+          "reputation": {
+            "normalized": 0.751,
+            "method": "rating_and_review_evidence",
+            "rating": 4.4,
+            "review_count": 45,
+            "rating_normalized": 0.88,
+            "review_count_normalized": 0.45,
+            "weight": 10.0,
+            "weighted_score": 7.51
+          }
+        }
+      },
+      {
+        "case_id": "directly_contactable",
+        "score": 97.51,
+        "expected_score_range": [
+          88.0,
+          100.0
+        ],
+        "suitable": true,
+        "expected_suitable": true,
+        "passed": true,
+        "signals": {
+          "service_fit": {
+            "normalized": 1.0,
+            "method": "configured_provider_category_exact",
+            "matched_categories": [
+              "Plumber"
+            ],
+            "provider_categories": [
+              "Plumber"
+            ],
+            "configured_categories": [
+              "plumber",
+              "water heater installation service"
+            ],
+            "weight": 30.0,
+            "weighted_score": 30.0
+          },
+          "geographic_fit": {
+            "normalized": 1.0,
+            "method": "coordinate_distance",
+            "distance_km": 0.82,
+            "service_area_match": 0.0,
+            "address_match": 0.0,
+            "provider_coordinates": [
+              36.17,
+              -86.78
+            ],
+            "market_coordinates": [
+              36.1627,
+              -86.7816
+            ],
+            "weight": 25.0,
+            "weighted_score": 25.0
+          },
+          "status_certainty": {
+            "normalized": 1.0,
+            "method": "confirmed_operating",
+            "reported_status": "open",
+            "weight": 15.0,
+            "weighted_score": 15.0
+          },
+          "contactability": {
+            "normalized": 1.0,
+            "method": "strongest_channel_adjusted_by_confidence",
+            "channels": {
+              "website": false,
+              "phone": true,
+              "email": true,
+              "contact_form": false
+            },
+            "channel_strength": 1.0,
+            "contact_confidence": 1.0,
+            "reliability_multiplier": 1.0,
+            "weight": 20.0,
+            "weighted_score": 20.0
+          },
+          "reputation": {
+            "normalized": 0.751,
+            "method": "rating_and_review_evidence",
+            "rating": 4.4,
+            "review_count": 45,
+            "rating_normalized": 0.88,
+            "review_count_normalized": 0.45,
+            "weight": 10.0,
+            "weighted_score": 7.51
+          }
+        }
+      },
+      {
+        "case_id": "non_contactable",
+        "score": 77.51,
+        "expected_score_range": [
+          65.0,
+          85.0
+        ],
+        "suitable": true,
+        "expected_suitable": true,
+        "passed": true,
+        "signals": {
+          "service_fit": {
+            "normalized": 1.0,
+            "method": "configured_provider_category_exact",
+            "matched_categories": [
+              "Plumber"
+            ],
+            "provider_categories": [
+              "Plumber"
+            ],
+            "configured_categories": [
+              "plumber",
+              "water heater installation service"
+            ],
+            "weight": 30.0,
+            "weighted_score": 30.0
+          },
+          "geographic_fit": {
+            "normalized": 1.0,
+            "method": "coordinate_distance",
+            "distance_km": 0.82,
+            "service_area_match": 0.0,
+            "address_match": 0.0,
+            "provider_coordinates": [
+              36.17,
+              -86.78
+            ],
+            "market_coordinates": [
+              36.1627,
+              -86.7816
+            ],
+            "weight": 25.0,
+            "weighted_score": 25.0
+          },
+          "status_certainty": {
+            "normalized": 1.0,
+            "method": "confirmed_operating",
+            "reported_status": "open",
+            "weight": 15.0,
+            "weighted_score": 15.0
+          },
+          "contactability": {
+            "normalized": 0.0,
+            "method": "no_contact_channel",
+            "channels": {
+              "website": false,
+              "phone": false,
+              "email": false,
+              "contact_form": false
+            },
+            "channel_strength": 0.0,
+            "contact_confidence": 0.8,
+            "reliability_multiplier": 0.95,
+            "weight": 20.0,
+            "weighted_score": 0.0
+          },
+          "reputation": {
+            "normalized": 0.751,
+            "method": "rating_and_review_evidence",
+            "rating": 4.4,
+            "review_count": 45,
+            "rating_normalized": 0.88,
+            "review_count_normalized": 0.45,
+            "weight": 10.0,
+            "weighted_score": 7.51
+          }
+        }
+      },
+      {
+        "case_id": "strong_review_evidence",
+        "score": 96.14,
+        "expected_score_range": [
+          88.0,
+          100.0
+        ],
+        "suitable": true,
+        "expected_suitable": true,
+        "passed": true,
+        "signals": {
+          "service_fit": {
+            "normalized": 1.0,
+            "method": "configured_provider_category_exact",
+            "matched_categories": [
+              "Plumber"
+            ],
+            "provider_categories": [
+              "Plumber"
+            ],
+            "configured_categories": [
+              "plumber",
+              "water heater installation service"
+            ],
+            "weight": 30.0,
+            "weighted_score": 30.0
+          },
+          "geographic_fit": {
+            "normalized": 1.0,
+            "method": "coordinate_distance",
+            "distance_km": 0.82,
+            "service_area_match": 0.0,
+            "address_match": 0.0,
+            "provider_coordinates": [
+              36.17,
+              -86.78
+            ],
+            "market_coordinates": [
+              36.1627,
+              -86.7816
+            ],
+            "weight": 25.0,
+            "weighted_score": 25.0
+          },
+          "status_certainty": {
+            "normalized": 1.0,
+            "method": "confirmed_operating",
+            "reported_status": "open",
+            "weight": 15.0,
+            "weighted_score": 15.0
+          },
+          "contactability": {
+            "normalized": 0.807,
+            "method": "strongest_channel_adjusted_by_confidence",
+            "channels": {
+              "website": false,
+              "phone": true,
+              "email": false,
+              "contact_form": false
+            },
+            "channel_strength": 0.85,
+            "contact_confidence": 0.8,
+            "reliability_multiplier": 0.95,
+            "weight": 20.0,
+            "weighted_score": 16.14
+          },
+          "reputation": {
+            "normalized": 1.0,
+            "method": "rating_and_review_evidence",
+            "rating": 5.0,
+            "review_count": 250,
+            "rating_normalized": 1.0,
+            "review_count_normalized": 1.0,
+            "weight": 10.0,
+            "weighted_score": 10.0
+          }
+        }
+      },
+      {
+        "case_id": "sparse_review_evidence",
+        "score": 91.8,
+        "expected_score_range": [
+          80.0,
+          95.0
+        ],
+        "suitable": true,
+        "expected_suitable": true,
+        "passed": true,
+        "signals": {
+          "service_fit": {
+            "normalized": 1.0,
+            "method": "configured_provider_category_exact",
+            "matched_categories": [
+              "Plumber"
+            ],
+            "provider_categories": [
+              "Plumber"
+            ],
+            "configured_categories": [
+              "plumber",
+              "water heater installation service"
+            ],
+            "weight": 30.0,
+            "weighted_score": 30.0
+          },
+          "geographic_fit": {
+            "normalized": 1.0,
+            "method": "coordinate_distance",
+            "distance_km": 0.82,
+            "service_area_match": 0.0,
+            "address_match": 0.0,
+            "provider_coordinates": [
+              36.17,
+              -86.78
+            ],
+            "market_coordinates": [
+              36.1627,
+              -86.7816
+            ],
+            "weight": 25.0,
+            "weighted_score": 25.0
+          },
+          "status_certainty": {
+            "normalized": 1.0,
+            "method": "confirmed_operating",
+            "reported_status": "open",
+            "weight": 15.0,
+            "weighted_score": 15.0
+          },
+          "contactability": {
+            "normalized": 0.807,
+            "method": "strongest_channel_adjusted_by_confidence",
+            "channels": {
+              "website": false,
+              "phone": true,
+              "email": false,
+              "contact_form": false
+            },
+            "channel_strength": 0.85,
+            "contact_confidence": 0.8,
+            "reliability_multiplier": 0.95,
+            "weight": 20.0,
+            "weighted_score": 16.14
+          },
+          "reputation": {
+            "normalized": 0.566,
+            "method": "rating_and_review_evidence",
+            "rating": 4.0,
+            "review_count": 2,
+            "rating_normalized": 0.8,
+            "review_count_normalized": 0.02,
+            "weight": 10.0,
+            "weighted_score": 5.66
+          }
+        }
+      }
+    ],
+    "pairwise": [
+      {
+        "preferred": "confirmed_active",
+        "over": "unknown_status",
+        "reason": "Confirmed operating status must outrank uncertain status.",
+        "preferred_score": 93.65,
+        "other_score": 82.4,
+        "passed": true
+      },
+      {
+        "preferred": "in_market",
+        "over": "outside_market",
+        "reason": "Verified geographic proximity must improve suitability.",
+        "preferred_score": 93.65,
+        "other_score": 68.65,
+        "passed": true
+      },
+      {
+        "preferred": "directly_contactable",
+        "over": "non_contactable",
+        "reason": "A direct contact channel must improve tenant reachability.",
+        "preferred_score": 97.51,
+        "other_score": 77.51,
+        "passed": true
+      },
+      {
+        "preferred": "strong_review_evidence",
+        "over": "sparse_review_evidence",
+        "reason": "Stronger review evidence must improve the reputation signal.",
+        "preferred_score": 96.14,
+        "other_score": 91.8,
+        "passed": true
+      }
+    ]
+  }
+}

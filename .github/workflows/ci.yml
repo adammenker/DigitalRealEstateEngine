@@ -25,6 +25,8 @@ jobs:
       - run: ruff check src tests scripts
       - run: mypy --strict src
       - run: alembic upgrade head
+      - run: rank-rent calibrate validate-config
+      - run: rank-rent calibrate run --no-save
       - run: pytest -q
 
   frontend:

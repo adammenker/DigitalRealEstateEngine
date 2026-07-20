@@ -1,0 +1,142 @@
+schema_version: 1
+version: "2026.07.1"
+cases:
+  - case_id: local_provider_clear_identity
+    service_family_id: water_heater_services
+    market: &market
+      id: benchmark_nashville_tn
+      display_name: Nashville, TN
+      state: TN
+      cities: [Nashville]
+      latitude: 36.1627
+      longitude: -86.7816
+      population: 689447
+      reference_population: 335893238
+      boundary_radius_km: 45
+    result:
+      order: 1
+      url: https://nashville-water-heater-pros.example/repair
+      domain: nashville-water-heater-pros.example
+      title: Licensed Water Heater Repair in Nashville TN
+      description: Family owned. Call now to schedule service.
+    expected_classification: local_provider
+    confidence_range: [0.68, 0.68]
+
+  - case_id: directory_known_domain
+    market: *market
+    result:
+      order: 1
+      url: https://www.yelp.com/search?find_desc=water+heater
+      domain: www.yelp.com
+      title: Best Water Heater Repair in Nashville
+    expected_classification: directory
+    confidence_range: [0.96, 0.96]
+
+  - case_id: marketplace_known_domain
+    market: *market
+    result:
+      order: 1
+      url: https://www.taskrabbit.com/locations/nashville/plumbing
+      domain: taskrabbit.com
+      title: Hire Water Heater Help
+    expected_classification: marketplace
+    confidence_range: [0.94, 0.94]
+
+  - case_id: lead_generator_language
+    market: *market
+    result:
+      order: 1
+      url: https://water-heater-quotes.example/nashville
+      domain: water-heater-quotes.example
+      title: Compare Quotes for Water Heater Repair
+      description: Get quotes and get matched with local contractors.
+    expected_classification: lead_generator
+    confidence_range: [0.78, 0.78]
+
+  - case_id: national_brand_known_domain
+    market: *market
+    result:
+      order: 1
+      url: https://www.homedepot.com/services/c/water-heater-installation
+      domain: homedepot.com
+      title: Water Heater Installation
+    expected_classification: national_brand
+    confidence_range: [0.94, 0.94]
+
+  - case_id: informational_publisher_language
+    market: *market
+    result:
+      order: 1
+      url: https://home-knowledge.example/water-heaters
+      domain: home-knowledge.example
+      title: How to Diagnose a Water Heater
+      description: A detailed DIY guide and average cost guide.
+    expected_classification: informational_publisher
+    confidence_range: [0.72, 0.72]
+
+  - case_id: government_domain
+    market: *market
+    result:
+      order: 1
+      url: https://energy.gov/energysaver/water-heating
+      domain: energy.gov
+      title: Water Heating
+    expected_classification: government_or_nonprofit
+    confidence_range: [0.90, 0.90]
+
+  - case_id: unknown_ambiguous_org
+    market: *market
+    result:
+      order: 1
+      url: https://example.org/nashville-water-heater
+      domain: example.org
+      title: Water Heater Repair Nashville
+    expected_classification: unknown
+    confidence_range: [0.35, 0.35]
+
+  - case_id: unknown_generic_service_language
+    market: *market
+    result:
+      order: 2
+      url: https://best-results.example/water-heater
+      domain: best-results.example
+      title: Water Heater Repair Service
+      description: Installation and repair information.
+    expected_classification: unknown
+    confidence_range: [0.35, 0.35]
+
+  - case_id: local_provider_listing_domain_match
+    market: *market
+    providers:
+      - name: Cumberland Water Pros
+        website: https://cumberlandwaterpros.example
+        business_status: open
+    result:
+      order: 1
+      url: https://cumberlandwaterpros.example/water-heater-repair
+      domain: cumberlandwaterpros.example
+      title: Water Heater Repair Nashville
+    expected_classification: local_provider
+    confidence_range: [0.68, 0.68]
+
+  - case_id: unknown_service_without_market
+    market: *market
+    result:
+      order: 3
+      url: https://licensed-water-heater-pros.example/repair
+      domain: licensed-water-heater-pros.example
+      title: Licensed Water Heater Repair
+      description: Family owned and insured.
+    expected_classification: unknown
+    confidence_range: [0.35, 0.35]
+
+  - case_id: unknown_market_without_service
+    market: *market
+    result:
+      order: 4
+      url: https://nashville-home-pros.example
+      domain: nashville-home-pros.example
+      title: Licensed Nashville Home Professionals
+      description: Family owned. Contact us today.
+    expected_classification: unknown
+    confidence_range: [0.35, 0.35]

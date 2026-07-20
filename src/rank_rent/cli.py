@@ -35,10 +35,12 @@ site_app = typer.Typer(no_args_is_help=True)
 replay_app = typer.Typer(no_args_is_help=True)
 fixtures_app = typer.Typer(no_args_is_help=True)
 data_app = typer.Typer(no_args_is_help=True)
+calibrate_app = typer.Typer(no_args_is_help=True)
 app.add_typer(site_app, name="site")
 app.add_typer(replay_app, name="replay")
 app.add_typer(fixtures_app, name="fixtures")
 app.add_typer(data_app, name="data")
+app.add_typer(calibrate_app, name="calibrate")
 
 
 def require_runtime_mode(mode: DataMode) -> None:
@@ -256,6 +258,137 @@ def data_audit() -> None:
     init_db()
     with SessionLocal() as session:
         typer.echo(json.dumps(audit_data(session), indent=2))
+
+
+@calibrate_app.command("run")
+def calibrate_run(
+    scoring_version: Annotated[
+        str | None,
+        typer.Option("--scoring-version", help="Version declared in the benchmark manifest."),
+    ] = None,
+    output_dir: Annotated[
+        Path | None,
+        typer.Option("--output-dir", help="Immutable historical report directory."),
+    ] = None,
+    output_format: Annotated[
+        str,
+        typer.Option("--format", help="Output format: text or json."),
+    ] = "text",
+    save: Annotated[
+        bool,
+        typer.Option("--save/--no-save", help="Preserve the report as an immutable artifact."),
+    ] = True,
+) -> None:
+    from rank_rent.calibration.loader import CalibrationConfigError, project_path
+    from rank_rent.calibration.reporting import render_report, save_report
+    from rank_rent.calibration.runner import CalibrationRunner
+
+    if output_format not in {"text", "json"}:
+        raise typer.BadParameter("--format must be text or json")
+    try:
+        runner = CalibrationRunner(get_settings().project_root)
+        report = runner.run(scoring_version)
+        typer.echo(render_report(report, output_format=output_format))
+        if save:
+            destination = output_dir or project_path(
+                runner.project_root,
+                runner.manifest.reports_directory,
+            )
+            typer.echo(f"Saved report: {save_report(report, destination)}")
+    except (CalibrationConfigError, OSError, ValueError) as exc:
+        typer.secho(str(exc), fg=typer.colors.RED)
+        raise typer.Exit(2) from exc
+    if not report.success:
+        raise typer.Exit(1)
+
+
+@calibrate_app.command("report")
+def calibrate_report(
+    report_path: Annotated[
+        Path | None,
+        typer.Argument(help="Historical report path; defaults to the latest report."),
+    ] = None,
+    reports_dir: Annotated[
+        Path | None,
+        typer.Option("--reports-dir", help="Directory searched for the latest report."),
+    ] = None,
+    output_format: Annotated[str, typer.Option("--format")] = "text",
+) -> None:
+    from rank_rent.calibration.loader import project_path
+    from rank_rent.calibration.reporting import latest_report, load_report, render_report
+    from rank_rent.calibration.runner import CalibrationRunner
+
+    if output_format not in {"text", "json"}:
+        raise typer.BadParameter("--format must be text or json")
+    try:
+        runner = CalibrationRunner(get_settings().project_root)
+        path = report_path or latest_report(
+            reports_dir
+            or project_path(runner.project_root, runner.manifest.reports_directory)
+        )
+        typer.echo(render_report(load_report(path), output_format=output_format))
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        typer.secho(str(exc), fg=typer.colors.RED)
+        raise typer.Exit(2) from exc
+
+
+@calibrate_app.command("compare")
+def calibrate_compare(
+    scoring_version_a: Annotated[str, typer.Argument()],
+    scoring_version_b: Annotated[str, typer.Argument()],
+    output_format: Annotated[str, typer.Option("--format")] = "text",
+    output_dir: Annotated[
+        Path | None,
+        typer.Option("--output-dir", help="Optional immutable comparison report directory."),
+    ] = None,
+) -> None:
+    from rank_rent.calibration.loader import CalibrationConfigError
+    from rank_rent.calibration.reporting import render_comparison, save_report
+    from rank_rent.calibration.runner import CalibrationRunner
+
+    if output_format not in {"text", "json"}:
+        raise typer.BadParameter("--format must be text or json")
+    try:
+        report = CalibrationRunner(get_settings().project_root).compare(
+            scoring_version_a,
+            scoring_version_b,
+        )
+        typer.echo(render_comparison(report, output_format=output_format))
+        if output_dir is not None:
+            typer.echo(f"Saved comparison: {save_report(report, output_dir)}")
+    except (CalibrationConfigError, OSError, ValueError) as exc:
+        typer.secho(str(exc), fg=typer.colors.RED)
+        raise typer.Exit(2) from exc
+
+
+@calibrate_app.command("validate-config")
+def calibrate_validate_config(
+    output_format: Annotated[str, typer.Option("--format")] = "text",
+) -> None:
+    from rank_rent.calibration.loader import CalibrationConfigError
+    from rank_rent.calibration.runner import CalibrationRunner
+
+    if output_format not in {"text", "json"}:
+        raise typer.BadParameter("--format must be text or json")
+    try:
+        report = CalibrationRunner(get_settings().project_root).validate_config()
+    except (CalibrationConfigError, OSError, ValueError) as exc:
+        typer.secho(str(exc), fg=typer.colors.RED)
+        raise typer.Exit(2) from exc
+    if output_format == "json":
+        typer.echo(report.model_dump_json(indent=2))
+    else:
+        typer.echo(
+            f"Calibration configuration: {'VALID' if report.valid else 'INVALID'}\n"
+            f"Suite: {report.suite_version}\n"
+            f"Scenarios: {report.scenario_count}\n"
+            f"Scoring versions: {', '.join(report.scoring_versions)}\n"
+            f"Configuration hash: {report.benchmark_config_hash}"
+        )
+        for check in report.checks:
+            typer.echo(f"[{'PASS' if check.passed else 'FAIL'}] {check.check}")
+    if not report.valid:
+        raise typer.Exit(1)
 
 
 @site_app.command("generate")

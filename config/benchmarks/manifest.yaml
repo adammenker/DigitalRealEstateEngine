@@ -1,0 +1,14 @@
+schema_version: 1
+suite_version: "2026.07.1"
+minimum_scenario_count: 24
+default_scoring_version: "v2.12"
+active_scoring_config: config/scoring.yaml
+scoring_configs:
+  v2.12: config/benchmarks/scoring/v2.12.yaml
+scenario_library: config/benchmarks/v1/scenarios.yaml
+classification_library: config/benchmarks/v1/serp_classification.yaml
+provider_library: config/benchmarks/v1/providers.yaml
+service_catalog: config/services.yaml
+evidence_quality_config: config/evidence_quality.yaml
+serp_classification_config: config/serp_classification.yaml
+reports_directory: benchmarks/reports

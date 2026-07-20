@@ -1,0 +1,885 @@
+schema_version: 1
+suite_version: "2026.07.1"
+
+# Anchors keep related scenarios identical except for the signal under test.
+fixtures:
+  market: &market
+    id: benchmark_nashville_tn
+    display_name: Nashville, TN
+    state: TN
+    cities: [Nashville]
+    latitude: 36.1627
+    longitude: -86.7816
+    population: 689447
+    reference_population: 335893238
+    boundary_radius_km: 45
+
+  strong_metrics: &strong_metrics
+    - &metric_repair
+      keyword: water heater repair
+      canonical_keyword: water heater repair
+      intent: transactional
+      search_volume: 900
+      cpc: 32
+      paid_competition: 0.9
+      market_granularity: country
+      source: benchmark
+    - &metric_replace
+      keyword: water heater replacement
+      canonical_keyword: water heater replacement
+      intent: commercial
+      search_volume: 500
+      cpc: 28
+      paid_competition: 0.8
+      market_granularity: country
+      source: benchmark
+    - &metric_install
+      keyword: tankless water heater installation
+      canonical_keyword: tankless water heater installation
+      intent: commercial
+      search_volume: 300
+      cpc: 24
+      paid_competition: 0.7
+      market_granularity: country
+      source: benchmark
+
+  weak_metrics: &weak_metrics
+    - <<: *metric_repair
+      search_volume: 45
+      cpc: 8
+      paid_competition: 0.3
+    - <<: *metric_replace
+      search_volume: 25
+      cpc: 7
+      paid_competition: 0.25
+    - <<: *metric_install
+      search_volume: 10
+      cpc: 6
+      paid_competition: 0.2
+
+  measured_local_metrics: &measured_local_metrics
+    - *metric_repair
+    - *metric_replace
+    - *metric_install
+    - keyword: water heater repair nashville
+      canonical_keyword: water heater repair nashville
+      intent: transactional
+      search_volume: 55
+      cpc: 34
+      paid_competition: 0.9
+      market_granularity: city
+      source: benchmark
+
+  local_only_metrics: &local_only_metrics
+    - keyword: water heater repair nashville
+      canonical_keyword: water heater repair nashville
+      intent: transactional
+      search_volume: 55
+      cpc: 34
+      paid_competition: 0.9
+      market_granularity: city
+      source: benchmark
+
+  irrelevant_metrics: &irrelevant_metrics
+    - keyword: pizza delivery
+      canonical_keyword: pizza delivery
+      intent: transactional
+      search_volume: 5000
+      cpc: 4
+      paid_competition: 0.7
+      market_granularity: country
+      source: benchmark
+
+  healthy_providers: &healthy_providers
+    - &provider_one
+      name: Cumberland Water Heater Co
+      website: https://cumberlandwater.example
+      phone: 615-555-0100
+      email: owner@cumberlandwater.example
+      category: Plumber
+      categories: [Plumber, Water heater installation service]
+      latitude: 36.17
+      longitude: -86.78
+      rating: 4.8
+      review_count: 120
+      business_status: open
+      contact_confidence: 0.95
+      source: benchmark
+    - &provider_two
+      name: Nashville Hot Water Pros
+      website: https://nashvillehotwater.example
+      phone: 615-555-0101
+      category: Water heater installation service
+      categories: [Water heater installation service]
+      latitude: 36.14
+      longitude: -86.80
+      rating: 4.6
+      review_count: 72
+      business_status: open
+      contact_confidence: 0.85
+      source: benchmark
+    - &provider_three
+      name: Davidson Plumbing
+      website: https://davidsonplumbing.example
+      contact_form_url: https://davidsonplumbing.example/contact
+      category: Plumber
+      categories: [Plumber]
+      latitude: 36.19
+      longitude: -86.75
+      rating: 4.4
+      review_count: 35
+      business_status: active
+      contact_confidence: 0.8
+      source: benchmark
+
+  few_providers: &few_providers
+    - *provider_one
+
+  oversupplied_providers: &oversupplied_providers
+    - *provider_one
+    - *provider_two
+    - *provider_three
+    - *provider_one
+    - *provider_two
+    - *provider_three
+    - *provider_one
+    - *provider_two
+    - *provider_three
+    - *provider_one
+    - *provider_two
+    - *provider_three
+    - *provider_one
+    - *provider_two
+    - *provider_three
+
+  irrelevant_providers: &irrelevant_providers
+    - name: Nashville Pizza One
+      category: Pizza restaurant
+      categories: [Pizza restaurant]
+      latitude: 36.17
+      longitude: -86.78
+      business_status: open
+      phone: 615-555-0200
+      source: benchmark
+    - name: Nashville Pizza Two
+      category: Pizza restaurant
+      categories: [Pizza restaurant]
+      latitude: 36.15
+      longitude: -86.79
+      business_status: open
+      source: benchmark
+    - name: Nashville Pizza Three
+      category: Pizza restaurant
+      categories: [Pizza restaurant]
+      latitude: 36.18
+      longitude: -86.77
+      business_status: open
+      source: benchmark
+
+  outside_providers: &outside_providers
+    - <<: *provider_one
+      name: Knoxville Water Heater Co
+      latitude: 35.9606
+      longitude: -83.9207
+      address: Knoxville, TN
+    - <<: *provider_two
+      name: Memphis Hot Water Pros
+      latitude: 35.1495
+      longitude: -90.0490
+      address: Memphis, TN
+    - <<: *provider_three
+      name: Chattanooga Plumbing
+      latitude: 35.0456
+      longitude: -85.3097
+      address: Chattanooga, TN
+
+  partial_providers: &partial_providers
+    - name: Nashville Plumbing Listing
+      category: Plumber
+      categories: [Plumber]
+      latitude: 36.17
+      longitude: -86.78
+      business_status: unknown
+      source: benchmark
+    - name: Nashville Water Heater Listing
+      category: Water heater installation service
+      categories: [Water heater installation service]
+      service_area: Nashville, TN
+      business_status: unknown
+      source: benchmark
+
+  local_serps: &local_serps
+    - query: water heater repair
+      market_id: benchmark_nashville_tn
+      features_present: []
+      results:
+        - &local_result_one
+          order: 1
+          url: https://cumberlandwater.example/nashville-water-heater-repair
+          domain: cumberlandwater.example
+          title: Licensed Water Heater Repair in Nashville TN
+          description: Family owned. Call now for service.
+        - &local_result_two
+          order: 2
+          url: https://nashvillehotwater.example/water-heater-replacement
+          domain: nashvillehotwater.example
+          title: Nashville Water Heater Replacement
+          description: Licensed and insured. Schedule service.
+        - &local_result_three
+          order: 3
+          url: https://davidsonplumbing.example/water-heaters
+          domain: davidsonplumbing.example
+          title: Water Heater Installation Nashville
+          description: Locally owned plumbing company. Contact us.
+    - query: water heater replacement
+      market_id: benchmark_nashville_tn
+      features_present: []
+      results:
+        - <<: *local_result_two
+          order: 1
+        - <<: *local_result_one
+          order: 2
+        - <<: *local_result_three
+          order: 4
+    - query: tankless water heater installation
+      market_id: benchmark_nashville_tn
+      features_present: []
+      results:
+        - <<: *local_result_three
+          order: 1
+        - <<: *local_result_two
+          order: 3
+        - <<: *local_result_one
+          order: 5
+
+  directory_serps: &directory_serps
+    - query: water heater repair
+      market_id: benchmark_nashville_tn
+      features_present: [local_pack, ads_top]
+      results:
+        - {order: 1, url: "https://yelp.com/search/water-heater", domain: yelp.com, title: "Best Water Heater Repair Nashville"}
+        - {order: 2, url: "https://angi.com/nashville/water-heater", domain: angi.com, title: "Nashville Water Heater Pros"}
+        - {order: 3, url: "https://homeadvisor.com/nashville/plumbing", domain: homeadvisor.com, title: "Water Heater Contractors"}
+    - query: water heater replacement
+      market_id: benchmark_nashville_tn
+      features_present: [local_pack]
+      results:
+        - {order: 1, url: "https://angi.com/nashville/replacement", domain: angi.com, title: "Water Heater Replacement"}
+        - {order: 2, url: "https://yelp.com/nashville/plumbers", domain: yelp.com, title: "Nashville Plumbers"}
+        - {order: 4, url: "https://houzz.com/professionals/nashville", domain: houzz.com, title: "Nashville Contractors"}
+    - query: tankless water heater installation
+      market_id: benchmark_nashville_tn
+      features_present: [ads_top]
+      results:
+        - {order: 1, url: "https://homeadvisor.com/nashville/tankless", domain: homeadvisor.com, title: "Tankless Installers"}
+        - {order: 3, url: "https://houzz.com/nashville/tankless", domain: houzz.com, title: "Water Heater Installers"}
+        - {order: 5, url: "https://yelp.com/nashville/tankless", domain: yelp.com, title: "Tankless Water Heater Nashville"}
+
+  marketplace_serps: &marketplace_serps
+    - query: water heater repair
+      market_id: benchmark_nashville_tn
+      features_present: [ads_top]
+      results:
+        - {order: 1, url: "https://taskrabbit.com/nashville/plumbing", domain: taskrabbit.com, title: "Hire Plumbing Help"}
+        - {order: 2, url: "https://thumbtack.com/tn/nashville/water-heaters", domain: thumbtack.com, title: "Water Heater Pros"}
+        - *local_result_one
+    - query: water heater replacement
+      market_id: benchmark_nashville_tn
+      features_present: []
+      results:
+        - {order: 1, url: "https://thumbtack.com/tn/nashville/plumbing", domain: thumbtack.com, title: "Hire Nashville Plumbers"}
+        - {order: 3, url: "https://taskrabbit.com/nashville/repairs", domain: taskrabbit.com, title: "Home Repair Help"}
+        - *local_result_two
+    - query: tankless water heater installation
+      market_id: benchmark_nashville_tn
+      features_present: []
+      results:
+        - {order: 2, url: "https://thumbtack.com/tn/nashville/tankless", domain: thumbtack.com, title: "Tankless Installers"}
+        - {order: 4, url: "https://taskrabbit.com/nashville/install", domain: taskrabbit.com, title: "Installation Help"}
+        - *local_result_three
+
+  national_serps: &national_serps
+    - query: water heater repair
+      market_id: benchmark_nashville_tn
+      features_present: [ads_top, shopping]
+      results:
+        - {order: 1, url: "https://homedepot.com/services/water-heaters", domain: homedepot.com, title: "Water Heater Services"}
+        - {order: 2, url: "https://lowes.com/l/install/water-heater", domain: lowes.com, title: "Water Heater Installation"}
+        - {order: 3, url: "https://acehardware.com/water-heater", domain: acehardware.com, title: "Water Heater Help"}
+    - query: water heater replacement
+      market_id: benchmark_nashville_tn
+      features_present: [shopping]
+      results:
+        - {order: 1, url: "https://lowes.com/water-heaters", domain: lowes.com, title: "Water Heaters"}
+        - {order: 3, url: "https://homedepot.com/water-heaters", domain: homedepot.com, title: "Water Heater Replacement"}
+        - {order: 5, url: "https://acehardware.com/heating", domain: acehardware.com, title: "Water Heating"}
+    - query: tankless water heater installation
+      market_id: benchmark_nashville_tn
+      features_present: [ads_top]
+      results:
+        - {order: 1, url: "https://homedepot.com/tankless-install", domain: homedepot.com, title: "Tankless Installation"}
+        - {order: 2, url: "https://lowes.com/tankless-install", domain: lowes.com, title: "Install a Tankless Heater"}
+        - {order: 4, url: "https://acehardware.com/tankless", domain: acehardware.com, title: "Tankless Heaters"}
+
+  unknown_serps: &unknown_serps
+    - query: water heater repair
+      market_id: benchmark_nashville_tn
+      features_present: []
+      results:
+        - {order: 1, url: "https://alpha.example/article", domain: alpha.example, title: "Water Heater Repair Nashville"}
+        - {order: 2, url: "https://beta.example/page", domain: beta.example, title: "Water Heater Service Nashville"}
+        - {order: 3, url: "https://gamma.example/content", domain: gamma.example, title: "Nashville Water Heaters"}
+    - query: water heater replacement
+      market_id: benchmark_nashville_tn
+      features_present: []
+      results:
+        - {order: 1, url: "https://beta.example/replacement", domain: beta.example, title: "Water Heater Replacement Nashville"}
+        - {order: 2, url: "https://gamma.example/replacement", domain: gamma.example, title: "Nashville Water Heater Replacement"}
+        - {order: 3, url: "https://alpha.example/replacement", domain: alpha.example, title: "Replace a Water Heater Nashville"}
+    - query: tankless water heater installation
+      market_id: benchmark_nashville_tn
+      features_present: []
+      results:
+        - {order: 1, url: "https://gamma.example/tankless", domain: gamma.example, title: "Tankless Water Heater Nashville"}
+        - {order: 2, url: "https://alpha.example/tankless", domain: alpha.example, title: "Nashville Tankless Installation"}
+        - {order: 3, url: "https://beta.example/tankless", domain: beta.example, title: "Tankless Water Heating Nashville"}
+
+  weak_competitors: &weak_competitors
+    - {url: "https://cumberlandwater.example/nashville-water-heater-repair", domain: cumberlandwater.example, referring_domains: 12, page_relevance_score: 0.75, local_relevance: 0.8}
+    - {url: "https://nashvillehotwater.example/water-heater-replacement", domain: nashvillehotwater.example, referring_domains: 20, page_relevance_score: 0.75, local_relevance: 0.8}
+    - {url: "https://davidsonplumbing.example/water-heaters", domain: davidsonplumbing.example, referring_domains: 28, page_relevance_score: 0.65, local_relevance: 0.8}
+
+  strong_competitors: &strong_competitors
+    - {url: "https://cumberlandwater.example/nashville-water-heater-repair", domain: cumberlandwater.example, referring_domains: 520, page_relevance_score: 0.95, local_relevance: 0.95}
+    - {url: "https://nashvillehotwater.example/water-heater-replacement", domain: nashvillehotwater.example, referring_domains: 430, page_relevance_score: 0.9, local_relevance: 0.9}
+    - {url: "https://davidsonplumbing.example/water-heaters", domain: davidsonplumbing.example, referring_domains: 350, page_relevance_score: 0.85, local_relevance: 0.9}
+
+  directory_competitors: &directory_competitors
+    - {url: "https://yelp.com/search/water-heater", domain: yelp.com, referring_domains: 900000, page_relevance_score: 0.7, local_relevance: 0.7}
+    - {url: "https://angi.com/nashville/water-heater", domain: angi.com, referring_domains: 800000, page_relevance_score: 0.7, local_relevance: 0.7}
+    - {url: "https://homeadvisor.com/nashville/plumbing", domain: homeadvisor.com, referring_domains: 700000, page_relevance_score: 0.6, local_relevance: 0.7}
+
+  marketplace_competitors: &marketplace_competitors
+    - {url: "https://taskrabbit.com/nashville/plumbing", domain: taskrabbit.com, referring_domains: 600000, page_relevance_score: 0.6, local_relevance: 0.7}
+    - {url: "https://thumbtack.com/tn/nashville/water-heaters", domain: thumbtack.com, referring_domains: 650000, page_relevance_score: 0.7, local_relevance: 0.8}
+    - {url: "https://cumberlandwater.example/nashville-water-heater-repair", domain: cumberlandwater.example, referring_domains: 12, page_relevance_score: 0.75, local_relevance: 0.8}
+
+  national_competitors: &national_competitors
+    - {url: "https://homedepot.com/services/water-heaters", domain: homedepot.com, referring_domains: 1200000, page_relevance_score: 0.8, local_relevance: 0.2}
+    - {url: "https://lowes.com/l/install/water-heater", domain: lowes.com, referring_domains: 1100000, page_relevance_score: 0.8, local_relevance: 0.2}
+    - {url: "https://acehardware.com/water-heater", domain: acehardware.com, referring_domains: 800000, page_relevance_score: 0.7, local_relevance: 0.2}
+
+  unknown_competitors: &unknown_competitors
+    - {url: "https://alpha.example/article", domain: alpha.example, referring_domains: 10, page_relevance_score: 0.35, local_relevance: 0.35}
+    - {url: "https://beta.example/page", domain: beta.example, referring_domains: 15, page_relevance_score: 0.35, local_relevance: 0.35}
+    - {url: "https://gamma.example/content", domain: gamma.example, referring_domains: 20, page_relevance_score: 0.35, local_relevance: 0.35}
+
+  no_backlink_competitors: &no_backlink_competitors
+    - {url: "https://cumberlandwater.example/nashville-water-heater-repair", domain: cumberlandwater.example, page_relevance_score: 0.75, local_relevance: 0.8}
+    - {url: "https://nashvillehotwater.example/water-heater-replacement", domain: nashvillehotwater.example, page_relevance_score: 0.75, local_relevance: 0.8}
+    - {url: "https://davidsonplumbing.example/water-heaters", domain: davidsonplumbing.example, page_relevance_score: 0.65, local_relevance: 0.8}
+
+  base_evidence: &base_evidence
+    keyword_metrics: *strong_metrics
+    serp_snapshots: *local_serps
+    competitors: *weak_competitors
+    providers: *healthy_providers
+    demand: {kind: population_estimated}
+    freshness: {keyword_age_days: 1, serp_age_days: 1, competitor_age_days: 1, provider_age_days: 1}
+
+  full_expectations: &full_expectations
+    rankable: true
+    assessment_type: full
+    confidence_in: [low, medium, high]
+    quality_status_in: [pass, warning]
+    evidence_status_in: [complete]
+    score_range: [0, 100]
+    invariants:
+      - score_between_0_and_100
+      - components_within_weights
+      - config_identity_matches
+      - full_rankable_requires_quality
+
+scenarios:
+  - scenario_id: strong_demand_weak_competition
+    version: 1
+    description: Strong national demand, weak local competitors, and healthy tenant supply.
+    service_family_id: water_heater_services
+    market: *market
+    evidence: *base_evidence
+    expectations:
+      <<: *full_expectations
+      component_ranges: {demand_evidence: [15, 24], competitor_weakness: [8, 22], provider_suitability: [8, 14]}
+
+  - scenario_id: strong_demand_strong_competition
+    version: 1
+    description: Strong demand held constant while authority and relevance increase.
+    service_family_id: water_heater_services
+    market: *market
+    evidence:
+      <<: *base_evidence
+      competitors: *strong_competitors
+    expectations:
+      <<: *full_expectations
+      component_ranges: {competitor_weakness: [0, 8]}
+
+  - scenario_id: weak_demand_weak_competition
+    version: 1
+    description: Weak demand paired with weak competitors.
+    service_family_id: water_heater_services
+    market: *market
+    evidence:
+      <<: *base_evidence
+      keyword_metrics: *weak_metrics
+    expectations:
+      <<: *full_expectations
+      component_ranges: {demand_evidence: [0, 8]}
+
+  - scenario_id: weak_demand_strong_competition
+    version: 1
+    description: Weak demand paired with strong competitors.
+    service_family_id: water_heater_services
+    market: *market
+    evidence:
+      <<: *base_evidence
+      keyword_metrics: *weak_metrics
+      competitors: *strong_competitors
+    expectations:
+      <<: *full_expectations
+      component_ranges: {demand_evidence: [0, 8], competitor_weakness: [0, 8]}
+
+  - scenario_id: directory_dominated_top_results
+    version: 1
+    description: Directories occupy most valuable organic positions.
+    service_family_id: water_heater_services
+    market: *market
+    evidence:
+      <<: *base_evidence
+      serp_snapshots: *directory_serps
+      competitors: *directory_competitors
+    expectations:
+      <<: *full_expectations
+      component_ranges: {organic_click_availability: [0, 14]}
+
+  - scenario_id: marketplace_dominated_top_results
+    version: 1
+    description: Marketplaces dominate the high-value result positions.
+    service_family_id: water_heater_services
+    market: *market
+    evidence:
+      <<: *base_evidence
+      serp_snapshots: *marketplace_serps
+      competitors: *marketplace_competitors
+    expectations:
+      <<: *full_expectations
+      component_ranges: {organic_click_availability: [0, 15]}
+
+  - scenario_id: national_brand_dominated_results
+    version: 1
+    description: Strong national service and retail brands dominate the sampled SERPs.
+    service_family_id: water_heater_services
+    market: *market
+    evidence:
+      <<: *base_evidence
+      serp_snapshots: *national_serps
+      competitors: *national_competitors
+    expectations:
+      <<: *full_expectations
+      component_ranges: {competitor_weakness: [0, 5], organic_click_availability: [0, 14]}
+
+  - scenario_id: strong_local_providers_top_positions
+    version: 1
+    description: Highly relevant local provider pages occupy the leading positions.
+    service_family_id: water_heater_services
+    market: *market
+    evidence:
+      <<: *base_evidence
+      competitors: *strong_competitors
+    expectations:
+      <<: *full_expectations
+      component_ranges: {competitor_weakness: [0, 8]}
+
+  - scenario_id: multiple_weak_generic_pages
+    version: 1
+    description: Several low-authority generic pages remain ambiguously classified.
+    service_family_id: water_heater_services
+    market: *market
+    evidence:
+      <<: *base_evidence
+      serp_snapshots: *unknown_serps
+      competitors: *unknown_competitors
+    expectations:
+      <<: *full_expectations
+      quality_status_in: [warning]
+      component_ranges: {competitor_weakness: [10, 22]}
+
+  - scenario_id: too_few_providers
+    version: 1
+    description: Only one suitable prospective tenant is present.
+    service_family_id: water_heater_services
+    market: *market
+    evidence:
+      <<: *base_evidence
+      providers: *few_providers
+    expectations:
+      <<: *full_expectations
+      component_ranges: {provider_suitability: [0, 10]}
+
+  - scenario_id: provider_oversupply
+    version: 1
+    description: Suitable provider supply exceeds the configured oversupply threshold.
+    service_family_id: water_heater_services
+    market: *market
+    evidence:
+      <<: *base_evidence
+      providers: *oversupplied_providers
+    expectations:
+      <<: *full_expectations
+      component_ranges: {provider_suitability: [0, 13]}
+
+  - scenario_id: providers_mostly_irrelevant
+    version: 1
+    description: Returned listings are geographically local but unrelated to the service.
+    service_family_id: water_heater_services
+    market: *market
+    evidence:
+      <<: *base_evidence
+      providers: *irrelevant_providers
+    expectations:
+      <<: *full_expectations
+      rankable: false
+      confidence_in: [insufficient]
+      quality_status_in: [fail]
+      evidence_status_in: [unusable]
+      score_range: [0, 35]
+      component_ranges: {provider_suitability: [0, 5]}
+
+  - scenario_id: providers_outside_boundary
+    version: 1
+    description: Service-fit providers are well outside the selected market boundary.
+    service_family_id: water_heater_services
+    market: *market
+    evidence:
+      <<: *base_evidence
+      providers: *outside_providers
+    expectations:
+      <<: *full_expectations
+      quality_status_in: [warning]
+      component_ranges: {provider_suitability: [0, 13]}
+
+  - scenario_id: mostly_unknown_serp_classifications
+    version: 1
+    description: Relevant representative queries return mostly unknown domains.
+    service_family_id: water_heater_services
+    market: *market
+    evidence:
+      <<: *base_evidence
+      serp_snapshots: *unknown_serps
+      competitors: *unknown_competitors
+    expectations:
+      <<: *full_expectations
+      quality_status_in: [warning]
+      confidence_in: [low, medium]
+
+  - scenario_id: national_demand_only
+    version: 1
+    description: Country-level service demand is available and local demand is estimated.
+    service_family_id: water_heater_services
+    market: *market
+    evidence: *base_evidence
+    expectations:
+      <<: *full_expectations
+      component_ranges: {demand_evidence: [15, 24]}
+
+  - scenario_id: measured_local_demand
+    version: 1
+    description: National demand and provider-measured city demand are both available.
+    service_family_id: water_heater_services
+    market: *market
+    evidence:
+      <<: *base_evidence
+      keyword_metrics: *measured_local_metrics
+      demand: {kind: measured_local}
+    expectations:
+      <<: *full_expectations
+      component_ranges: {demand_evidence: [20, 24]}
+
+  - scenario_id: population_estimated_local_demand
+    version: 1
+    description: Local attractiveness uses the low-confidence population-share estimator.
+    service_family_id: water_heater_services
+    market: *market
+    evidence: *base_evidence
+    expectations:
+      <<: *full_expectations
+      component_ranges: {demand_evidence: [15, 24]}
+
+  - scenario_id: stale_serps
+    version: 1
+    description: Complete but stale SERP evidence lowers confidence.
+    service_family_id: water_heater_services
+    market: *market
+    evidence:
+      <<: *base_evidence
+      freshness: {keyword_age_days: 1, serp_age_days: 120, competitor_age_days: 120, provider_age_days: 1}
+    expectations:
+      <<: *full_expectations
+      confidence_in: [low, medium]
+
+  - scenario_id: missing_backlink_evidence
+    version: 1
+    description: Competitors are observed but authority and backlink metrics are unavailable.
+    service_family_id: water_heater_services
+    market: *market
+    evidence:
+      <<: *base_evidence
+      competitors: *no_backlink_competitors
+    expectations:
+      <<: *full_expectations
+      component_ranges: {competitor_weakness: [0, 18]}
+
+  - scenario_id: partial_provider_evidence
+    version: 1
+    description: Provider categories and geography exist but status and contact evidence are sparse.
+    service_family_id: water_heater_services
+    market: *market
+    evidence:
+      <<: *base_evidence
+      providers: *partial_providers
+    expectations:
+      <<: *full_expectations
+      confidence_in: [low, medium, high]
+      component_ranges: {provider_suitability: [0, 12]}
+
+  - scenario_id: failed_evidence_gate
+    version: 1
+    description: Irrelevant keywords, queries, and providers must be rejected.
+    service_family_id: water_heater_services
+    market: *market
+    evidence:
+      <<: *base_evidence
+      keyword_metrics: *irrelevant_metrics
+      serp_snapshots:
+        - query: pizza delivery
+          market_id: benchmark_nashville_tn
+          results:
+            - {order: 1, url: "https://pizza.example/nashville", domain: pizza.example, title: "Pizza Delivery Nashville"}
+      competitors:
+        - {url: "https://pizza.example/nashville", domain: pizza.example, referring_domains: 20}
+        - {url: "https://pizza-two.example/nashville", domain: pizza-two.example, referring_domains: 30}
+        - {url: "https://pizza-three.example/nashville", domain: pizza-three.example, referring_domains: 40}
+      providers: *irrelevant_providers
+    expectations:
+      rankable: false
+      assessment_type: full
+      confidence_in: [insufficient]
+      quality_status_in: [fail]
+      evidence_status_in: [unusable]
+      score_range: [0, 35]
+      invariants:
+        - score_between_0_and_100
+        - components_within_weights
+        - config_identity_matches
+        - full_rankable_requires_quality
+
+  - scenario_id: testing_preliminary_assessment
+    version: 1
+    description: Testing scans remain preliminary even with otherwise complete evidence.
+    service_family_id: water_heater_services
+    market: *market
+    assessment_type: preliminary
+    evidence: *base_evidence
+    expectations:
+      rankable: false
+      assessment_type: preliminary
+      confidence_in: [low, medium, high]
+      quality_status_in: [pass, warning]
+      evidence_status_in: [preliminary]
+      score_range: [0, 100]
+      invariants:
+        - score_between_0_and_100
+        - components_within_weights
+        - config_identity_matches
+        - preliminary_not_rankable
+
+  - scenario_id: same_competitor_several_valuable_queries
+    version: 1
+    description: One strong domain dominates position one across every valuable query.
+    service_family_id: water_heater_services
+    market: *market
+    evidence:
+      <<: *base_evidence
+      competitors:
+        - {url: "https://cumberlandwater.example/nashville-water-heater-repair", domain: cumberlandwater.example, referring_domains: 520, page_relevance_score: 0.95, local_relevance: 0.95}
+        - {url: "https://nashvillehotwater.example/water-heater-replacement", domain: nashvillehotwater.example, referring_domains: 20, page_relevance_score: 0.7, local_relevance: 0.8}
+        - {url: "https://davidsonplumbing.example/water-heaters", domain: davidsonplumbing.example, referring_domains: 28, page_relevance_score: 0.65, local_relevance: 0.8}
+      serp_snapshots:
+        - query: water heater repair
+          market_id: benchmark_nashville_tn
+          results: [*local_result_one, *local_result_two, *local_result_three]
+        - query: water heater replacement
+          market_id: benchmark_nashville_tn
+          results:
+            - <<: *local_result_one
+              order: 1
+            - <<: *local_result_two
+              order: 2
+            - <<: *local_result_three
+              order: 3
+        - query: tankless water heater installation
+          market_id: benchmark_nashville_tn
+          results:
+            - <<: *local_result_one
+              order: 1
+            - <<: *local_result_two
+              order: 2
+            - <<: *local_result_three
+              order: 3
+    expectations:
+      <<: *full_expectations
+
+  - scenario_id: strong_competitor_single_valuable_query
+    version: 1
+    description: The same strong domain appears at position one for only one query.
+    service_family_id: water_heater_services
+    market: *market
+    evidence:
+      <<: *base_evidence
+      competitors:
+        - {url: "https://cumberlandwater.example/nashville-water-heater-repair", domain: cumberlandwater.example, referring_domains: 520, page_relevance_score: 0.95, local_relevance: 0.95}
+        - {url: "https://nashvillehotwater.example/water-heater-replacement", domain: nashvillehotwater.example, referring_domains: 20, page_relevance_score: 0.7, local_relevance: 0.8}
+        - {url: "https://davidsonplumbing.example/water-heaters", domain: davidsonplumbing.example, referring_domains: 28, page_relevance_score: 0.65, local_relevance: 0.8}
+      serp_snapshots:
+        - query: water heater repair
+          market_id: benchmark_nashville_tn
+          results: [*local_result_one, *local_result_two, *local_result_three]
+        - query: water heater replacement
+          market_id: benchmark_nashville_tn
+          results:
+            - <<: *local_result_two
+              order: 1
+            - <<: *local_result_three
+              order: 2
+        - query: tankless water heater installation
+          market_id: benchmark_nashville_tn
+          results:
+            - <<: *local_result_three
+              order: 1
+            - <<: *local_result_two
+              order: 2
+    expectations:
+      <<: *full_expectations
+
+  - scenario_id: strong_competitor_position_one
+    version: 1
+    description: A strong direct competitor occupies organic position one.
+    service_family_id: water_heater_services
+    market: *market
+    evidence:
+      <<: *base_evidence
+      competitors:
+        - {url: "https://cumberlandwater.example/nashville-water-heater-repair", domain: cumberlandwater.example, referring_domains: 520, page_relevance_score: 0.95, local_relevance: 0.95}
+        - {url: "https://nashvillehotwater.example/water-heater-replacement", domain: nashvillehotwater.example, referring_domains: 20, page_relevance_score: 0.7, local_relevance: 0.8}
+        - {url: "https://davidsonplumbing.example/water-heaters", domain: davidsonplumbing.example, referring_domains: 28, page_relevance_score: 0.65, local_relevance: 0.8}
+    expectations:
+      <<: *full_expectations
+
+  - scenario_id: strong_competitor_position_ten
+    version: 1
+    description: The same strong direct competitor appears only at organic position ten.
+    service_family_id: water_heater_services
+    market: *market
+    evidence:
+      <<: *base_evidence
+      competitors:
+        - {url: "https://cumberlandwater.example/nashville-water-heater-repair", domain: cumberlandwater.example, referring_domains: 520, page_relevance_score: 0.95, local_relevance: 0.95}
+        - {url: "https://nashvillehotwater.example/water-heater-replacement", domain: nashvillehotwater.example, referring_domains: 20, page_relevance_score: 0.7, local_relevance: 0.8}
+        - {url: "https://davidsonplumbing.example/water-heaters", domain: davidsonplumbing.example, referring_domains: 28, page_relevance_score: 0.65, local_relevance: 0.8}
+      serp_snapshots:
+        - query: water heater repair
+          market_id: benchmark_nashville_tn
+          results:
+            - <<: *local_result_two
+              order: 1
+            - <<: *local_result_three
+              order: 2
+            - <<: *local_result_one
+              order: 10
+        - query: water heater replacement
+          market_id: benchmark_nashville_tn
+          results:
+            - <<: *local_result_two
+              order: 1
+            - <<: *local_result_three
+              order: 2
+        - query: tankless water heater installation
+          market_id: benchmark_nashville_tn
+          results:
+            - <<: *local_result_three
+              order: 1
+            - <<: *local_result_two
+              order: 2
+    expectations:
+      <<: *full_expectations
+
+pairwise_expectations:
+  - preferred: strong_demand_weak_competition
+    over: strong_demand_strong_competition
+    reason: Weaker competition must improve opportunity attractiveness.
+    component: competitor_weakness
+    minimum_margin: 1
+  - preferred: weak_demand_weak_competition
+    over: weak_demand_strong_competition
+    reason: Competition direction must remain correct when demand is weak.
+    component: competitor_weakness
+    minimum_margin: 1
+  - preferred: strong_demand_weak_competition
+    over: weak_demand_weak_competition
+    reason: Stronger demand must improve the demand component.
+    component: demand_evidence
+    minimum_margin: 1
+  - preferred: measured_local_demand
+    over: national_demand_only
+    reason: Measured local demand must earn more demand credit than a population estimate.
+    component: demand_evidence
+    minimum_margin: 1
+  - preferred: strong_demand_weak_competition
+    over: too_few_providers
+    reason: Healthy suitable-provider supply must improve provider suitability.
+    component: provider_suitability
+    minimum_margin: 1
+  - preferred: strong_demand_weak_competition
+    over: provider_oversupply
+    reason: Healthy supply must outrank a demonstrably oversupplied market.
+    component: provider_suitability
+    minimum_margin: 0.5
+  - preferred: strong_demand_weak_competition
+    over: providers_outside_boundary
+    reason: In-market providers must improve tenant suitability.
+    component: provider_suitability
+    minimum_margin: 1
+  - preferred: strong_demand_weak_competition
+    over: directory_dominated_top_results
+    reason: Directory displacement must reduce organic click availability.
+    component: organic_click_availability
+    minimum_margin: 0.5
+  - preferred: strong_demand_weak_competition
+    over: marketplace_dominated_top_results
+    reason: Marketplace displacement must reduce organic click availability.
+    component: organic_click_availability
+    minimum_margin: 0.25
+  - preferred: strong_demand_weak_competition
+    over: national_brand_dominated_results
+    reason: National-brand and shopping displacement must reduce organic clicks.
+    component: organic_click_availability
+    minimum_margin: 0.5
+  - preferred: strong_competitor_single_valuable_query
+    over: same_competitor_several_valuable_queries
+    reason: A domain dominating several valuable queries is a larger ranking obstacle.
+    component: competitor_weakness
+    minimum_margin: 0.25
+  - preferred: strong_competitor_position_ten
+    over: strong_competitor_position_one
+    reason: A strong competitor at position ten is less threatening than at position one.
+    component: competitor_weakness
+    minimum_margin: 0.25
