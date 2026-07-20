@@ -650,6 +650,10 @@ def test_sandbox_scan_plan_uses_free_sandbox_provider() -> None:
     assert plan.confirmation_required is False
     assert plan.estimated_uncached_cost_usd == Decimal("0")
     assert {call.provider for call in plan.planned_calls} == {"dataforseo-sandbox"}
+    provider_task = next(
+        call for call in plan.planned_calls if call.stage == "provider_discovery"
+    ).request_parameters["tasks"][0]
+    assert "location_coordinate" not in provider_task
 
 
 def test_scan_plan_marks_exact_cached_calls() -> None:

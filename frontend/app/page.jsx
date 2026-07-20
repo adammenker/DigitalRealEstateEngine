@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   ArrowDownUp,
   Building2,
+  Check,
   CheckCircle2,
   ChevronDown,
   CircleDollarSign,
@@ -13,6 +14,7 @@ import {
   FileText,
   Gauge,
   Globe2,
+  Info,
   Loader2,
   MapPin,
   Play,
@@ -21,7 +23,7 @@ import {
   ShieldCheck,
   Sparkles
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const api = {
   async getMeta() {
@@ -137,6 +139,33 @@ function signedPoints(value) {
   return `${points >= 0 ? "+" : ""}${points.toFixed(2)}`;
 }
 
+function ScanOption({ checked, disabled = false, label, help, onChange }) {
+  return (
+    <div className={`optionToggle${disabled ? " disabled" : ""}`}>
+      <label className="optionChoice">
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.checked)}
+        />
+        <span className="checkboxVisual" aria-hidden="true">
+          <Check size={13} strokeWidth={3} />
+        </span>
+        <span className="optionLabel">{label}</span>
+      </label>
+      <button
+        type="button"
+        className="infoTip"
+        aria-label={`${label}: ${help}`}
+        data-tooltip={help}
+      >
+        <Info size={14} />
+      </button>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const [opportunities, setOpportunities] = useState([]);
   const [scans, setScans] = useState([]);
@@ -153,6 +182,8 @@ export default function Dashboard() {
   const [locationLoading, setLocationLoading] = useState(false);
   const [locationOpen, setLocationOpen] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState(null);
+  const locationPickerRef = useRef(null);
+  const locationDismissedRef = useRef(false);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("score");
   const [form, setForm] = useState({
@@ -207,6 +238,17 @@ export default function Dashboard() {
   }, [selectedId]);
 
   useEffect(() => {
+    function dismissLocationMenu(event) {
+      if (locationPickerRef.current?.contains(event.target)) return;
+      locationDismissedRef.current = true;
+      setLocationOpen(false);
+    }
+
+    document.addEventListener("pointerdown", dismissLocationMenu);
+    return () => document.removeEventListener("pointerdown", dismissLocationMenu);
+  }, []);
+
+  useEffect(() => {
     const text = form.location_text.trim();
     if (selectedLocation && selectedLocation.label === text) return undefined;
     if (text.length < 2) {
@@ -222,7 +264,7 @@ export default function Dashboard() {
         .then((result) => {
           if (cancelled) return;
           setLocationOptions(result.locations || []);
-          setLocationOpen(true);
+          if (!locationDismissedRef.current) setLocationOpen(true);
         })
         .catch(() => {
           if (cancelled) return;
@@ -241,6 +283,7 @@ export default function Dashboard() {
 
   function updateLocationText(value) {
     setSelectedLocation(null);
+    locationDismissedRef.current = false;
     setLocationOpen(true);
     setForm({ ...form, location_text: value });
   }
@@ -408,11 +451,12 @@ export default function Dashboard() {
           </label>
           <label>
             <span>Location</span>
-            <div className="locationPicker">
+            <div className="locationPicker" ref={locationPickerRef}>
               <div className="locationInputWrap">
                 <input
                   value={form.location_text}
                   onFocus={() => {
+                    locationDismissedRef.current = false;
                     setLocationOpen(true);
                   }}
                   onChange={(event) => updateLocationText(event.target.value)}
@@ -421,7 +465,10 @@ export default function Dashboard() {
                 <button
                   type="button"
                   className="locationToggle"
-                  onClick={() => setLocationOpen(!locationOpen)}
+                  onClick={() => {
+                    locationDismissedRef.current = locationOpen;
+                    setLocationOpen(!locationOpen);
+                  }}
                   aria-label="Show location options"
                 >
                   <ChevronDown size={16} />
@@ -472,35 +519,31 @@ export default function Dashboard() {
               <option value="US">United States</option>
             </select>
           </label>
-          <label className="toggle">
-            <input
-              type="checkbox"
+          <div className="scanOptions" aria-label="Scan options">
+            <ScanOption
               checked={form.dry_run}
-              onChange={(event) => setForm({ ...form, dry_run: event.target.checked })}
+              label="Dry run"
+              help="Builds and prices the scan plan without making API requests or saving results."
+              onChange={(checked) => setForm({ ...form, dry_run: checked })}
             />
-            <span>Dry run</span>
-          </label>
-          <label className="toggle">
-            <input
-              type="checkbox"
+            <ScanOption
               checked={form.async_run}
               disabled={form.dry_run}
-              onChange={(event) => setForm({ ...form, async_run: event.target.checked })}
+              label="Background"
+              help="Queues the scan so it keeps running while you use the dashboard."
+              onChange={(checked) => setForm({ ...form, async_run: checked })}
             />
-            <span>Background</span>
-          </label>
-          {meta?.data_mode === "live" && !form.dry_run && (
-            <label className="toggle costToggle">
-              <input
-                type="checkbox"
+            {meta?.data_mode === "live" && !form.dry_run && (
+              <ScanOption
                 checked={form.confirm_live_cost}
-                onChange={(event) =>
-                  setForm({ ...form, confirm_live_cost: event.target.checked })
+                label="Confirm cost"
+                help="Confirms that the displayed uncached API estimate is approved before execution."
+                onChange={(checked) =>
+                  setForm({ ...form, confirm_live_cost: checked })
                 }
               />
-              <span>Confirm cost</span>
-            </label>
-          )}
+            )}
+          </div>
           <button className="primaryButton" disabled={scanLoading}>
             {scanLoading ? <Loader2 className="spin" size={17} /> : <Play size={17} />}
             {form.dry_run ? "Dry Run" : form.async_run ? "Queue Scan" : "Run Scan"}

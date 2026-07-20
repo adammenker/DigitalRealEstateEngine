@@ -19,6 +19,7 @@ from rank_rent.domain.models import (
     KeywordMetric,
     Market,
     ProviderCandidate,
+    SerpResult,
     SerpSnapshot,
     ServiceFamily,
 )
@@ -126,13 +127,16 @@ def test_fixture_scan_detail_and_rescore_use_stored_discovery_evidence() -> None
         for artifact in detail["artifacts"]
         if artifact["kind"] == "discovery_report"
     )
-    assert report["score_breakdown"]["version"] == "v2"
+    assert report["score_breakdown"]["version"] == "v2.6"
+    assert report["summary"]["evidence_status"] == "complete"
+    assert report["score_breakdown"]["evidence_status"] == "complete"
+    assert report["score_breakdown"]["score_cap"] is None
     assert report["providers"]["provider_count"] > 0
     competitor_trace = report["score_breakdown"]["component_details"][
         "competitor_weakness"
     ]
     assert competitor_trace["maximum_score"] == 22
-    assert competitor_trace["formula"].startswith("mean(clamp(")
+    assert competitor_trace["formula"].startswith("position_weighted_mean(clamp(")
     assert competitor_trace["calculation_steps"]
     assert "Median referring domains" in competitor_trace["calculation_steps"][0]["detail"]
     scan_metadata = report["scan_metadata"]
@@ -160,7 +164,7 @@ def test_fixture_scan_detail_and_rescore_use_stored_discovery_evidence() -> None
     commercial_row = next(
         row for row in component_rows if row.component == "commercial_value"
     )
-    assert competitor_row.formula.startswith("mean(clamp(")
+    assert competitor_row.formula.startswith("position_weighted_mean(clamp(")
     assert "average_cpc" not in competitor_row.inputs["measurements"]
     assert "average_cpc" in commercial_row.inputs["measurements"]
     assert competitor_row.inputs["calculation_steps"]
@@ -168,7 +172,7 @@ def test_fixture_scan_detail_and_rescore_use_stored_discovery_evidence() -> None
 
     rescore_response = client.post(f"/api/opportunities/{opportunity_id}/rescore")
     assert rescore_response.status_code == 200
-    assert rescore_response.json()["score"]["scoring_version"] == "v2"
+    assert rescore_response.json()["score"]["scoring_version"] == "v2.6"
     assert rescore_response.json()["discovery_report"]["scan_metadata"]["rescored_from_stored_data"] is True
 
 
@@ -377,7 +381,19 @@ def _seed_scan_evidence(
                     ).model_dump(mode="json")
                 ],
                 "serp_snapshots": [
-                    SerpSnapshot(query="drywall repair", market_id=market.id).model_dump(mode="json")
+                    SerpSnapshot(
+                        query="drywall repair",
+                        market_id=market.id,
+                        results=[
+                            SerpResult(
+                                order=1,
+                                url="https://local.example",
+                                domain="local.example",
+                                title="Local Drywall Contractor",
+                                classification="local_provider",
+                            )
+                        ],
+                    ).model_dump(mode="json")
                 ],
                 "competitors": [
                     CompetitorMetric(

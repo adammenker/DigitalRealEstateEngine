@@ -63,7 +63,7 @@ After V1 hardening:
 After discovery completion:
 
 - Opportunity discovery now stores a `discovery_report` artifact with summary, market interpretation, demand, SERP composition, competitors, providers, score breakdown, and scan metadata.
-- Scoring is version `v2` and uses demand evidence, commercial value, competitor weakness, organic click availability, provider suitability, and data completeness.
+- Scoring is version `v2.6` and uses demand evidence, commercial value, competitor weakness, position-weighted organic click availability, provider suitability, and data completeness.
 - DataForSEO live/sandbox requests write per-scan `api_calls` ledger rows for cache hits, completed calls, failures, planned request IDs, provider IDs, and actual cost attribution.
 - `POST /api/opportunities/{id}/rescore` reruns scoring from stored scan evidence without provider calls.
 - `GET /api/opportunities/compare?ids=1,2` returns comparable latest reports and scores.
@@ -85,6 +85,8 @@ After discovery completion:
   and a provider-search radius; ambiguous markets require dropdown selection.
 - Live planning validates canonical market values against the index and provider discovery
   refuses to run without a verified boundary.
+- Population-share market-demand estimates use a configured, versioned estimator contract
+  and retain factor-level inputs, confidence, and limitations in discovery evidence.
 - `LIVE_SCAN_DEPTH=testing` limits paid-call fan-out and produces a preliminary assessment instead of a full ranked score.
 - DataForSEO account verification passed during prior smoke checks; current live scans may fail if DataForSEO balance is insufficient.
 

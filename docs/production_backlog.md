@@ -42,6 +42,11 @@ This file tracks work that should be completed before the Digital Real Estate En
 - [ ] Add relevance validation for sandbox/provider responses so obviously unrelated results are labeled as mock/noisy.
 - [ ] Improve competitor metric collection before promoting opportunities to full review.
 - [ ] Add score explainability panels that show which fields were missing and how much each missing component affected the score.
+- [x] Isolate market-demand estimation behind a configured, versioned strategy with
+  factor-level inputs, output, confidence, and limitations.
+- [ ] Enrich a future offline geography version with validated household, housing-unit,
+  homeownership, housing-age, and climate signals before introducing a richer estimator.
+  Keep population-share estimates low confidence until that replacement is validated.
 
 ## Operations
 

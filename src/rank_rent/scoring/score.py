@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from statistics import mean, median
 from typing import Any, cast
+from urllib.parse import urlparse
 
 import yaml
 
@@ -20,6 +22,7 @@ from rank_rent.domain.models import (
     SerpSnapshot,
 )
 from rank_rent.services.demand import analyze_demand
+from rank_rent.services.demand_estimation import build_market_demand_estimator
 from rank_rent.services.providers import provider_suitability_summary
 
 HIGH_INTENTS = {"transactional", "commercial"}
@@ -41,6 +44,9 @@ class OpportunityScorer:
         self.config = yaml.safe_load(raw_config)
         self.config_hash = hashlib.sha256(raw_config.encode("utf-8")).hexdigest()[:16]
         self.weights: dict[str, float] = self.config["weights"]
+        self.market_demand_estimator = build_market_demand_estimator(
+            self.config.get("demand", {}).get("market_estimator")
+        )
 
     def score(
         self,
@@ -55,7 +61,11 @@ class OpportunityScorer:
     ) -> OpportunityScore:
         scored_metrics = [metric for metric in metrics if metric.included]
         market = market or Market(id="unknown", display_name="Unknown")
-        demand_model = analyze_demand(scored_metrics, market)
+        demand_model = analyze_demand(
+            scored_metrics,
+            market,
+            estimator=self.market_demand_estimator,
+        )
         missing = self._missing_fields(
             scored_metrics,
             serp_snapshots,
@@ -81,7 +91,10 @@ class OpportunityScorer:
         )
 
         competitor, competitor_detail = self._competitor_weakness(competitors)
-        organic, organic_detail = self._organic_click_availability(serp_snapshots)
+        organic, organic_detail = self._organic_click_availability(
+            serp_snapshots,
+            scored_metrics,
+        )
         provider, provider_detail = self._provider_suitability(providers)
         completeness, completeness_detail = self._data_completeness(missing)
 
@@ -125,17 +138,41 @@ class OpportunityScorer:
             assessment_type=assessment_type,
         )
         measurements["confidence_model"] = confidence_model
+        evidence_status = self._evidence_status(missing, assessment_type)
+        score_cap = self._missing_evidence_score_cap(missing, assessment_type)
         explanations = {
             component: detail.explanation
             for component, detail in component_details.items()
         }
+        uncapped_total = round(max(0, total), 2)
+        final_total = (
+            round(min(uncapped_total, score_cap), 2)
+            if score_cap is not None
+            else uncapped_total
+        )
+        measurements["evidence_status"] = evidence_status
+        measurements["score_cap_model"] = {
+            "uncapped_total_score": uncapped_total,
+            "score_cap": score_cap,
+            "cap_deduction": round(final_total - uncapped_total, 2),
+            "critical_missing_fields": [
+                field
+                for field in missing
+                if field in self.config["missing_evidence_score_caps"]
+            ],
+        }
         explanation = (
-            f"Score {round(max(0, total), 1)} combines demand, commercial value, competitor weakness, "
-            f"organic click availability, provider suitability, and data completeness. It is discovery evidence, not a profit forecast."
+            f"Score {final_total:.1f} combines demand, commercial value, competitor "
+            "weakness, organic click availability, provider suitability, and data "
+            f"completeness. Evidence status is {evidence_status}. It is discovery "
+            "evidence, not a profit forecast."
         )
         assumptions = self._assumptions(metrics, demand_model)
         return OpportunityScore(
-            total_score=round(max(0, total), 2),
+            total_score=final_total,
+            uncapped_total_score=uncapped_total,
+            evidence_status=evidence_status,
+            score_cap=score_cap,
             component_scores=components,
             input_measurements=measurements,
             missing_data_penalties=penalties,
@@ -168,12 +205,7 @@ class OpportunityScorer:
         market_weight = weight * market_share
         service_demand = float(demand_model["service_attractiveness_demand"] or 0)
         market_demand = float(demand_model["estimated_market_demand"] or 0)
-        service_threshold_key = (
-            "strong_national_monthly_volume"
-            if demand_model["national_service_demand"] is not None
-            else "strong_market_monthly_volume"
-        )
-        service_threshold = max(1.0, float(config[service_threshold_key]))
+        service_threshold = max(1.0, float(config["strong_national_monthly_volume"]))
         market_threshold = max(1.0, float(config["strong_market_monthly_volume"]))
         service_score = _bounded(
             (service_demand / service_threshold) * service_weight,
@@ -188,6 +220,7 @@ class OpportunityScorer:
             "service_threshold": service_threshold,
             "service_weight": round(service_weight, 2),
             "service_score": service_score,
+            "service_demand_kind": demand_model["service_demand_kind"],
             "market_attractiveness_demand": market_demand or None,
             "market_threshold": market_threshold,
             "market_weight": round(market_weight, 2),
@@ -201,6 +234,12 @@ class OpportunityScorer:
         score: float,
         inputs: dict[str, Any],
     ) -> ScoreComponentDetail:
+        service_demand = inputs["service_attractiveness_demand"]
+        service_text = (
+            f"{float(service_demand):g} national monthly searches"
+            if isinstance(service_demand, int | float)
+            else "no independent national service-demand measurement"
+        )
         market_demand = inputs["market_attractiveness_demand"]
         market_text = (
             f"{float(market_demand):g} market-level monthly searches"
@@ -208,8 +247,8 @@ class OpportunityScorer:
             else "no market-level demand measurement"
         )
         explanation = (
-            f"{float(inputs['service_attractiveness_demand'] or 0):g} monthly searches "
-            f"support service attractiveness, with {market_text}. "
+            f"Service attractiveness uses {service_text}; market attractiveness uses "
+            f"{market_text}. "
             f"The evidence is classified as {inputs['market_demand_kind']} "
             f"with {inputs['market_estimation_confidence']} estimation confidence."
         )
@@ -227,14 +266,15 @@ class OpportunityScorer:
                     label="Service attractiveness",
                     points=float(inputs["service_score"]),
                     detail=(
-                        f"{float(inputs['service_attractiveness_demand'] or 0):g} searches "
-                        f"against a strong-demand threshold of "
-                        f"{float(inputs['service_threshold']):g}."
+                        f"{service_text.capitalize()} against a strong national-demand "
+                        f"threshold of {float(inputs['service_threshold']):g}. "
+                        "Local volume is not reused for this subcomponent."
                     ),
                     inputs={
-                        "demand": inputs["service_attractiveness_demand"],
+                        "demand": service_demand,
                         "threshold": inputs["service_threshold"],
                         "maximum_points": inputs["service_weight"],
+                        "demand_kind": inputs["service_demand_kind"],
                     },
                 ),
                 ScoreCalculationStep(
@@ -270,12 +310,35 @@ class OpportunityScorer:
             0.01,
             float(config["strong_paid_competition"]),
         )
+        configured_shares = {
+            signal: max(0.0, float(config["signal_shares"][signal]))
+            for signal in ("cpc", "paid_competition", "high_intent")
+        }
+        total_signal_share = sum(configured_shares.values())
+        signal_shares = {
+            signal: (
+                configured_share / total_signal_share
+                if total_signal_share > 0
+                else 0.0
+            )
+            for signal, configured_share in configured_shares.items()
+        }
+        signal_point_budgets = {
+            signal: weight * signal_share
+            for signal, signal_share in signal_shares.items()
+        }
         high_intent_share = high_intent_count / max(1, scored_keyword_count)
-        cpc_points = (avg_cpc / strong_cpc) * 9
+        cpc_factor = min(max(avg_cpc / strong_cpc, 0.0), 1.0)
+        competition_factor = min(
+            max(avg_paid_competition / strong_paid_competition, 0.0),
+            1.0,
+        )
+        intent_factor = min(max(high_intent_share, 0.0), 1.0)
+        cpc_points = cpc_factor * signal_point_budgets["cpc"]
         competition_points = (
-            avg_paid_competition / strong_paid_competition
-        ) * 3
-        intent_points = high_intent_share * 4
+            competition_factor * signal_point_budgets["paid_competition"]
+        )
+        intent_points = intent_factor * signal_point_budgets["high_intent"]
         raw_score = cpc_points + competition_points + intent_points
         score = _bounded(raw_score, weight)
         steps = [
@@ -289,7 +352,9 @@ class OpportunityScorer:
                 inputs={
                     "average_cpc": round(avg_cpc, 4),
                     "strong_cpc": strong_cpc,
-                    "maximum_points": 9,
+                    "normalized_factor": round(cpc_factor, 4),
+                    "signal_share": round(signal_shares["cpc"], 4),
+                    "maximum_points": round(signal_point_budgets["cpc"], 4),
                 },
             ),
             ScoreCalculationStep(
@@ -305,7 +370,15 @@ class OpportunityScorer:
                         4,
                     ),
                     "strong_paid_competition": strong_paid_competition,
-                    "maximum_points": 3,
+                    "normalized_factor": round(competition_factor, 4),
+                    "signal_share": round(
+                        signal_shares["paid_competition"],
+                        4,
+                    ),
+                    "maximum_points": round(
+                        signal_point_budgets["paid_competition"],
+                        4,
+                    ),
                 },
             ),
             ScoreCalculationStep(
@@ -319,7 +392,12 @@ class OpportunityScorer:
                     "high_intent_keyword_count": high_intent_count,
                     "scored_keyword_count": scored_keyword_count,
                     "high_intent_share": round(high_intent_share, 4),
-                    "maximum_points": 4,
+                    "normalized_factor": round(intent_factor, 4),
+                    "signal_share": round(signal_shares["high_intent"], 4),
+                    "maximum_points": round(
+                        signal_point_budgets["high_intent"],
+                        4,
+                    ),
                 },
             ),
         ]
@@ -338,9 +416,12 @@ class OpportunityScorer:
             score=score,
             maximum_score=weight,
             formula=(
-                f"clamp((average_cpc / {strong_cpc:g}) * 9 + "
-                f"(average_paid_competition / {strong_paid_competition:g}) * 3 + "
-                f"high_intent_share * 4, 0, {weight:g})"
+                f"clamp((clamp(average_cpc / {strong_cpc:g}, 0, 1) * "
+                f"{signal_shares['cpc']:g} + clamp(average_paid_competition / "
+                f"{strong_paid_competition:g}, 0, 1) * "
+                f"{signal_shares['paid_competition']:g} + "
+                f"clamp(high_intent_share, 0, 1) * "
+                f"{signal_shares['high_intent']:g}) * {weight:g}, 0, {weight:g})"
             ),
             inputs={
                 "average_cpc": round(avg_cpc, 4),
@@ -350,6 +431,15 @@ class OpportunityScorer:
                 "high_intent_keyword_count": high_intent_count,
                 "scored_keyword_count": scored_keyword_count,
                 "high_intent_share": round(high_intent_share, 4),
+                "configured_signal_shares": configured_shares,
+                "normalized_signal_shares": {
+                    signal: round(signal_share, 4)
+                    for signal, signal_share in signal_shares.items()
+                },
+                "signal_point_budgets": {
+                    signal: round(point_budget, 4)
+                    for signal, point_budget in signal_point_budgets.items()
+                },
             },
             calculation_steps=steps,
             explanation=(
@@ -364,16 +454,23 @@ class OpportunityScorer:
         competitors: list[CompetitorMetric],
     ) -> tuple[float, ScoreComponentDetail]:
         weight = self.weights["competitor_weakness"]
+        supplied_competitor_count = len(competitors)
+        competitors = _unique_domain_competitors(competitors)
+        duplicate_competitor_count = supplied_competitor_count - len(competitors)
         if not competitors:
             return 0.0, ScoreComponentDetail(
                 score=0,
                 maximum_score=weight,
                 formula=(
-                    "mean(clamp(link_weakness * (1 - relevance_threat_strength * "
-                    "direct_relevance) + archetype_adjustment, 0, 1)) * "
+                    "position_weighted_mean(clamp(link_weakness * "
+                    "(1 - relevance_threat_strength * direct_relevance) + "
+                    "archetype_adjustment, 0, 1)) * "
                     f"{weight:g}"
                 ),
-                inputs={"competitor_count": 0},
+                inputs={
+                    "competitor_count": 0,
+                    "duplicate_competitor_count": duplicate_competitor_count,
+                },
                 calculation_steps=[
                     ScoreCalculationStep(
                         label="Missing competitor evidence",
@@ -389,6 +486,7 @@ class OpportunityScorer:
         relevance_threat_strength = float(config["relevance_threat_strength"])
         archetype_adjustments = config["archetype_weakness_adjustments"]
         values: list[float] = []
+        position_weights: list[float] = []
         competitor_inputs: list[dict[str, Any]] = []
         archetype_counts: dict[str, int] = {}
         base_total = 0.0
@@ -418,17 +516,30 @@ class OpportunityScorer:
             relevance_deduction = -(base * direct_threat_penalty)
             raw_value = base + relevance_deduction + archetype_adjustment
             normalized_value = max(0, min(1, raw_value))
+            position_weight = _competitor_position_weight(
+                competitor.serp_position,
+                config,
+            )
             values.append(normalized_value)
-            base_total += base
-            relevance_deduction_total += relevance_deduction
+            position_weights.append(position_weight)
+            base_total += base * position_weight
+            relevance_deduction_total += relevance_deduction * position_weight
             archetype_point_totals[archetype] = (
-                archetype_point_totals.get(archetype, 0) + archetype_adjustment
+                archetype_point_totals.get(archetype, 0)
+                + archetype_adjustment * position_weight
             )
             archetype_counts[archetype] = archetype_counts.get(archetype, 0) + 1
-            unclamped_total += raw_value
+            unclamped_total += raw_value * position_weight
             competitor_inputs.append(
                 {
                     "domain": competitor.domain,
+                    "representative_query": competitor.representative_query,
+                    "serp_position": competitor.serp_position,
+                    "serp_position_weight": position_weight,
+                    "serp_observations": [
+                        observation.model_dump(mode="json")
+                        for observation in competitor.serp_observations
+                    ],
                     "referring_domains": ref_domains,
                     "link_weakness": round(base, 4),
                     "direct_relevance": round(relevance, 4),
@@ -437,14 +548,23 @@ class OpportunityScorer:
                     "archetype_adjustment": archetype_adjustment,
                     "unclamped_weakness": round(raw_value, 4),
                     "normalized_weakness": round(normalized_value, 4),
-                    "component_points": round(
-                        normalized_value * weight / len(competitors),
-                        4,
-                    ),
                 }
             )
         count = len(competitors)
-        score = _bounded(mean(values) * weight, weight)
+        total_position_weight = sum(position_weights)
+        weighted_value_total = sum(
+            value * position_weight
+            for value, position_weight in zip(values, position_weights, strict=True)
+        )
+        score = _bounded(weighted_value_total / total_position_weight * weight, weight)
+        for item in competitor_inputs:
+            item["component_points"] = round(
+                item["normalized_weakness"]
+                * item["serp_position_weight"]
+                / total_position_weight
+                * weight,
+                4,
+            )
         measured_referring_domains = [
             competitor.referring_domains
             for competitor in competitors
@@ -455,14 +575,15 @@ class OpportunityScorer:
             if measured_referring_domains
             else None
         )
-        average_relevance = mean(
-            item["direct_relevance"] for item in competitor_inputs
-        )
+        average_relevance = sum(
+            item["direct_relevance"] * item["serp_position_weight"]
+            for item in competitor_inputs
+        ) / total_position_weight
         high_relevance_count = sum(
             item["direct_relevance"] >= 0.65 for item in competitor_inputs
         )
-        base_points = base_total / count * weight
-        relevance_points = relevance_deduction_total / count * weight
+        base_points = base_total / total_position_weight * weight
+        relevance_points = relevance_deduction_total / total_position_weight * weight
         steps = [
             ScoreCalculationStep(
                 label="Link weakness baseline",
@@ -483,6 +604,7 @@ class OpportunityScorer:
                     - len(measured_referring_domains),
                     "weak_referring_domains": weak_ref,
                     "strong_referring_domains": strong_ref,
+                    "total_serp_position_weight": round(total_position_weight, 4),
                 },
             ),
             ScoreCalculationStep(
@@ -497,6 +619,7 @@ class OpportunityScorer:
                     "competitor_count": count,
                     "average_direct_relevance": round(average_relevance, 4),
                     "relevance_threat_strength": relevance_threat_strength,
+                    "total_serp_position_weight": round(total_position_weight, 4),
                 },
             ),
         ]
@@ -504,7 +627,7 @@ class OpportunityScorer:
             normalized_adjustment = archetype_point_totals[archetype]
             if abs(normalized_adjustment) < 0.0001:
                 continue
-            points = normalized_adjustment / count * weight
+            points = normalized_adjustment / total_position_weight * weight
             per_result = float(archetype_adjustments.get(archetype, 0))
             steps.append(
                 ScoreCalculationStep(
@@ -522,7 +645,9 @@ class OpportunityScorer:
                 )
             )
         clamp_points = (
-            (sum(values) - unclamped_total) / count * weight
+            (weighted_value_total - unclamped_total)
+            / total_position_weight
+            * weight
         )
         if abs(clamp_points) >= 0.0001:
             steps.append(
@@ -546,12 +671,15 @@ class OpportunityScorer:
             score=score,
             maximum_score=weight,
             formula=(
-                "mean(clamp(link_weakness * (1 - "
+                "position_weighted_mean(clamp(link_weakness * (1 - "
                 f"{relevance_threat_strength:g} * direct_relevance) + "
                 f"archetype_adjustment, 0, 1)) * {weight:g}"
             ),
             inputs={
                 "competitor_count": count,
+                "supplied_competitor_count": supplied_competitor_count,
+                "duplicate_competitor_count": duplicate_competitor_count,
+                "total_serp_position_weight": round(total_position_weight, 4),
                 "median_referring_domains": median_referring_domains,
                 "average_direct_relevance": round(average_relevance, 4),
                 "high_relevance_competitor_count": high_relevance_count,
@@ -562,13 +690,16 @@ class OpportunityScorer:
                     config["unknown_referring_domains_weakness"]
                 ),
                 "relevance_threat_strength": relevance_threat_strength,
+                "serp_position_weights": config["serp_position_weights"],
+                "unpositioned_weight": float(config["unpositioned_weight"]),
                 "archetype_weakness_adjustments": archetype_adjustments,
                 "per_competitor": competitor_inputs,
             },
             calculation_steps=steps,
             explanation=(
                 f"Median referring domains are {median_text}; {high_relevance_count} of "
-                f"{count} competitors are strongly relevant. Observed archetypes: "
+                f"{count} unique-domain competitors are strongly relevant. Results were "
+                f"weighted by their best organic position; observed archetypes: "
                 f"{archetype_summary}."
             ),
         )
@@ -576,9 +707,15 @@ class OpportunityScorer:
     def _organic_click_availability(
         self,
         serp_snapshots: list[SerpSnapshot],
+        metrics: list[KeywordMetric],
     ) -> tuple[float, ScoreComponentDetail]:
         weight = self.weights["organic_click_availability"]
-        results = [result for snapshot in serp_snapshots for result in snapshot.results]
+        results = [
+            result
+            for snapshot in serp_snapshots
+            for result in snapshot.results
+            if result.result_type == "organic"
+        ]
         if not results:
             return 0.0, ScoreComponentDetail(
                 score=0,
@@ -601,6 +738,20 @@ class OpportunityScorer:
                 explanation="No SERP results were available, so this component received 0 points.",
             )
         penalties = self.config["organic_click"]
+        position_weights = {
+            int(position): float(position_weight)
+            for position, position_weight in penalties["serp_position_weights"].items()
+        }
+        position_capacity = sum(position_weights.values())
+        serp_evidence = _serp_keyword_evidence(
+            serp_snapshots,
+            metrics,
+            penalties["keyword_weighting"],
+        )
+        total_serp_weight = sum(
+            float(item["keyword_weight"]) for item in serp_evidence
+        )
+        total_result_capacity = position_capacity * total_serp_weight
         classification_penalties = {
             "directory": float(penalties["directory_penalty"]),
             "marketplace": float(penalties["marketplace_penalty"]),
@@ -612,22 +763,64 @@ class OpportunityScorer:
             str(result_type).lower()
             for result_type in penalties.get("shopping_product_result_types", [])
         }
-        shopping_snapshot_share = (
-            sum(
-                1
-                for snapshot in serp_snapshots
-                if shopping_types
+        shopping_serp_share = _weighted_serp_feature_share(
+            serp_snapshots,
+            serp_evidence,
+            lambda snapshot: bool(
+                shopping_types
                 & {
                     *(feature.lower() for feature in snapshot.features_present),
                     *(result.result_type.lower() for result in snapshot.results),
                 }
-            )
-            / len(serp_snapshots)
+            ),
         )
-        local_pack = any("local_pack" in snapshot.features_present for snapshot in serp_snapshots)
-        ads_top = any("ads_top" in snapshot.features_present for snapshot in serp_snapshots)
+        local_pack_serp_share = _weighted_serp_feature_share(
+            serp_snapshots,
+            serp_evidence,
+            lambda snapshot: "local_pack" in snapshot.features_present,
+        )
+        ads_top_serp_share = _weighted_serp_feature_share(
+            serp_snapshots,
+            serp_evidence,
+            lambda snapshot: "ads_top" in snapshot.features_present,
+        )
         availability = 1.0
         classification_counts = _serp_composition(results)
+        classification_weight_totals: dict[str, float] = {}
+        result_evidence: list[dict[str, Any]] = []
+        for snapshot, snapshot_evidence in zip(
+            serp_snapshots,
+            serp_evidence,
+            strict=True,
+        ):
+            keyword_weight = float(snapshot_evidence["keyword_weight"])
+            for result in snapshot.results:
+                if result.result_type != "organic":
+                    continue
+                position_weight = position_weights.get(result.order, 0.0)
+                evidence_weight = keyword_weight * position_weight
+                classification_weight_totals[result.classification] = (
+                    classification_weight_totals.get(result.classification, 0.0)
+                    + evidence_weight
+                )
+                result_evidence.append(
+                    {
+                        "query": snapshot.query,
+                        "domain": result.domain,
+                        "position": result.order,
+                        "classification": result.classification,
+                        "position_weight": position_weight,
+                        "keyword_weight": round(keyword_weight, 4),
+                        "evidence_weight": round(evidence_weight, 4),
+                    }
+                )
+        classification_weighted_shares = {
+            classification: round(
+                classification_weight / total_result_capacity,
+                4,
+            )
+            for classification, classification_weight in classification_weight_totals.items()
+        }
         steps = [
             ScoreCalculationStep(
                 label="Available organic-click baseline",
@@ -638,7 +831,10 @@ class OpportunityScorer:
         ]
         for classification, penalty in classification_penalties.items():
             result_count = classification_counts.get(classification, 0)
-            result_share = result_count / len(results)
+            result_share = (
+                classification_weight_totals.get(classification, 0.0)
+                / total_result_capacity
+            )
             deduction = result_share * penalty
             availability -= deduction
             if result_count:
@@ -647,54 +843,69 @@ class OpportunityScorer:
                         label=f"{classification.replace('_', ' ').title()} displacement",
                         points=round(-(deduction * weight), 4),
                         detail=(
-                            f"{result_count} of {len(results)} results are "
-                            f"{classification.replace('_', ' ')} pages."
+                            f"{result_count} {classification.replace('_', ' ')} "
+                            "result(s), weighted by organic position and representative "
+                            f"keyword value, occupy {result_share:.1%} of top-10 capacity."
                         ),
                         inputs={
                             "result_count": result_count,
-                            "result_share": round(result_share, 4),
+                            "weighted_result_share": round(result_share, 4),
                             "penalty_rate": penalty,
                         },
                     )
                 )
         shopping_penalty = float(penalties["shopping_product_penalty"])
-        shopping_deduction = shopping_snapshot_share * shopping_penalty
+        shopping_deduction = shopping_serp_share * shopping_penalty
         availability -= shopping_deduction
-        if shopping_snapshot_share:
+        if shopping_serp_share:
             steps.append(
                 ScoreCalculationStep(
                     label="Shopping/product displacement",
                     points=round(-(shopping_deduction * weight), 4),
                     detail=(
                         f"Shopping or product features appear in "
-                        f"{shopping_snapshot_share:.0%} of sampled SERPs."
+                        f"{shopping_serp_share:.0%} of the keyword-weighted SERP sample."
                     ),
                     inputs={
-                        "snapshot_share": round(shopping_snapshot_share, 4),
+                        "weighted_serp_share": round(shopping_serp_share, 4),
                         "penalty_rate": shopping_penalty,
                     },
                 )
             )
-        if local_pack:
-            local_pack_deduction = float(penalties["local_pack_penalty"])
+        if local_pack_serp_share:
+            local_pack_deduction = (
+                local_pack_serp_share * float(penalties["local_pack_penalty"])
+            )
             availability -= local_pack_deduction
             steps.append(
                 ScoreCalculationStep(
                     label="Local-pack displacement",
                     points=round(-(local_pack_deduction * weight), 4),
-                    detail="At least one sampled SERP contains a local pack.",
-                    inputs={"penalty_rate": local_pack_deduction},
+                    detail=(
+                        f"Local packs affect {local_pack_serp_share:.1%} of the "
+                        "keyword-weighted SERP sample."
+                    ),
+                    inputs={
+                        "weighted_serp_share": round(local_pack_serp_share, 4),
+                        "penalty_rate": float(penalties["local_pack_penalty"]),
+                    },
                 )
             )
-        if ads_top:
-            ads_deduction = float(penalties["ads_top_penalty"])
+        if ads_top_serp_share:
+            ads_deduction = ads_top_serp_share * float(penalties["ads_top_penalty"])
             availability -= ads_deduction
             steps.append(
                 ScoreCalculationStep(
                     label="Top-ad displacement",
                     points=round(-(ads_deduction * weight), 4),
-                    detail="At least one sampled SERP contains ads above organic results.",
-                    inputs={"penalty_rate": ads_deduction},
+                    detail=(
+                        f"Top ads affect {ads_top_serp_share:.1%} of the "
+                        "keyword-weighted SERP sample."
+                    ),
+                    inputs={
+                        "weighted_serp_share": round(ads_top_serp_share, 4),
+                        "penalty_rate": float(penalties["ads_top_penalty"]),
+                    },
                 )
             )
         score = _bounded(availability * weight, weight)
@@ -715,33 +926,47 @@ class OpportunityScorer:
             for classification, count in sorted(classification_counts.items())
         )
         active_features = []
-        if local_pack:
-            active_features.append("local pack")
-        if ads_top:
-            active_features.append("top ads")
-        if shopping_snapshot_share:
-            active_features.append("shopping/product features")
+        if local_pack_serp_share:
+            active_features.append(
+                f"local packs on {local_pack_serp_share:.0%} of weighted SERPs"
+            )
+        if ads_top_serp_share:
+            active_features.append(
+                f"top ads on {ads_top_serp_share:.0%} of weighted SERPs"
+            )
+        if shopping_serp_share:
+            active_features.append(
+                f"shopping/product features on {shopping_serp_share:.0%} of weighted SERPs"
+            )
         feature_text = ", ".join(active_features) if active_features else "none"
         return score, ScoreComponentDetail(
             score=score,
             maximum_score=weight,
             formula=(
-                f"clamp((1 - sum(result_share * classification_penalty) - "
-                f"shopping_serp_share * {shopping_penalty:g} - "
-                f"local_pack_present * {float(penalties['local_pack_penalty']):g} - "
-                f"ads_top_present * {float(penalties['ads_top_penalty']):g}) * "
+                f"clamp((1 - sum(position_and_keyword_weighted_result_share * "
+                f"classification_penalty) - weighted_shopping_serp_share * "
+                f"{shopping_penalty:g} - weighted_local_pack_serp_share * "
+                f"{float(penalties['local_pack_penalty']):g} - "
+                f"weighted_ads_top_serp_share * "
+                f"{float(penalties['ads_top_penalty']):g}) * "
                 f"{weight:g}, 0, {weight:g})"
             ),
             inputs={
                 "serp_snapshot_count": len(serp_snapshots),
                 "serp_result_count": len(results),
                 "classification_counts": classification_counts,
+                "classification_weighted_shares": classification_weighted_shares,
                 "classification_penalties": classification_penalties,
-                "shopping_snapshot_share": round(shopping_snapshot_share, 4),
+                "serp_position_weights": position_weights,
+                "position_capacity_per_serp": round(position_capacity, 4),
+                "total_result_capacity": round(total_result_capacity, 4),
+                "serp_keyword_evidence": serp_evidence,
+                "per_result_evidence": result_evidence,
+                "shopping_serp_share": round(shopping_serp_share, 4),
                 "shopping_product_penalty": shopping_penalty,
-                "local_pack_present": local_pack,
+                "local_pack_serp_share": round(local_pack_serp_share, 4),
                 "local_pack_penalty": float(penalties["local_pack_penalty"]),
-                "ads_top_present": ads_top,
+                "ads_top_serp_share": round(ads_top_serp_share, 4),
                 "ads_top_penalty": float(penalties["ads_top_penalty"]),
             },
             calculation_steps=steps,
@@ -783,7 +1008,7 @@ class OpportunityScorer:
         oversupply = int(self.config["providers"]["oversupply_count"])
         base_supply_fit = min(suitable / max(1, ideal_min), 1.0)
         supply_multiplier = 1.0
-        if len(providers) > oversupply:
+        if suitable > oversupply:
             supply_multiplier = 0.72
         elif suitable > ideal_max:
             supply_multiplier = 0.88
@@ -820,9 +1045,9 @@ class OpportunityScorer:
         ]
         if abs(supply_adjustment_points) >= 0.0001:
             reason = (
-                f"{len(providers)} candidates exceed the {oversupply}-provider "
+                f"{suitable} suitable providers exceed the {oversupply}-provider "
                 "oversupply threshold."
-                if len(providers) > oversupply
+                if suitable > oversupply
                 else (
                     f"{suitable} suitable providers exceed the preferred maximum "
                     f"of {ideal_max}."
@@ -835,6 +1060,8 @@ class OpportunityScorer:
                     detail=reason,
                     inputs={
                         "supply_multiplier": supply_multiplier,
+                        "supply_count_basis": "suitable_provider_count",
+                        "saturation_supply_count": suitable,
                         "ideal_max": ideal_max,
                         "oversupply_count": oversupply,
                     },
@@ -866,6 +1093,8 @@ class OpportunityScorer:
                 "ideal_min": ideal_min,
                 "ideal_max": ideal_max,
                 "oversupply_count": oversupply,
+                "supply_count_basis": "suitable_provider_count",
+                "saturation_supply_count": suitable,
                 "supply_fit_before_adjustment": round(base_supply_fit, 4),
                 "supply_multiplier": supply_multiplier,
                 "adjusted_supply_fit": round(supply_fit, 4),
@@ -966,8 +1195,50 @@ class OpportunityScorer:
         if not missing:
             return {}
         max_penalty = float(self.config["missing_data_penalty_max"])
-        penalty_each = min(max_penalty / max(1, len(missing)), max_penalty / 3)
-        return {field: round(penalty_each, 2) for field in missing}
+        configured = self.config["missing_data_penalties"]
+        raw_penalties = {
+            field: max(0.0, float(configured.get(field, 0)))
+            for field in missing
+        }
+        raw_total = sum(raw_penalties.values())
+        scale = (
+            max_penalty / raw_total
+            if raw_total > max_penalty and raw_total > 0
+            else 1.0
+        )
+        return {
+            field: round(penalty * scale, 2)
+            for field, penalty in raw_penalties.items()
+            if penalty > 0
+        }
+
+    def _evidence_status(
+        self,
+        missing: list[str],
+        assessment_type: str,
+    ) -> str:
+        if assessment_type == "preliminary":
+            return "preliminary"
+        if "competitor_metrics" in missing:
+            return "unusable"
+        if missing:
+            return "partial"
+        return "complete"
+
+    def _missing_evidence_score_cap(
+        self,
+        missing: list[str],
+        assessment_type: str,
+    ) -> float | None:
+        if assessment_type == "preliminary":
+            return None
+        configured_caps = self.config["missing_evidence_score_caps"]
+        active_caps = [
+            float(configured_caps[field])
+            for field in missing
+            if field in configured_caps
+        ]
+        return min(active_caps) if active_caps else None
 
     def _confidence(
         self,
@@ -1108,8 +1379,19 @@ class OpportunityScorer:
                 "prevents high confidence.",
             )
 
-        if "competitor_metrics" in missing:
-            cap(Confidence.medium, "Missing competitor evidence prevents high confidence.")
+        if "competitor_metrics" in missing and assessment_type != "preliminary":
+            cap(
+                Confidence.insufficient,
+                "A full assessment without competitor evidence is unusable.",
+            )
+        if (
+            {"serp_snapshots", "serp_results"} & set(missing)
+            and assessment_type != "preliminary"
+        ):
+            cap(
+                Confidence.low,
+                "Missing SERP evidence makes the full assessment partial.",
+            )
         if assessment_type == "preliminary":
             cap(Confidence.medium, "Preliminary assessments cannot be high confidence.")
 
@@ -1208,9 +1490,185 @@ class OpportunityScorer:
                 )
         else:
             assumptions.append(
-                "Provider-local keyword volume is treated as directional market evidence."
+                "Provider-local keyword volume supports market attractiveness only; no "
+                "independent national volume was available for service attractiveness."
             )
         return assumptions
+
+
+def _unique_domain_competitors(
+    competitors: list[CompetitorMetric],
+) -> list[CompetitorMetric]:
+    by_domain: dict[str, CompetitorMetric] = {}
+    for competitor in competitors:
+        domain = (
+            competitor.domain
+            or urlparse(competitor.url).netloc
+            or competitor.url
+        ).lower().removeprefix("www.").strip()
+        existing = by_domain.get(domain)
+        if existing is None:
+            by_domain[domain] = competitor
+            continue
+
+        chosen = min(
+            (existing, competitor),
+            key=lambda item: (
+                item.serp_position is None,
+                item.serp_position or 0,
+            ),
+        )
+        observations = {
+            (item.query, item.position, item.url): item
+            for item in [*existing.serp_observations, *competitor.serp_observations]
+        }
+        ordered_observations = sorted(
+            observations.values(),
+            key=lambda item: (item.position, item.query, item.url),
+        )
+        update: dict[str, Any] = {"serp_observations": ordered_observations}
+        if ordered_observations:
+            update["representative_query"] = ordered_observations[0].query
+            update["serp_position"] = ordered_observations[0].position
+        by_domain[domain] = chosen.model_copy(update=update)
+    return list(by_domain.values())
+
+
+def _competitor_position_weight(
+    position: int | None,
+    config: dict[str, Any],
+) -> float:
+    if position is None:
+        return float(config["unpositioned_weight"])
+    configured = cast(dict[Any, Any], config["serp_position_weights"])
+    exact = configured.get(position, configured.get(str(position)))
+    if exact is not None:
+        return float(exact)
+    return min(float(value) for value in configured.values())
+
+
+def _serp_keyword_evidence(
+    serp_snapshots: list[SerpSnapshot],
+    metrics: list[KeywordMetric],
+    config: dict[str, Any],
+) -> list[dict[str, Any]]:
+    metrics_by_query: dict[str, KeywordMetric] = {}
+    for metric in metrics:
+        for value in (metric.keyword, metric.canonical_keyword):
+            metrics_by_query.setdefault(_normalize_query(value), metric)
+    matched_metrics = [
+        metrics_by_query.get(_normalize_query(snapshot.query))
+        for snapshot in serp_snapshots
+    ]
+    max_volume = max(
+        (
+            metric.search_volume
+            for metric in matched_metrics
+            if metric is not None and metric.search_volume is not None
+        ),
+        default=0,
+    )
+    max_cpc = max(
+        (
+            metric.cpc
+            for metric in matched_metrics
+            if metric is not None and metric.cpc is not None
+        ),
+        default=0.0,
+    )
+    demand_share = float(config["demand_share"])
+    commercial_share = float(config["commercial_share"])
+    minimum_weight = float(config["minimum_weight"])
+    unmatched_weight = float(config["unmatched_keyword_weight"])
+    evidence: list[dict[str, Any]] = []
+    for snapshot, matched_metric in zip(
+        serp_snapshots,
+        matched_metrics,
+        strict=True,
+    ):
+        if matched_metric is None:
+            evidence.append(
+                {
+                    "query": snapshot.query,
+                    "matched_keyword": None,
+                    "search_volume": None,
+                    "cpc": None,
+                    "demand_signal": None,
+                    "commercial_signal": None,
+                    "keyword_weight": unmatched_weight,
+                    "weight_basis": "unmatched_keyword",
+                }
+            )
+            continue
+
+        weighted_signals: list[tuple[float, float]] = []
+        demand_signal: float | None = None
+        commercial_signal: float | None = None
+        if matched_metric.search_volume is not None and max_volume > 0:
+            demand_signal = matched_metric.search_volume / max_volume
+            weighted_signals.append((demand_share, demand_signal))
+        if matched_metric.cpc is not None and max_cpc > 0:
+            commercial_signal = matched_metric.cpc / max_cpc
+            weighted_signals.append((commercial_share, commercial_signal))
+        if weighted_signals:
+            signal_weight = sum(signal_share for signal_share, _ in weighted_signals)
+            raw_weight = (
+                sum(
+                    signal_share * signal
+                    for signal_share, signal in weighted_signals
+                )
+                / signal_weight
+            )
+            keyword_weight = max(minimum_weight, raw_weight)
+            weight_basis = "relative_demand_and_commercial_value"
+        else:
+            keyword_weight = unmatched_weight
+            weight_basis = "matched_without_weighting_metrics"
+        evidence.append(
+            {
+                "query": snapshot.query,
+                "matched_keyword": matched_metric.keyword,
+                "search_volume": matched_metric.search_volume,
+                "cpc": matched_metric.cpc,
+                "demand_signal": (
+                    round(demand_signal, 4)
+                    if demand_signal is not None
+                    else None
+                ),
+                "commercial_signal": (
+                    round(commercial_signal, 4)
+                    if commercial_signal is not None
+                    else None
+                ),
+                "keyword_weight": round(keyword_weight, 4),
+                "weight_basis": weight_basis,
+            }
+        )
+    return evidence
+
+
+def _weighted_serp_feature_share(
+    serp_snapshots: list[SerpSnapshot],
+    serp_evidence: list[dict[str, Any]],
+    predicate: Callable[[SerpSnapshot], bool],
+) -> float:
+    total_weight = sum(float(item["keyword_weight"]) for item in serp_evidence)
+    if total_weight <= 0:
+        return 0.0
+    affected_weight = sum(
+        float(item["keyword_weight"])
+        for snapshot, item in zip(
+            serp_snapshots,
+            serp_evidence,
+            strict=True,
+        )
+        if predicate(snapshot)
+    )
+    return affected_weight / total_weight
+
+
+def _normalize_query(value: str) -> str:
+    return " ".join(value.casefold().split())
 
 
 def _serp_composition(results: list[Any]) -> dict[str, int]:

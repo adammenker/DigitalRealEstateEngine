@@ -12,6 +12,13 @@ The score is composed from five separately persisted, configuration-driven signa
 
 Signal weights, status values, distance bands, channel strengths, reputation normalization, inactive cap, and the minimum suitable score are configured under `providers` in `config/scoring.yaml`.
 
+DataForSEO reports `work_time.work_hours.current_status` using `open`, `close`,
+`temporarily_closed`, or `closed_forever`. The adapter normalizes its `close` value to
+`closed_now`: the listing is outside its current opening hours, not marked as an inactive
+business. `closed_now` therefore remains operating evidence, while temporary and permanent
+closures receive no status credit. A raw, unnormalized `close` value is not configured for
+full credit. See the [DataForSEO Business Listings response schema](https://docs.dataforseo.com/v3/business_data-business_listings-search-live/).
+
 Provider records persist primary/additional categories, listing/service categories, coordinates, source timestamp, the normalized signal evidence, and each weighted contribution. DataForSEO's requested market is not copied into `service_area`; that field is used only when the provider source supplies service-area evidence.
 
-The score is used to distinguish healthy provider supply from unusable, unreachable, closed, or excessive provider lists. It does not contact providers and does not imply a provider has agreed to buy leads.
+The score is used to distinguish healthy provider supply from unusable, unreachable, closed, or excessive provider lists. Preferred-range and oversupply adjustments use only `suitable_provider_count`; irrelevant, inactive, geographically unsuitable, and low-scoring records remain visible in the raw count but cannot trigger saturation. It does not contact providers and does not imply a provider has agreed to buy leads.

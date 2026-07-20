@@ -10,6 +10,12 @@ Local demand is only estimated when there is transparent evidence:
 - Country-level volume can be converted by population share only when market and reference population metadata exists.
 - Otherwise the report leaves local demand unestimated rather than inventing precision.
 
+Market estimation is selected by `demand.market_estimator` in `config/scoring.yaml` and
+implemented behind a replaceable estimator interface. The current
+`population_share_v2` strategy preserves a factor-level trace containing national service
+demand, market population, reference population, and the calculated population share.
+Its output remains `low` confidence.
+
 The demand score has two configured sub-signals:
 
 - Service attractiveness uses national demand when it exists, otherwise provider-local demand.
@@ -18,3 +24,9 @@ The demand score has two configured sub-signals:
 National-only evidence therefore earns only the service-attractiveness share. It cannot receive market-attractiveness points until local demand is measured or estimated, and missing local demand caps overall confidence at `low`. Population-derived estimates are labeled `low` confidence and cap overall confidence at `medium`.
 
 This keeps sandbox, fixture, replay, and production scans comparable without hiding weak geography evidence.
+
+The current estimator deliberately does not use housing units, households, homeownership,
+housing age, climate, or service-specific market factors. Those inputs should be added to
+the versioned offline geography build and validated before a new estimator strategy uses
+them. Adding a strategy does not require changing scan orchestration or the demand scoring
+contract.

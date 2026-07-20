@@ -29,7 +29,7 @@ from rank_rent.repositories import (
 from rank_rent.runtime import DataMode, resolve_data_mode
 from rank_rent.scoring.score import OpportunityScorer
 from rank_rent.scoring.serp import classify_result
-from rank_rent.services.competitors import enrich_competitors
+from rank_rent.services.competitors import enrich_competitors, select_competitor_urls
 from rank_rent.services.demand import analyze_demand
 from rank_rent.services.discovery_report import (
     build_api_cost_ledger,
@@ -140,9 +140,10 @@ class ScanPipeline:
                     for result in snapshot.results
                 ]
                 serp_snapshots.append(snapshot)
-            competitor_urls = [
-                r.url for s in serp_snapshots for r in s.results if r.result_type == "organic"
-            ][: self.backlink_competitor_limit]
+            competitor_urls = select_competitor_urls(
+                serp_snapshots,
+                self.backlink_competitor_limit,
+            )
             self._ensure_not_cancelled(scan)
             self._set_stage(scan, "fetching_competitors")
             raw_competitors = (
@@ -203,13 +204,22 @@ class ScanPipeline:
             site_config = build_site_config(service, market, domains[0].domain if domains else None) if build_site else None
             site_path: Path | None = generate_static_site(site_config) if build_site and site_config else None
 
-            opportunity.status = "preliminary_review" if is_preliminary else "full_review"
+            opportunity.status = (
+                "preliminary_review"
+                if is_preliminary
+                else "full_review"
+                if score.evidence_status == "complete"
+                else f"{score.evidence_status}_review"
+            )
             if is_preliminary:
                 if opportunity.latest_score is None:
                     opportunity.confidence = "preliminary"
                     opportunity.score_version = score.scoring_version
-            else:
+            elif score.evidence_status == "complete":
                 opportunity.latest_score = score.total_score
+                opportunity.score_version = score.scoring_version
+                opportunity.confidence = score.confidence.value
+            elif opportunity.latest_score is None:
                 opportunity.score_version = score.scoring_version
                 opportunity.confidence = score.confidence.value
             opportunity.missing_data_flags = score.missing_fields
@@ -246,6 +256,7 @@ class ScanPipeline:
                 providers=providers,
                 score=score,
                 scan_metadata=scan_metadata,
+                demand_estimator=self.scorer.market_demand_estimator,
             )
 
             save_artifact(
@@ -483,14 +494,24 @@ class ScanPipeline:
             )
 
     def _demand_evidence(self, metrics: list[Any], market: Market) -> dict[str, Any]:
-        evidence = analyze_demand(metrics, market)
-        warning = (
-            "Keyword volume is provider-reported at country level. It supports service "
-            "attractiveness, while market attractiveness requires measured or transparently "
-            "estimated local demand."
-            if evidence["national_service_demand"] is not None
-            else None
+        evidence = analyze_demand(
+            metrics,
+            market,
+            estimator=self.scorer.market_demand_estimator,
         )
+        if evidence["national_service_demand"] is not None:
+            warning = (
+                "Keyword volume is provider-reported at country level. It supports service "
+                "attractiveness, while market attractiveness requires measured or transparently "
+                "estimated local demand."
+            )
+        elif evidence["provider_reported_local_demand"] is not None:
+            warning = (
+                "Local keyword volume supports market attractiveness only. Service "
+                "attractiveness receives no demand points without independent national evidence."
+            )
+        else:
+            warning = None
         return {
             **evidence,
             "localized_competition": bool(

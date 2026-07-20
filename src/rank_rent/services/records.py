@@ -171,6 +171,12 @@ def save_scan_records(
                 local_relevance=competitor.local_relevance,
                 page_type=competitor.page_type,
                 relevance_signals=competitor.relevance_signals,
+                representative_query=competitor.representative_query,
+                serp_position=competitor.serp_position,
+                serp_observations=[
+                    observation.model_dump(mode="json")
+                    for observation in competitor.serp_observations
+                ],
                 captured_at=competitor.captured_at,
             )
         )

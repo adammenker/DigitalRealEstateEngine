@@ -62,6 +62,48 @@ def dataforseo_base_url(settings: Settings) -> str:
     return DATAFORSEO_BASE_URLS[normalize_dataforseo_environment(settings)]
 
 
+def serp_location_payload(market: Market) -> dict[str, Any]:
+    if market.latitude is not None and market.longitude is not None:
+        if market.boundary_radius_km is None or market.boundary_radius_km <= 0:
+            raise DataForSEOError(
+                "SERP discovery requires a positive canonical market boundary radius."
+            )
+        radius_meters = max(200, min(199_999, round(market.boundary_radius_km * 1_000)))
+        return {
+            "location_coordinate": (
+                f"{market.latitude:.6f},{market.longitude:.6f},{radius_meters}"
+            )
+        }
+    if market.provider_location_code:
+        return {"location_code": int(market.provider_location_code)}
+    if market.provider_location_name:
+        return {"location_name": market.provider_location_name}
+    return {"location_name": market.display_name}
+
+
+def business_listings_location_payload(
+    market: Market,
+    api_environment: str,
+) -> dict[str, str]:
+    if api_environment == "sandbox":
+        return {}
+    if (
+        market.latitude is None
+        or market.longitude is None
+        or market.boundary_radius_km is None
+        or market.boundary_radius_km <= 0
+    ):
+        raise DataForSEOError(
+            "Provider discovery requires canonical coordinates and a positive boundary radius."
+        )
+    radius = f"{market.boundary_radius_km:g}"
+    return {
+        "location_coordinate": (
+            f"{market.latitude:.6f},{market.longitude:.6f},{radius}"
+        )
+    }
+
+
 STATE_NAMES = {
     "al": "alabama",
     "ak": "alaska",
@@ -269,7 +311,7 @@ class DataForSEOLiveProvider:
             "language_code": "en",
             "device": "desktop",
             "depth": self.serp_depth,
-            **self._location_payload(market),
+            **serp_location_payload(market),
         }
         payload = await self._post("/v3/serp/google/organic/live/advanced", [task])
         result = self._first_result(payload)
@@ -338,7 +380,7 @@ class DataForSEOLiveProvider:
             "language_code": "en",
             "limit": self.business_listings_limit,
             "filters": ["address_info.country_code", "=", market.country_code.upper()],
-            "location_coordinate": self._location_coordinate(market),
+            **business_listings_location_payload(market, self.api_environment),
         }
         if service.provider_categories:
             task["categories"] = service.provider_categories[:10]
@@ -385,7 +427,7 @@ class DataForSEOLiveProvider:
                     longitude=self._to_float(item.get("longitude")),
                     rating=self._to_float(rating.get("value") or item.get("rating")),
                     review_count=self._to_int(rating.get("votes_count") or item.get("review_count")),
-                    business_status=str(
+                    business_status=self._provider_business_status(
                         work_hours.get("current_status")
                         or work_time.get("current_status")
                         or item.get("current_status")
@@ -768,13 +810,6 @@ class DataForSEOLiveProvider:
                     items.extend(cast(list[dict[str, Any]], raw_items))
         return items
 
-    def _location_payload(self, market: Market) -> dict[str, Any]:
-        if market.provider_location_code:
-            return {"location_code": int(market.provider_location_code)}
-        if market.provider_location_name:
-            return {"location_name": market.provider_location_name}
-        return {"location_name": market.display_name}
-
     def _labs_location_payload(self, market: Market) -> dict[str, Any]:
         if market.country_code.upper() == "US":
             return {"location_code": self.us_labs_location_code}
@@ -784,19 +819,6 @@ class DataForSEOLiveProvider:
         if market.country_code.upper() == "US":
             return "country"
         return market.type.value
-
-    def _location_coordinate(self, market: Market) -> str:
-        if (
-            market.latitude is None
-            or market.longitude is None
-            or market.boundary_radius_km is None
-            or market.boundary_radius_km <= 0
-        ):
-            raise DataForSEOError(
-                "Provider discovery requires canonical coordinates and a positive boundary radius."
-            )
-        radius = f"{market.boundary_radius_km:g}"
-        return f"{market.latitude:.6f},{market.longitude:.6f},{radius}"
 
     def _keyword_seeds(self, service: ServiceFamily) -> list[str]:
         return service_seed_keywords(service)
@@ -941,6 +963,12 @@ class DataForSEOLiveProvider:
                 seen.add(key)
                 output.append(normalized)
         return output
+
+    def _provider_business_status(self, value: Any) -> str:
+        normalized = str(value or "unknown").strip().lower() or "unknown"
+        if normalized == "close":
+            return "closed_now"
+        return normalized
 
     def _contact_value(self, value: Any, contact_types: set[str]) -> str | None:
         if not isinstance(value, list):

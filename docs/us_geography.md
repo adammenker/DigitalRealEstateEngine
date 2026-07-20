@@ -30,7 +30,11 @@ checksums, build time, and reference year are stored in the database `metadata` 
 - A selected candidate is reloaded by canonical geography ID. Client-supplied coordinates,
   population, and radius are never trusted.
 - Live planning verifies the persisted fields against the index.
+- Organic SERP requests use the canonical coordinate and convert the market boundary from
+  kilometers to DataForSEO's meter-based coordinate radius.
 - Provider discovery cannot run without verified coordinates and a positive radius.
+- Production Business Listings requests use the canonical kilometer radius. Sandbox
+  requests omit that unsupported mock filter while retaining sandbox evidence labels.
 - Unsupported countries, unknown ZIPs, and unpopulated/non-geographic ZIPs are rejected.
 
 ZCTAs are Census statistical approximations of ZIP service areas. They are not a complete
@@ -66,3 +70,11 @@ python3 scripts/build_us_geography.py \
 The builder downloads missing sources, reuses existing source files, writes through a
 temporary database, records source checksums in its manifest, and atomically replaces the
 output.
+
+## Demand Enrichment Boundary
+
+The canonical geography fields are the required foundation for market-demand estimation.
+The current estimator uses only aligned market and U.S. reference population. Future
+dataset versions may add validated household, housing-unit, homeownership, housing-age,
+climate, or service-specific fields, but absent fields must not be inferred or silently
+treated as zero.

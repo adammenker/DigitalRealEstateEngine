@@ -11,8 +11,10 @@ from rank_rent.db.orm import RawApiResponseORM
 from rank_rent.domain.models import Market, ServiceFamily
 from rank_rent.integrations.dataforseo.live import (
     DataForSEOLiveProvider,
+    business_listings_location_payload,
     dataforseo_provider_name,
     normalize_dataforseo_environment,
+    serp_location_payload,
 )
 from rank_rent.runtime import DataMode
 from rank_rent.services.cache import cache_key, normalize_request
@@ -66,7 +68,8 @@ def build_scan_plan(
     validate_market_against_index(market, settings)
     profile = settings.live_scan_depth.lower().strip()
     provider = dataforseo_provider_name(settings)
-    free_sandbox = normalize_dataforseo_environment(settings) == "sandbox"
+    api_environment = normalize_dataforseo_environment(settings)
+    free_sandbox = api_environment == "sandbox"
     planned: list[PlannedApiCall] = []
 
     keyword_seed_limit = 1 if profile == "testing" else 3
@@ -125,7 +128,7 @@ def build_scan_plan(
                         "language_code": "en",
                         "device": "desktop",
                         "depth": 10,
-                        **_location_payload(market),
+                        **serp_location_payload(market),
                     }
                 ]
             },
@@ -159,7 +162,7 @@ def build_scan_plan(
         "limit": 5 if profile == "testing" else 10,
         "filters": ["address_info.country_code", "=", market.country_code.upper()],
         "description": f"{service.display_name} {market.display_name}",
-        "location_coordinate": _location_coordinate(market),
+        **business_listings_location_payload(market, api_environment),
     }
     if service.provider_categories:
         provider_task["categories"] = service.provider_categories[:10]
@@ -249,29 +252,7 @@ def _keyword_seeds(service: ServiceFamily) -> list[str]:
     return service_seed_keywords(service)
 
 
-def _location_payload(market: Market) -> dict[str, Any]:
-    if market.provider_location_code:
-        return {"location_code": int(market.provider_location_code)}
-    if market.provider_location_name:
-        return {"location_name": market.provider_location_name}
-    return {"location_name": market.display_name}
-
-
 def _labs_location_payload(market: Market) -> dict[str, Any]:
     if market.country_code.upper() == "US":
         return {"location_code": DataForSEOLiveProvider.us_labs_location_code}
     return {"location_name": market.country_code.upper()}
-
-
-def _location_coordinate(market: Market) -> str:
-    if (
-        market.latitude is None
-        or market.longitude is None
-        or market.boundary_radius_km is None
-        or market.boundary_radius_km <= 0
-    ):
-        raise ValueError(
-            "Provider discovery requires canonical coordinates and a positive boundary radius."
-        )
-    radius = f"{market.boundary_radius_km:g}"
-    return f"{market.latitude:.6f},{market.longitude:.6f},{radius}"

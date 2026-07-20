@@ -89,3 +89,11 @@ def test_alembic_upgrade_head_creates_v1_schema(tmp_path, monkeypatch) -> None:
         "source_timestamp",
         "suitability_signals",
     } <= provider_columns
+    competitor_columns = {
+        column["name"] for column in inspector.get_columns("competitor_metrics")
+    }
+    assert {
+        "representative_query",
+        "serp_position",
+        "serp_observations",
+    } <= competitor_columns

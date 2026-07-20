@@ -324,6 +324,9 @@ class CompetitorMetricORM(TimestampMixin, Base):
     local_relevance: Mapped[float | None] = mapped_column(Float, nullable=True)
     page_type: Mapped[str] = mapped_column(String(80))
     relevance_signals: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    representative_query: Mapped[str | None] = mapped_column(Text, nullable=True)
+    serp_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    serp_observations: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 

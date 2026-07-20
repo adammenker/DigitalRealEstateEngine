@@ -173,8 +173,8 @@ def test_live_plan_requires_canonical_geography_and_always_plans_provider_radius
 
     assert "location_resolution" not in [call.stage for call in plan.planned_calls]
     serp_call = next(call for call in plan.planned_calls if call.stage == "serp")
-    assert serp_call.request_parameters["tasks"][0]["location_name"] == (
-        "London,Kentucky,United States"
+    assert serp_call.request_parameters["tasks"][0]["location_coordinate"] == (
+        f"{market.latitude:.6f},{market.longitude:.6f},3240"
     )
     provider_call = next(
         call for call in plan.planned_calls if call.stage == "provider_discovery"
@@ -182,6 +182,44 @@ def test_live_plan_requires_canonical_geography_and_always_plans_provider_radius
     assert provider_call.request_parameters["tasks"][0]["location_coordinate"] == (
         f"{market.latitude:.6f},{market.longitude:.6f},3.24"
     )
+
+
+def test_serp_executor_uses_the_same_canonical_coordinate_as_the_plan() -> None:
+    market = resolve("Stockton CA")
+    service = ServiceFamily(
+        id="plumbing",
+        display_name="Plumbing",
+        seed_queries=["plumbing"],
+    )
+    plan = build_scan_plan(
+        live_settings(),
+        DataMode.live,
+        service=service,
+        market=market,
+    )
+    planned_serp = next(
+        call for call in plan.planned_calls if call.stage == "serp"
+    )
+    provider = DataForSEOLiveProvider(settings=live_settings())
+    provider._post = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "tasks": [
+                {
+                    "status_code": 20000,
+                    "result": [{"items": []}],
+                }
+            ]
+        }
+    )
+
+    asyncio.run(provider.get_serp_snapshot("plumbing", market))
+
+    task = provider._post.await_args.args[1][0]
+    assert task["location_coordinate"] == "37.976553,-121.308598,7400"
+    assert task["location_coordinate"] == (
+        planned_serp.request_parameters["tasks"][0]["location_coordinate"]
+    )
+    assert "location_name" not in task
 
 
 def test_live_plan_rejects_unresolved_or_stale_market() -> None:

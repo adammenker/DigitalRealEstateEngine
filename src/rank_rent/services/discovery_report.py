@@ -16,6 +16,7 @@ from rank_rent.domain.models import (
     ServiceFamily,
 )
 from rank_rent.services.demand import analyze_demand
+from rank_rent.services.demand_estimation import MarketDemandEstimator
 
 
 def build_discovery_report(
@@ -28,8 +29,13 @@ def build_discovery_report(
     providers: list[ProviderCandidate],
     score: OpportunityScore,
     scan_metadata: dict[str, Any],
+    demand_estimator: MarketDemandEstimator | None = None,
 ) -> dict[str, Any]:
-    demand = analyze_demand([metric for metric in metrics if metric.included], market)
+    demand = analyze_demand(
+        [metric for metric in metrics if metric.included],
+        market,
+        estimator=demand_estimator,
+    )
     serp_results = [result for snapshot in serp_snapshots for result in snapshot.results]
     composition = _composition([result.classification for result in serp_results])
     return {
@@ -37,6 +43,7 @@ def build_discovery_report(
             "service": service.display_name,
             "market": market.display_name,
             "score": score.total_score,
+            "evidence_status": score.evidence_status,
             "confidence": score.confidence.value,
             "status": _summary_status(score),
             "explanation": score.explanation,
@@ -97,6 +104,9 @@ def build_discovery_report(
         "providers": score.input_measurements.get("provider_suitability", {}),
         "score_breakdown": {
             "version": score.scoring_version,
+            "evidence_status": score.evidence_status,
+            "uncapped_total_score": score.uncapped_total_score,
+            "score_cap": score.score_cap,
             "config_hash": score.scoring_config_hash,
             "components": score.component_scores,
             "component_explanations": score.component_explanations,
@@ -176,6 +186,10 @@ def build_api_cost_ledger(
 
 
 def _summary_status(score: OpportunityScore) -> str:
+    if score.evidence_status == "unusable":
+        return "unusable"
+    if score.evidence_status in {"partial", "preliminary"}:
+        return "needs_more_evidence"
     if score.confidence.value in {"low", "insufficient"}:
         return "needs_more_evidence"
     if score.total_score >= 70:

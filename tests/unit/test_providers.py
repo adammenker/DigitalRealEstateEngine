@@ -98,6 +98,23 @@ def test_unknown_status_scores_lower_than_confirmed_open_and_closed_is_ineligibl
     assert summary["suitable_provider_count"] == 2
 
 
+def test_dataforseo_closed_now_is_distinct_from_raw_close_status() -> None:
+    config = _config()
+    closed_now, raw_close = score_provider_suitability(
+        [
+            _provider(business_status="closed_now"),
+            _provider(name="Unnormalized Status Plumbing", business_status="close"),
+        ],
+        _service(),
+        _market(),
+        config,
+    )
+
+    assert "close" not in config["status_scores"]
+    assert closed_now.suitability_signals["status_certainty"]["normalized"] == 1
+    assert raw_close.suitability_signals["status_certainty"]["normalized"] == 0.25
+
+
 def test_contact_channels_are_one_composite_signal_not_additive_points() -> None:
     config = _config()
     email_only, every_channel = score_provider_suitability(
@@ -246,11 +263,13 @@ def test_dataforseo_business_listing_normalizes_provider_evidence() -> None:
     providers = asyncio.run(provider.find_providers(_service(), _market()))
 
     assert len(providers) == 1
+    request_task = provider._post.await_args.args[1][0]
+    assert "location_coordinate" not in request_task
     result = providers[0]
     assert "Plumber" in result.categories
     assert "Water heater repair" in result.categories
     assert result.latitude == 41.0534
     assert result.longitude == -73.5387
-    assert result.business_status == "close"
+    assert result.business_status == "closed_now"
     assert result.service_area is None
     assert result.source_timestamp.year == 2026

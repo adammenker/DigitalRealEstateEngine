@@ -500,7 +500,8 @@ def api_opportunity_rescore(
     assessment_type = _assessment_type_for_payload(artifact, latest_scan)
     is_preliminary = assessment_type == "preliminary"
     evidence_source_mode = _scan_evidence_source_mode(latest_scan)
-    score = OpportunityScorer().score(
+    scorer = OpportunityScorer()
+    score = scorer.score(
         metrics,
         serp_snapshots,
         competitors,
@@ -532,6 +533,7 @@ def api_opportunity_rescore(
             "api_cost_ledger": cost_ledger,
             "assessment_type": assessment_type,
         },
+        demand_estimator=scorer.market_demand_estimator,
     )
     _save_rescore_assessment_records(
         session,
@@ -546,11 +548,17 @@ def api_opportunity_rescore(
             opportunity.score_version = score.scoring_version
             opportunity.confidence = "preliminary"
             opportunity.missing_data_flags = score.missing_fields
-    else:
+    elif score.evidence_status == "complete":
         opportunity.status = "full_review"
         opportunity.latest_score = score.total_score
         opportunity.score_version = score.scoring_version
         opportunity.confidence = score.confidence.value
+        opportunity.missing_data_flags = score.missing_fields
+    else:
+        opportunity.status = f"{score.evidence_status}_review"
+        if opportunity.latest_score is None:
+            opportunity.score_version = score.scoring_version
+            opportunity.confidence = score.confidence.value
         opportunity.missing_data_flags = score.missing_fields
     session.add(
         JsonArtifactORM(

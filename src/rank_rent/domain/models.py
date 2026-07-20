@@ -149,6 +149,12 @@ class SerpSnapshot(BaseModel):
     raw_response_ref: str | None = None
 
 
+class CompetitorSerpObservation(BaseModel):
+    query: str
+    position: int = Field(ge=1)
+    url: str
+
+
 class CompetitorMetric(BaseModel):
     url: str
     domain: str
@@ -159,6 +165,9 @@ class CompetitorMetric(BaseModel):
     local_relevance: float | None = None
     page_type: str = "unknown"
     relevance_signals: dict[str, Any] = Field(default_factory=dict)
+    representative_query: str | None = None
+    serp_position: int | None = Field(default=None, ge=1)
+    serp_observations: list[CompetitorSerpObservation] = Field(default_factory=list)
     captured_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -225,6 +234,9 @@ class ScoreComponentDetail(BaseModel):
 
 class OpportunityScore(BaseModel):
     total_score: float
+    uncapped_total_score: float
+    evidence_status: str
+    score_cap: float | None = None
     component_scores: dict[str, float]
     input_measurements: dict[str, Any]
     missing_data_penalties: dict[str, float]
