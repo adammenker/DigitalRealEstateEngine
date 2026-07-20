@@ -76,7 +76,7 @@ def session() -> Session:
                 id=1,
                 service_family_id=service.id,
                 market_id=market.id,
-                status="approved",
+                status="approved_for_property",
             )
         )
         active_session.commit()

@@ -44,6 +44,21 @@ from rank_rent.domain.models import (
     ServiceFamily,
 )
 from rank_rent.integrations.dataforseo.live import DataForSEOError
+from rank_rent.opportunity_review.api import (
+    review_actor,
+)
+from rank_rent.opportunity_review.api import (
+    router as opportunity_review_router,
+)
+from rank_rent.opportunity_review.models import (
+    OpportunityState,
+    ReviewActor,
+    ReviewTransitionRequest,
+)
+from rank_rent.opportunity_review.services import (
+    OpportunityReviewError,
+    OpportunityReviewService,
+)
 from rank_rent.planning import build_scan_plan
 from rank_rent.repositories import get_or_create_opportunity, upsert_market, upsert_service
 from rank_rent.runtime import resolve_data_mode, validate_runtime_mode
@@ -90,6 +105,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Digital Real Estate Engine", lifespan=lifespan)
+app.include_router(opportunity_review_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://127.0.0.1:8010", "http://localhost:8010"],
@@ -214,6 +230,9 @@ def _opportunity_summary(row: OpportunityORM) -> dict[str, Any]:
         "score": row.latest_score,
         "confidence": row.confidence,
         "status": row.status,
+        "owner_user_id": row.owner_user_id,
+        "review_version": row.review_version,
+        "approved_at": row.approved_at.isoformat() if row.approved_at else None,
         "missing_data_flags": row.missing_data_flags,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
@@ -857,6 +876,7 @@ def api_opportunity_detail(
             opportunity_id,
             latest_assessment,
         ),
+        "review": OpportunityReviewService(session).review_summary(opportunity_id),
         "artifacts": [
             {
                 "id": artifact.id,
@@ -975,13 +995,13 @@ def api_opportunity_rescore(
         score=score,
         is_preliminary=is_preliminary,
     )
+    current_review_state = OpportunityState(
+        opportunity.status
+        if opportunity.status in {state.value for state in OpportunityState}
+        else OpportunityState.needs_more_evidence.value
+    )
     if is_preliminary:
         if opportunity.latest_score is None:
-            opportunity.status = (
-                "evidence_rejected"
-                if evidence_quality.status == "fail"
-                else "preliminary_review"
-            )
             opportunity.score_version = score.scoring_version
             opportunity.confidence = (
                 "insufficient"
@@ -990,17 +1010,33 @@ def api_opportunity_rescore(
             )
             opportunity.missing_data_flags = score.missing_fields
     elif score.evidence_status == "complete":
-        opportunity.status = "full_review"
         opportunity.latest_score = score.total_score
         opportunity.score_version = score.scoring_version
         opportunity.confidence = score.confidence.value
         opportunity.missing_data_flags = score.missing_fields
     else:
-        opportunity.status = f"{score.evidence_status}_review"
         if opportunity.latest_score is None:
             opportunity.score_version = score.scoring_version
             opportunity.confidence = score.confidence.value
         opportunity.missing_data_flags = score.missing_fields
+    target_review_state = (
+        OpportunityState.needs_more_evidence
+        if evidence_quality.status == "fail"
+        or (not is_preliminary and score.evidence_status != "complete")
+        else OpportunityState.preliminary_review
+        if is_preliminary
+        else OpportunityState.full_review
+    )
+    if (
+        current_review_state != OpportunityState.approved_for_property
+        or target_review_state == OpportunityState.needs_more_evidence
+    ):
+        OpportunityReviewService(session).transition_system(
+            opportunity_id,
+            target_review_state,
+            decision="evidence_rescored",
+            reason=reason,
+        )
     session.add(
         JsonArtifactORM(
             opportunity_id=opportunity_id,
@@ -1034,6 +1070,7 @@ def api_opportunity_rescore(
 def api_opportunity_promote(
     opportunity_id: int,
     payload: PromoteScanRequest,
+    actor: ReviewActor = Depends(review_actor),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     opportunity = session.get(OpportunityORM, opportunity_id)
@@ -1161,6 +1198,24 @@ def api_opportunity_promote(
                 f"Estimated uncached cost: ${plan.estimated_uncached_cost_usd}."
             ),
         )
+    try:
+        OpportunityReviewService(session).transition(
+            opportunity_id,
+            ReviewTransitionRequest(
+                target_state=OpportunityState.full_scan_approved,
+                decision="full_scan_approved",
+                decision_reason=(
+                    "Reviewer approved promotion from testing evidence to a full scan."
+                ),
+            ),
+            actor,
+        )
+    except OpportunityReviewError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={"code": exc.code, "context": exc.detail},
+        ) from exc
     queued = _queue_scan(
         session,
         service,
@@ -1360,6 +1415,13 @@ def api_cancel_scan(scan_id: int, session: Session = Depends(get_session)) -> di
         scan.heartbeat_at = None
         scan.lease_token = None
         scan.lease_expires_at = None
+        if scan.opportunity_id is not None:
+            OpportunityReviewService(session).transition_system(
+                scan.opportunity_id,
+                OpportunityState.needs_more_evidence,
+                decision="queued_scan_cancelled",
+                reason=f"Queued scan {scan.id} was cancelled before execution.",
+            )
     session.commit()
     return {
         "cancelled": True,
@@ -1463,6 +1525,28 @@ async def api_scan(
         service,
         market,
     )
+    if (
+        requested_mode.value == "live"
+        and requested_profile == "full"
+        and not payload.dry_run
+    ):
+        service_row = upsert_service(session, service)
+        market_row = upsert_market(session, market)
+        opportunity = get_or_create_opportunity(session, service_row, market_row)
+        try:
+            review_state = OpportunityState(opportunity.status)
+        except ValueError:
+            review_state = OpportunityState.needs_more_evidence
+        if review_state != OpportunityState.full_scan_approved:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "live_full_scan_requires_review_approval",
+                    "opportunity_id": opportunity.id,
+                    "current_state": opportunity.status,
+                    "required_state": OpportunityState.full_scan_approved.value,
+                },
+            )
     if payload.dry_run:
         plan = build_scan_plan(
             settings,
@@ -1585,6 +1669,13 @@ def _queue_scan(
     service_row = upsert_service(session, service)
     market_row = upsert_market(session, market)
     opportunity = get_or_create_opportunity(session, service_row, market_row)
+    if str(scan_plan.get("scan_profile") or "testing") == "testing":
+        OpportunityReviewService(session).transition_system(
+            opportunity.id,
+            OpportunityState.testing_planned,
+            decision="testing_scan_queued",
+            reason="Testing scan was explicitly queued.",
+        )
     scan = ScanRunORM(
         opportunity_id=opportunity.id,
         source=source,

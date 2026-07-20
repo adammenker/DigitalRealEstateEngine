@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from rank_rent.db.orm import OpportunityORM
+from rank_rent.lead_routing.adapters import RetryableDeliveryError
 from rank_rent.lead_routing.interfaces import (
     CallTrackingAdapter,
     DeliveryAdapter,
@@ -46,6 +47,10 @@ from rank_rent.lead_routing.privacy import (
     redact_pii,
     stable_private_hash,
     subject_fingerprint,
+)
+from rank_rent.opportunity_review.services import (
+    OpportunityReviewError,
+    require_property_approval,
 )
 
 logger = logging.getLogger(__name__)
@@ -87,8 +92,6 @@ class ProviderOperationsService:
         recording_approved: bool = False,
         recording_retention_days: int | None = None,
     ) -> PropertyRoutingProfileORM:
-        if self.session.get(OpportunityORM, opportunity_id) is None:
-            raise ProviderAssignmentError("opportunity_not_found")
         existing = self.session.scalar(
             select(PropertyRoutingProfileORM).where(
                 PropertyRoutingProfileORM.property_id == property_id
@@ -98,6 +101,10 @@ class ProviderOperationsService:
             if existing.opportunity_id != opportunity_id:
                 raise ProviderAssignmentError("property_opportunity_is_immutable")
             return existing
+        try:
+            require_property_approval(self.session, opportunity_id)
+        except OpportunityReviewError as exc:
+            raise ProviderAssignmentError(exc.code) from exc
         if recording_approved and recording_retention_days is None:
             raise ProviderAssignmentError("recording_requires_retention")
         profile = PropertyRoutingProfileORM(

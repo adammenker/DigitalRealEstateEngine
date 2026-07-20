@@ -14,7 +14,7 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from rank_rent.settings import Settings, get_settings
 
 BASELINE_REVISION = "e6f6b8c2a915"
-SCHEMA_HEAD_REVISION = "1a7d9c4e6b20"
+SCHEMA_HEAD_REVISION = "8b3e1f4a6c2d"
 
 
 class Base(DeclarativeBase):
@@ -98,6 +98,7 @@ def _is_ephemeral_sqlite(database_url: str) -> bool:
 def init_db() -> None:
     from rank_rent.db import orm  # noqa: F401
     from rank_rent.lead_routing import orm as lead_routing_orm  # noqa: F401
+    from rank_rent.opportunity_review import orm as opportunity_review_orm  # noqa: F401
     from rank_rent.outcomes import orm as outcomes_orm  # noqa: F401
 
     settings = get_settings()
@@ -121,6 +122,7 @@ def init_db() -> None:
 def reset_db() -> None:
     from rank_rent.db import orm  # noqa: F401
     from rank_rent.lead_routing import orm as lead_routing_orm  # noqa: F401
+    from rank_rent.opportunity_review import orm as opportunity_review_orm  # noqa: F401
     from rank_rent.outcomes import orm as outcomes_orm  # noqa: F401
 
     Base.metadata.drop_all(bind=engine)

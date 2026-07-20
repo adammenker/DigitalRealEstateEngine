@@ -172,6 +172,7 @@ def test_testing_assessment_can_plan_and_queue_full_promotion(
         service_row = upsert_service(session, service)
         market_row = upsert_market(session, market)
         opportunity = get_or_create_opportunity(session, service_row, market_row)
+        opportunity.status = "preliminary_review"
         source_scan = ScanRunORM(
             opportunity_id=opportunity.id,
             source="manual_async",

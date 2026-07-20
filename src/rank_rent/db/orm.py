@@ -94,6 +94,8 @@ class OpportunityORM(TimestampMixin, Base):
     confidence: Mapped[str | None] = mapped_column(String(20), nullable=True)
     missing_data_flags: Mapped[list[str]] = mapped_column(JSON, default=list)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    owner_user_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    review_version: Mapped[int] = mapped_column(Integer, default=0)
 
     service_family: Mapped[ServiceFamilyORM] = relationship()
     market: Mapped[MarketORM] = relationship()

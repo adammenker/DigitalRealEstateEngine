@@ -32,6 +32,8 @@ from rank_rent.services.cost_controls import (
     reconcile_stale_api_call_attempts,
 )
 from rank_rent.services.scan_leases import ScanExecutionLease, ScanLeaseLost
+from rank_rent.opportunity_review.models import OpportunityState
+from rank_rent.opportunity_review.services import OpportunityReviewService
 from rank_rent.services.scanner import ScanCancelled, ScanPipeline
 from rank_rent.settings import Settings, get_settings
 
@@ -40,7 +42,11 @@ logger = logging.getLogger(__name__)
 ACTIVE_SCAN_STATUSES = {"queued", "running"}
 TERMINAL_SCAN_STATUSES = {"completed", "failed", "cancelled", "quarantined"}
 WORKER_SCAN_SOURCE = "manual_async"
-WORKER_SCAN_SOURCES = {WORKER_SCAN_SOURCE, "promotion_async"}
+WORKER_SCAN_SOURCES = {
+    WORKER_SCAN_SOURCE,
+    "promotion_async",
+    "batch_review_async",
+}
 
 SessionFactory = Callable[[], Session]
 
@@ -561,6 +567,13 @@ def _fail_without_retry(
         "failed_at": now.isoformat(),
     }
     _clear_lease(scan)
+    if scan.opportunity_id is not None:
+        OpportunityReviewService(session).transition_system(
+            scan.opportunity_id,
+            OpportunityState.needs_more_evidence,
+            decision="worker_scan_failed",
+            reason=error_summary,
+        )
     session.commit()
 
 

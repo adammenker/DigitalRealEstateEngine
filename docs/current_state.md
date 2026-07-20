@@ -1,5 +1,16 @@
 # Current State
 
+## Opportunity review
+
+Opportunity discovery now feeds a validated, attributable review workflow with
+ownership, approval completeness, reversible evidence overrides, saved
+discovery templates, aggregate-cost-bounded batch testing, and JSON/CSV
+evidence packets. No downstream property decision or routing profile may be
+created before the opportunity reaches `approved_for_property`.
+
+See [opportunity_review.md](opportunity_review.md) for the state graph and API
+contract.
+
 The engine has a complete discovery workflow for evaluating configured home-service
 opportunities in canonical U.S. cities and ZIP Code Tabulation Areas (ZCTAs).
 

@@ -19,6 +19,11 @@ from rank_rent.integrations.factory import (
     build_domain_availability_provider,
     build_market_research_provider,
 )
+from rank_rent.opportunity_review.models import OpportunityState
+from rank_rent.opportunity_review.services import (
+    OpportunityReviewService,
+    require_property_approval,
+)
 from rank_rent.planning import ScanPlan, build_scan_plan
 from rank_rent.replay import DatabaseReplayTransport
 from rank_rent.repositories import (
@@ -133,6 +138,19 @@ class ScanPipeline:
         service_row = upsert_service(self.session, service)
         market_row = upsert_market(self.session, market)
         opportunity = get_or_create_opportunity(self.session, service_row, market_row)
+        if build_site:
+            require_property_approval(self.session, opportunity.id)
+        review = OpportunityReviewService(self.session)
+        review.transition_system(
+            opportunity.id,
+            (
+                OpportunityState.testing_running
+                if self.is_preliminary_assessment
+                else OpportunityState.full_running
+            ),
+            decision="scan_started",
+            reason=f"{self.scan_profile.title()} scan execution started.",
+        )
         scan = self._prepare_scan_run(
             existing_scan_id=existing_scan_id,
             opportunity_id=opportunity.id,
@@ -259,14 +277,23 @@ class ScanPipeline:
             site_path: Path | None = generate_static_site(site_config) if build_site and site_config else None
 
             self._ensure_not_cancelled(scan)
-            opportunity.status = (
-                "evidence_rejected"
-                if evidence_quality.status == "fail"
-                else "preliminary_review"
-                if is_preliminary
-                else "full_review"
-                if score.evidence_status == "complete"
-                else f"{score.evidence_status}_review"
+            review.transition_system(
+                opportunity.id,
+                (
+                    OpportunityState.needs_more_evidence
+                    if evidence_quality.status == "fail"
+                    or (not is_preliminary and score.evidence_status != "complete")
+                    else OpportunityState.preliminary_review
+                    if is_preliminary
+                    else OpportunityState.full_review
+                ),
+                decision="scan_completed",
+                reason=(
+                    "Scan completed but evidence requires remediation."
+                    if evidence_quality.status == "fail"
+                    or (not is_preliminary and score.evidence_status != "complete")
+                    else f"{assessment_type.title()} evidence is ready for review."
+                ),
             )
             if is_preliminary:
                 if opportunity.latest_score is None:
@@ -418,6 +445,12 @@ class ScanPipeline:
                 **(scan.partial_outputs or {}),
                 "cancelled": True,
             }
+            review.transition_system(
+                opportunity.id,
+                OpportunityState.needs_more_evidence,
+                decision="scan_cancelled",
+                reason="Scan was cancelled before assessment completion.",
+            )
             self.session.commit()
             raise
         except Exception as exc:
@@ -429,7 +462,12 @@ class ScanPipeline:
             scan.actual_cost_usd = float(
                 build_api_cost_ledger(self.session, scan.id)["actual_cost_usd"]
             )
-            opportunity.status = "scan_failed"
+            review.transition_system(
+                opportunity.id,
+                OpportunityState.needs_more_evidence,
+                decision="scan_failed",
+                reason=f"Scan failed during {failed_stage}: {exc}",
+            )
             scan.partial_outputs = {
                 **(scan.partial_outputs or {}),
                 "failed_stage": failed_stage,

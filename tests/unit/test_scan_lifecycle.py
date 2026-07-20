@@ -204,7 +204,7 @@ def test_unusable_full_scan_does_not_replace_ranked_score(monkeypatch) -> None:
 
         assert result["assessment_type"] == "full"
         assert result["score"].evidence_status == "unusable"
-        assert opportunity.status == "evidence_rejected"
+        assert opportunity.status == "needs_more_evidence"
         assert opportunity.latest_score == 77.0
         assert opportunity.confidence == "high"
         assert opportunity.score_version == "v1"

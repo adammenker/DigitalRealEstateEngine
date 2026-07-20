@@ -52,7 +52,7 @@ def session() -> Session:
         opportunity = OpportunityORM(
             service_family_id=service.id,
             market_id=market.id,
-            status="approved",
+            status="approved_for_property",
             latest_score=70,
             score_version="score-v2",
         )

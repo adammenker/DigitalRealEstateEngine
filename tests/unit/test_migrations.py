@@ -40,7 +40,8 @@ def test_migration_graph_has_one_linear_head_for_workstreams_c_and_d() -> None:
 
     referenced = {revision for revision in revisions.values() if revision is not None}
     assert set(revisions) - referenced == {SCHEMA_HEAD_REVISION}
-    assert revisions[SCHEMA_HEAD_REVISION] == "a6e2c9f4d7b1"
+    assert revisions[SCHEMA_HEAD_REVISION] == "1a7d9c4e6b20"
+    assert revisions["1a7d9c4e6b20"] == "a6e2c9f4d7b1"
     assert revisions["a6e2c9f4d7b1"] == "8a7d3f2c1b90"
     assert revisions["8a7d3f2c1b90"] == "6f4c2d8a9b17"
     assert revisions["6f4c2d8a9b17"] == "c9a4e7d2b6f1"
@@ -83,7 +84,16 @@ def test_alembic_upgrade_head_creates_v1_schema(tmp_path, monkeypatch) -> None:
         "property_outcomes",
         "calibration_reports",
         "scoring_change_reviews",
+        "opportunity_reviews",
+        "evidence_overrides",
+        "discovery_templates",
+        "batch_scan_plans",
+        "batch_scan_plan_items",
     } <= tables
+    opportunity_columns = {
+        column["name"] for column in inspector.get_columns("opportunities")
+    }
+    assert {"owner_user_id", "review_version"} <= opportunity_columns
     routing_profile_columns = {
         column["name"] for column in inspector.get_columns("property_routing_profiles")
     }

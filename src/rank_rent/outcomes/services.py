@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from rank_rent.db.orm import FullOpportunityScoreORM, JsonArtifactORM
 from rank_rent.lead_routing.models import AccessContext, LeadAccessRole, TruthBasis
 from rank_rent.lead_routing.privacy import redact_pii
+from rank_rent.opportunity_review.services import require_property_approval
 from rank_rent.outcomes.interfaces import OutcomeSourceAdapter
 from rank_rent.outcomes.models import (
     CalibrationReport,
@@ -64,6 +65,10 @@ class PropertyOutcomeService:
             if immutable_values != submitted_values:
                 raise OutcomeIntegrityError("property_decision_is_immutable")
             return existing
+        try:
+            require_property_approval(self.session, decision.opportunity_id)
+        except RuntimeError as exc:
+            raise OutcomeIntegrityError(str(exc)) from exc
 
         score = self.session.get(FullOpportunityScoreORM, decision.full_score_id)
         if score is None or score.opportunity_id != decision.opportunity_id:
