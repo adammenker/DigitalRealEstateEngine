@@ -66,9 +66,15 @@ full scans and promotions require a configured service.
 
 - Scans run synchronously or as durable database-backed jobs with atomic claim, heartbeat,
   cancellation, retry, and stale-worker recovery.
+- Production configuration requires PostgreSQL and applies explicit pool, statement-timeout,
+  idle-transaction-timeout, health, and schema-readiness policies. SQLite remains supported
+  for local fixtures and lightweight replay.
+- Web requests and workers create sessions from separate factories and never share a Session.
 - Typed records cover plans, calls, keywords, SERPs, competitors, providers, preliminary
   assessments, full scores, score components, and public-data prefilter assessments.
-- Raw provider responses are sanitized, checksummed, cached, and exportable for replay.
+- New live-provider raw responses are sanitized and stored as immutable filesystem or optional
+  S3-compatible blobs. PostgreSQL stores checksummed blob metadata and source-scan lineage;
+  legacy inline rows remain readable and replay/export validates integrity.
 - Fixture and replay modes make no network calls.
 - A realistic zero-network replay covers the full discovery path, including relevant
   keywords, multiple SERPs, competitor evidence, providers, scoring, reporting, and rescore.
@@ -91,6 +97,6 @@ make verify
 ## Remaining Production Work
 
 The discovery architecture is implemented, but production readiness still requires empirical
-score calibration with real outcomes, additional public datasets where they add validated
-signal, production database and observability work, security hardening, and downstream review
-and launch workflows. These items are tracked in `docs/production_backlog.md`.
+score calibration with real outcomes, a deployed PostgreSQL concurrency test and backup/restore
+rehearsal, observability, security hardening, and downstream review and launch workflows. These
+items are tracked in `docs/production_backlog.md`.

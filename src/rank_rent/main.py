@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from rank_rent.db.base import get_session, init_db
+from rank_rent.db.base import database_readiness, get_session, init_db
 from rank_rent.db.orm import (
     ApiCallORM,
     CompetitorMetricORM,
@@ -622,6 +622,14 @@ def _promotion_status(
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/readyz")
+def readyz() -> dict[str, str | bool | None]:
+    status = database_readiness()
+    if not status["ready"]:
+        raise HTTPException(status_code=503, detail=status)
+    return status
 
 
 @app.get("/api/meta")

@@ -9,6 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from rank_rent.db.orm import RawApiResponseORM
+from rank_rent.settings import get_settings
+from rank_rent.storage.blobs import BlobStore, build_blob_store
 
 SENSITIVE_KEYS = {
     "authorization",
@@ -22,6 +24,11 @@ SENSITIVE_KEYS = {
 }
 
 DEFAULT_RESPONSE_SHAPE_VERSION = "v1"
+RAW_RESPONSE_CONTENT_TYPE = "application/json"
+
+
+class RawResponseIntegrityError(RuntimeError):
+    pass
 
 
 def normalize_request(params: dict[str, Any]) -> dict[str, Any]:
@@ -42,8 +49,48 @@ def cache_key(
 
 
 def checksum_payload(payload: dict[str, Any]) -> str:
+    return hashlib.sha256(serialize_payload(payload)).hexdigest()
+
+
+def serialize_payload(payload: dict[str, Any]) -> bytes:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(encoded.encode()).hexdigest()
+    return encoded.encode()
+
+
+def raw_response_payload(
+    row: RawApiResponseORM,
+    blob_store: BlobStore | None = None,
+) -> dict[str, Any]:
+    if row.object_key is None:
+        payload = row.response_json
+    else:
+        store = blob_store or build_blob_store(get_settings())
+        try:
+            encoded = store.get(row.object_key)
+        except (OSError, KeyError) as exc:
+            raise RawResponseIntegrityError(
+                f"Raw response blob {row.object_key!r} is unavailable."
+            ) from exc
+        if row.size_bytes is not None and len(encoded) != row.size_bytes:
+            raise RawResponseIntegrityError(
+                f"Raw response blob size mismatch for {row.object_key!r}."
+            )
+        try:
+            decoded = json.loads(encoded)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RawResponseIntegrityError(
+                f"Raw response blob {row.object_key!r} is not valid JSON."
+            ) from exc
+        if not isinstance(decoded, dict):
+            raise RawResponseIntegrityError(
+                f"Raw response blob {row.object_key!r} must contain a JSON object."
+            )
+        payload = cast(dict[str, Any], decoded)
+    if row.checksum and row.checksum != checksum_payload(payload):
+        raise RawResponseIntegrityError(
+            f"Raw response checksum mismatch for {row.provider} {row.endpoint}."
+        )
+    return payload
 
 
 def sanitize_payload(value: Any) -> Any:
@@ -89,11 +136,17 @@ class RawResponseCache:
         provider: str,
         api_version: str = "fixture",
         response_shape_version: str = DEFAULT_RESPONSE_SHAPE_VERSION,
+        blob_store: BlobStore | None = None,
+        storage_backend: str | None = None,
+        encryption_status: str = "not_encrypted",
     ) -> None:
         self.session = session
         self.provider = provider
         self.api_version = api_version
         self.response_shape_version = response_shape_version
+        self.blob_store = blob_store
+        self.storage_backend = storage_backend
+        self.encryption_status = encryption_status
 
     def get(self, endpoint: str, params: dict[str, Any]) -> dict[str, Any] | None:
         row = self.get_row(endpoint, params)
@@ -101,9 +154,11 @@ class RawResponseCache:
             return None
         if row.expires_at is not None and _as_aware_utc(row.expires_at) <= datetime.now(UTC):
             return None
-        if row.checksum and row.checksum != checksum_payload(row.response_json):
+        try:
+            payload = raw_response_payload(row, self.blob_store)
+        except RawResponseIntegrityError:
             return None
-        return row.response_json if row else None
+        return payload
 
     def get_row(self, endpoint: str, params: dict[str, Any]) -> RawApiResponseORM | None:
         key = cache_key(
@@ -140,6 +195,27 @@ class RawResponseCache:
         now = datetime.now(UTC)
         ttl = ttl_for_endpoint(endpoint)
         sanitized_response = cast(dict[str, Any], sanitize_payload(response))
+        checksum = checksum_payload(sanitized_response)
+        object_key: str | None = None
+        content_type: str | None = None
+        size_bytes: int | None = None
+        blob_created_at: datetime | None = None
+        response_json = sanitized_response
+        if self.blob_store is not None:
+            object_key = f"raw-responses/{self.provider}/{key}.json"
+            blob = self.blob_store.put(
+                object_key,
+                serialize_payload(sanitized_response),
+                content_type=RAW_RESPONSE_CONTENT_TYPE,
+            )
+            if blob.checksum != checksum:
+                raise RawResponseIntegrityError(
+                    f"Blob store checksum mismatch while writing {object_key!r}."
+                )
+            content_type = blob.content_type
+            size_bytes = blob.size_bytes
+            blob_created_at = now
+            response_json = {}
         self.session.add(
             RawApiResponseORM(
                 cache_key=key,
@@ -148,7 +224,7 @@ class RawResponseCache:
                 parameters=normalized,
                 api_version=self.api_version,
                 response_shape_version=self.response_shape_version,
-                response_json=sanitized_response,
+                response_json=response_json,
                 sanitized=True,
                 status_code=status_code,
                 request_time=now,
@@ -157,8 +233,15 @@ class RawResponseCache:
                 provider_task_id=provider_task_id,
                 provider_request_id=provider_request_id,
                 source_scan_run_id=source_scan_run_id,
-                checksum=checksum_payload(sanitized_response),
+                checksum=checksum,
                 expires_at=now + ttl if ttl else None,
+                object_key=object_key,
+                storage_backend=self.storage_backend if object_key else None,
+                content_type=content_type,
+                size_bytes=size_bytes,
+                retention_classification="raw_provider_response",
+                encryption_status=self.encryption_status if object_key else "not_applicable",
+                blob_created_at=blob_created_at,
             )
         )
         self.session.flush()

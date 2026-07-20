@@ -22,6 +22,10 @@ The discovery engineering workflow is implemented end to end:
 - Preliminary-to-full promotion with lineage, incremental call preview, and cost confirmation.
 - Explainable scoring, evidence freshness, historical rescoring, and full-opportunity comparison.
 - Fixture and realistic DataForSEO replay coverage that makes no network calls.
+- PostgreSQL production configuration with bounded pooling/timeouts and separate web/worker
+  sessions, while retaining SQLite for local and replay use.
+- Immutable raw-response blob storage through a filesystem adapter or optional S3-compatible
+  adapter, with checksummed database metadata and source-scan lineage.
 
 Scoring currently uses configuration version `v2.12`. The architecture is ready for controlled
 discovery testing, but the scores and quality thresholds still require empirical calibration
@@ -45,7 +49,8 @@ Open:
 - Interactive API documentation: [http://localhost:8011/docs](http://localhost:8011/docs)
 
 Both services use `restart: unless-stopped`, so they remain running and restart with Docker
-Desktop. SQLite data is stored in the `rank_rent_data` Docker volume.
+Desktop. SQLite data and filesystem raw-response blobs are stored in the `rank_rent_data`
+Docker volume.
 
 Useful commands:
 
@@ -114,6 +119,11 @@ Production also requires valid credentials. Never commit `.env` or credentials.
 Live market scans cannot silently exceed their persisted plan: every external request must
 consume one unique planned request before network access. The dashboard shows estimated and
 actual calls, cache hits, failures, unexpected calls, and provider-reported cost.
+
+For a private production deployment, set `APP_ENV=production` and provide a PostgreSQL
+`DATABASE_URL`; production startup rejects SQLite. Configure durable raw-response storage with
+`BLOB_STORE_BACKEND=filesystem` on a separately backed-up volume, or install `.[s3]` and use an
+S3-compatible bucket. See [Production Database and Storage](docs/production_data.md).
 
 ## Data And Resetting
 
@@ -197,5 +207,6 @@ become profitable. Assessments are research aids with explicit inputs, assumptio
 missing-data effects, and evidence-quality labels.
 
 Before production use, the project still needs labeled real-world calibration, validated local
-demand improvements, production database and observability work, authentication and secret
-management, durable spend limits and alerts, and downstream review/launch workflows.
+demand improvements, a deployed PostgreSQL concurrency test and backup/restore rehearsal,
+observability, authentication and secret management, durable spend limits and alerts, and
+downstream review/launch workflows.

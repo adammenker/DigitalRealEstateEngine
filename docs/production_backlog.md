@@ -72,14 +72,19 @@ deliberately deferred before production use.
 - [x] Run scans through a database-backed worker with atomic claim, heartbeat, cancellation,
   retry, stale recovery, and idempotent active retries.
 - [x] Provide a confirmed one-command reset for local test data.
-- [ ] Select and validate the production database, connection-pool policy, and backup/restore
-  process.
+- [x] Select PostgreSQL for production, retain SQLite for local/replay use, and define explicit
+  connection-pool and timeout policy with health/schema-readiness checks.
+- [x] Store new live-provider raw responses in immutable filesystem or optional S3-compatible
+  blobs with checksummed metadata and source-scan lineage.
+- [ ] Run PostgreSQL concurrency tests and rehearse the documented encrypted database/blob
+  backup and restore process in the selected production environment.
 - [ ] Add production-grade structured logs, metrics, traces, and alerting by scan and call.
 - [ ] Add deploy-time health checks for the frontend, backend, database, worker, and provider
   credentials.
 - [x] Add CI gates for backend tests, frontend lint/build, migration checks, replay, and
   container builds.
-- [ ] Define deployment, rollback, disaster-recovery, and data-retention procedures.
+- [ ] Operationalize the documented RPO/RTO, backup alerts, legal deletion, rollback,
+  disaster-recovery, and data-retention procedures.
 
 ## Security And Secrets
 

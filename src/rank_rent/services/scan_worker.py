@@ -13,7 +13,7 @@ from typing import Any
 from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
-from rank_rent.db.base import SessionLocal
+from rank_rent.db.base import WorkerSessionLocal
 from rank_rent.db.orm import ScanRunORM
 from rank_rent.domain.models import Market, ServiceFamily
 from rank_rent.services.scanner import ScanCancelled, ScanPipeline
@@ -162,7 +162,7 @@ async def run_scan_by_id(
     session_factory: SessionFactory | None = None,
     heartbeat_seconds: float = 5.0,
 ) -> None:
-    factory = session_factory or SessionLocal
+    factory = session_factory or WorkerSessionLocal
     with factory() as session:
         scan = session.get(ScanRunORM, scan_id)
         if scan is None:
@@ -236,7 +236,7 @@ async def scan_worker_loop(
     heartbeat_seconds: float = 5.0,
     stale_after_seconds: float = 30.0,
 ) -> None:
-    factory = session_factory or SessionLocal
+    factory = session_factory or WorkerSessionLocal
     active_worker_id = worker_id or build_worker_id()
     logger.info("Scan worker %s started.", active_worker_id)
     try:

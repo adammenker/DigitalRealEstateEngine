@@ -10,6 +10,7 @@ __pycache__/
 *.egg-info/
 rank_rent.db
 data/public_data/
+data/raw-responses/
 generated_sites/*
 !generated_sites/.gitkeep
 frontend/node_modules/

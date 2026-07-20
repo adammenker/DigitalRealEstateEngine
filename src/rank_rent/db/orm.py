@@ -3,8 +3,22 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    event,
+    inspect,
+)
+from sqlalchemy.engine import Connection
+from sqlalchemy.orm import Mapped, Mapper, mapped_column, relationship
 from sqlalchemy.types import JSON
 
 from rank_rent.db.base import Base
@@ -182,6 +196,13 @@ class ScanPlanCallORM(TimestampMixin, Base):
 
 class RawApiResponseORM(TimestampMixin, Base):
     __tablename__ = "raw_api_responses"
+    __table_args__ = (
+        UniqueConstraint("object_key", name="uq_raw_api_responses_object_key"),
+        CheckConstraint(
+            "size_bytes IS NULL OR size_bytes >= 0",
+            name="ck_raw_api_responses_size_bytes_nonnegative",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     cache_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
@@ -201,6 +222,66 @@ class RawApiResponseORM(TimestampMixin, Base):
     source_scan_run_id: Mapped[int | None] = mapped_column(ForeignKey("scan_runs.id"), nullable=True)
     checksum: Mapped[str] = mapped_column(String(128), default="")
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    object_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    storage_backend: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    content_type: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    retention_classification: Mapped[str] = mapped_column(
+        String(80), default="raw_provider_response"
+    )
+    encryption_status: Mapped[str] = mapped_column(String(80), default="not_encrypted")
+    blob_created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class ImmutableRawResponseError(RuntimeError):
+    pass
+
+
+_IMMUTABLE_RAW_RESPONSE_FIELDS = {
+    "cache_key",
+    "provider",
+    "endpoint",
+    "parameters",
+    "api_version",
+    "response_shape_version",
+    "response_json",
+    "sanitized",
+    "status_code",
+    "request_time",
+    "response_time",
+    "cost_usd",
+    "provider_task_id",
+    "provider_request_id",
+    "source_scan_run_id",
+    "checksum",
+    "object_key",
+    "storage_backend",
+    "content_type",
+    "size_bytes",
+    "retention_classification",
+    "encryption_status",
+    "blob_created_at",
+}
+
+
+def _reject_raw_response_mutation(
+    _mapper: Mapper[RawApiResponseORM],
+    _connection: Connection,
+    target: RawApiResponseORM,
+) -> None:
+    state = inspect(target)
+    changed = sorted(
+        field for field in _IMMUTABLE_RAW_RESPONSE_FIELDS if state.attrs[field].history.has_changes()
+    )
+    if changed:
+        raise ImmutableRawResponseError(
+            "Raw response content and lineage are immutable after insert: " + ", ".join(changed)
+        )
+
+
+event.listen(RawApiResponseORM, "before_update", _reject_raw_response_mutation)
 
 
 class ApiCallORM(TimestampMixin, Base):

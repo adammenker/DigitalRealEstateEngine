@@ -17,7 +17,9 @@ from rank_rent.services.cache import (
     cache_key,
     checksum_payload,
     normalize_request,
+    raw_response_payload,
 )
+from rank_rent.storage.blobs import BlobStore
 
 
 class ReplayMissError(RuntimeError):
@@ -75,15 +77,17 @@ def stored_response_from_orm(
     row: RawApiResponseORM,
     *,
     source_scan_run_id: int | None = None,
+    blob_store: BlobStore | None = None,
 ) -> StoredApiResponse:
     normalized = normalize_request(row.parameters)
+    payload = raw_response_payload(row, blob_store)
     return StoredApiResponse(
         provider=row.provider,
         endpoint=row.endpoint,
         api_version=row.api_version,
         response_shape_version=row.response_shape_version,
         normalized_request=normalized,
-        raw_response=row.response_json,
+        raw_response=payload,
         sanitized=row.sanitized,
         provider_task_id=row.provider_task_id,
         provider_request_id=row.provider_request_id,
@@ -91,14 +95,20 @@ def stored_response_from_orm(
         requested_at=row.request_time,
         received_at=row.response_time,
         source_scan_run_id=source_scan_run_id,
-        checksum=row.checksum or checksum_response(row.response_json),
+        checksum=row.checksum or checksum_response(payload),
     )
 
 
 class DatabaseReplayTransport:
-    def __init__(self, session: Session, api_version: str = "v3") -> None:
+    def __init__(
+        self,
+        session: Session,
+        api_version: str = "v3",
+        blob_store: BlobStore | None = None,
+    ) -> None:
         self.session = session
         self.api_version = api_version
+        self.blob_store = blob_store
 
     async def get_response(
         self,
@@ -113,7 +123,7 @@ class DatabaseReplayTransport:
             raise ReplayMissError(
                 f"No stored response for {provider} {endpoint}. Replay mode makes no network calls."
             )
-        stored = stored_response_from_orm(row)
+        stored = stored_response_from_orm(row, blob_store=self.blob_store)
         stored.validate_checksum()
         return stored
 
@@ -154,6 +164,7 @@ def export_responses_for_scan(
     output_path: str,
     *,
     scan_run_id: int | None = None,
+    blob_store: BlobStore | None = None,
 ) -> None:
     source_scan_run_id = None
     query = select(RawApiResponseORM).order_by(RawApiResponseORM.id)
@@ -173,7 +184,11 @@ def export_responses_for_scan(
     else:
         rows = session.scalars(query).all()
     responses = [
-        stored_response_from_orm(row, source_scan_run_id=source_scan_run_id).model_dump(mode="json")
+        stored_response_from_orm(
+            row,
+            source_scan_run_id=source_scan_run_id,
+            blob_store=blob_store,
+        ).model_dump(mode="json")
         for row in rows
     ]
     payload = {

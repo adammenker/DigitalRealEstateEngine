@@ -29,6 +29,7 @@ from rank_rent.services.cache import RawResponseCache, cache_key, normalize_requ
 from rank_rent.services.keywords import service_seed_keywords
 from rank_rent.services.us_geography import validate_market_against_index
 from rank_rent.settings import Settings, get_settings
+from rank_rent.storage.blobs import build_blob_store
 
 
 class DataForSEOError(RuntimeError):
@@ -179,7 +180,22 @@ class DataForSEOLiveProvider:
         self.base_url = dataforseo_base_url(self.settings)
         self.timeout_seconds = timeout_seconds
         self.session = session
-        self.cache = RawResponseCache(session, self.provider_name, self.api_version) if session else None
+        self.cache = (
+            RawResponseCache(
+                session,
+                self.provider_name,
+                self.api_version,
+                blob_store=build_blob_store(self.settings),
+                storage_backend=self.settings.blob_store_backend,
+                encryption_status=(
+                    f"sse:{self.settings.blob_store_s3_server_side_encryption}"
+                    if self.settings.blob_store_backend == "s3"
+                    else "not_encrypted"
+                ),
+            )
+            if session
+            else None
+        )
         self.force_refresh = force_refresh
         self.allow_unplanned_requests = allow_unplanned_requests
         self.current_scan_run_id: int | None = None
@@ -534,10 +550,9 @@ class DataForSEOLiveProvider:
         return payload
 
     def _cache_get(self, path: str, params: dict[str, Any]) -> dict[str, Any] | None:
-        row = self._cache_row(path, normalize_request(params))
-        if row is None or self.force_refresh:
+        if self.cache is None or self.force_refresh:
             return None
-        return row.response_json
+        return self.cache.get(path, normalize_request(params))
 
     def _cache_row(self, path: str, params: dict[str, Any]) -> RawApiResponseORM | None:
         if self.cache is None:
