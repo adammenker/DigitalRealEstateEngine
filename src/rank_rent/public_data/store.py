@@ -4,8 +4,12 @@ import hashlib
 import json
 import os
 import shutil
+import socket
 import tempfile
-from collections.abc import Iterable
+import time
+import uuid
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -23,6 +27,7 @@ from rank_rent.public_data.models import (
 RECORDS_FILENAME = "records.jsonl"
 MANIFEST_FILENAME = "manifest.json"
 REGISTRY_FILENAME = "registry.json"
+REGISTRY_LOCKNAME = ".registry.lock"
 
 
 class DatasetValidationError(ValueError):
@@ -30,6 +35,10 @@ class DatasetValidationError(ValueError):
 
 
 class DatasetNotFoundError(FileNotFoundError):
+    pass
+
+
+class RegistryLockTimeoutError(TimeoutError):
     pass
 
 
@@ -44,10 +53,23 @@ class StagedDataset:
 class PublicDataStore:
     """Immutable release store with atomic active-version pointers."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        lock_timeout_seconds: float = 10.0,
+        stale_lock_seconds: float = 300.0,
+        lock_poll_seconds: float = 0.05,
+    ) -> None:
+        if lock_timeout_seconds <= 0 or stale_lock_seconds <= 0 or lock_poll_seconds <= 0:
+            raise ValueError("Public-data lock timings must be positive.")
         self.root = root
         self.datasets_root = root / "datasets"
         self.registry_path = root / REGISTRY_FILENAME
+        self.registry_lock_path = root / REGISTRY_LOCKNAME
+        self.lock_timeout_seconds = lock_timeout_seconds
+        self.stale_lock_seconds = stale_lock_seconds
+        self.lock_poll_seconds = lock_poll_seconds
 
     def registry(self) -> PublicDataRegistry:
         if not self.registry_path.is_file():
@@ -66,10 +88,6 @@ class PublicDataStore:
                 "A source-file SHA-256 checksum is required before staging."
             )
         destination = self._release_path(release.dataset, release.version)
-        if destination.exists():
-            raise DatasetValidationError(
-                f"{release.dataset.value} {release.version} is already staged."
-            )
         self.datasets_root.mkdir(parents=True, exist_ok=True)
         staging_root = self.root / ".staging"
         staging_root.mkdir(parents=True, exist_ok=True)
@@ -96,9 +114,7 @@ class PublicDataStore:
                 manifest.model_dump(mode="json"),
             )
             self._validate_release_directory(temporary, expected_manifest=manifest)
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(temporary, destination)
-            self._register_staged(manifest)
+            manifest = self._commit_staged(temporary, destination, manifest)
             return StagedDataset(
                 dataset=release.dataset,
                 version=release.version,
@@ -110,7 +126,15 @@ class PublicDataStore:
             raise
 
     def validate(self, dataset: DatasetKind, version: str) -> DatasetManifest:
-        registration = self.registry().registration(dataset)
+        return self._validate_registered(self.registry(), dataset, version)
+
+    def _validate_registered(
+        self,
+        registry: PublicDataRegistry,
+        dataset: DatasetKind,
+        version: str,
+    ) -> DatasetManifest:
+        registration = registry.registration(dataset)
         manifest = registration.versions.get(version)
         if manifest is None:
             raise DatasetNotFoundError(f"{dataset.value} {version} is not registered.")
@@ -121,8 +145,17 @@ class PublicDataStore:
         return manifest
 
     def activate(self, dataset: DatasetKind, version: str) -> DatasetManifest:
-        manifest = self.validate(dataset, version)
-        registry = self.registry()
+        with self._registry_lock():
+            registry = self.registry()
+            return self._activate_locked(registry, dataset, version)
+
+    def _activate_locked(
+        self,
+        registry: PublicDataRegistry,
+        dataset: DatasetKind,
+        version: str,
+    ) -> DatasetManifest:
+        manifest = self._validate_registered(registry, dataset, version)
         registration = registry.registration(dataset).model_copy(deep=True)
         if registration.active_version == version:
             return registration.versions[version]
@@ -149,18 +182,20 @@ class PublicDataStore:
         return active_manifest
 
     def rollback(self, dataset: DatasetKind) -> DatasetManifest:
-        registration = self.registry().registration(dataset)
-        active = registration.active_version
-        candidates = [
-            version
-            for version in reversed(registration.activation_history)
-            if version != active
-        ]
-        if not candidates:
-            raise DatasetNotFoundError(
-                f"No previous activated {dataset.value} release is available."
-            )
-        return self.activate(dataset, candidates[0])
+        with self._registry_lock():
+            registry = self.registry()
+            registration = registry.registration(dataset)
+            active = registration.active_version
+            candidates = [
+                version
+                for version in reversed(registration.activation_history)
+                if version != active
+            ]
+            if not candidates:
+                raise DatasetNotFoundError(
+                    f"No previous activated {dataset.value} release is available."
+                )
+            return self._activate_locked(registry, dataset, candidates[0])
 
     def active_manifest(self, dataset: DatasetKind) -> DatasetManifest | None:
         registration = self.registry().registration(dataset)
@@ -228,8 +263,58 @@ class PublicDataStore:
             warnings=warnings,
         )
 
-    def _register_staged(self, manifest: DatasetManifest) -> None:
-        registry = self.registry()
+    def _commit_staged(
+        self,
+        temporary: Path,
+        destination: Path,
+        manifest: DatasetManifest,
+    ) -> DatasetManifest:
+        with self._registry_lock():
+            registry = self.registry()
+            if destination.exists():
+                disk_manifest = DatasetManifest.model_validate_json(
+                    (destination / MANIFEST_FILENAME).read_text()
+                )
+                self._validate_recoverable_release(disk_manifest, manifest)
+                self._validate_release_directory(
+                    destination,
+                    expected_manifest=disk_manifest,
+                )
+                registration = registry.registration(manifest.release.dataset)
+                existing = registration.versions.get(manifest.release.version)
+                if existing is not None:
+                    return existing
+                manifest = disk_manifest
+            else:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                os.rename(temporary, destination)
+                self._fsync_directory(destination.parent)
+            self._register_staged(manifest, registry)
+            return manifest
+
+    @staticmethod
+    def _validate_recoverable_release(
+        disk_manifest: DatasetManifest,
+        candidate_manifest: DatasetManifest,
+    ) -> None:
+        disk_release = disk_manifest.release.model_dump(mode="json")
+        candidate_release = candidate_manifest.release.model_dump(mode="json")
+        disk_release.pop("retrieved_at", None)
+        candidate_release.pop("retrieved_at", None)
+        if (
+            disk_release != candidate_release
+            or disk_manifest.content_sha256 != candidate_manifest.content_sha256
+            or disk_manifest.record_count != candidate_manifest.record_count
+        ):
+            raise DatasetValidationError(
+                "An immutable dataset release already exists with different content or provenance."
+            )
+
+    def _register_staged(
+        self,
+        manifest: DatasetManifest,
+        registry: PublicDataRegistry,
+    ) -> None:
         dataset = manifest.release.dataset
         registration = registry.registration(dataset).model_copy(deep=True)
         registration.versions[manifest.release.version] = manifest
@@ -285,6 +370,12 @@ class PublicDataStore:
             raise DatasetValidationError("Dataset manifest kind does not match registry.")
         if disk_manifest.release.version != expected_manifest.release.version:
             raise DatasetValidationError("Dataset manifest version does not match registry.")
+        if disk_manifest.release != expected_manifest.release:
+            raise DatasetValidationError("Dataset release provenance does not match registry.")
+        if disk_manifest.content_sha256 != expected_manifest.content_sha256:
+            raise DatasetValidationError("Dataset content checksum does not match registry.")
+        if disk_manifest.record_count != expected_manifest.record_count:
+            raise DatasetValidationError("Dataset record count does not match registry.")
         digest = hashlib.sha256(records_path.read_bytes()).hexdigest()
         if digest != expected_manifest.content_sha256:
             raise DatasetValidationError(
@@ -313,6 +404,84 @@ class PublicDataStore:
         self.root.mkdir(parents=True, exist_ok=True)
         self._atomic_write_json(self.registry_path, registry.model_dump(mode="json"))
 
+    @contextmanager
+    def _registry_lock(self) -> Iterator[None]:
+        self.root.mkdir(parents=True, exist_ok=True)
+        token = uuid.uuid4().hex
+        started = time.monotonic()
+        while True:
+            try:
+                self.registry_lock_path.mkdir()
+            except FileExistsError:
+                self._remove_stale_lock()
+                if time.monotonic() - started >= self.lock_timeout_seconds:
+                    raise RegistryLockTimeoutError(
+                        "Timed out waiting for the public-data registry lock."
+                    ) from None
+                time.sleep(self.lock_poll_seconds)
+                continue
+            try:
+                self._write_json(
+                    self.registry_lock_path / "owner.json",
+                    {
+                        "token": token,
+                        "pid": os.getpid(),
+                        "hostname": socket.gethostname(),
+                        "acquired_at": datetime.now(UTC).isoformat(),
+                    },
+                )
+            except Exception:
+                shutil.rmtree(self.registry_lock_path, ignore_errors=True)
+                raise
+            break
+        try:
+            yield
+        finally:
+            self._release_registry_lock(token)
+
+    def _remove_stale_lock(self) -> None:
+        try:
+            age = time.time() - self.registry_lock_path.stat().st_mtime
+        except FileNotFoundError:
+            return
+        if age < self.stale_lock_seconds:
+            return
+        try:
+            owner = json.loads((self.registry_lock_path / "owner.json").read_text())
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            owner = {}
+        if (
+            owner.get("hostname") == socket.gethostname()
+            and isinstance(owner.get("pid"), int)
+            and self._pid_is_alive(owner["pid"])
+        ):
+            return
+        stale_path = self.root / f".registry.lock.stale-{uuid.uuid4().hex}"
+        try:
+            os.rename(self.registry_lock_path, stale_path)
+        except FileNotFoundError:
+            return
+        shutil.rmtree(stale_path, ignore_errors=True)
+
+    def _release_registry_lock(self, token: str) -> None:
+        owner_path = self.registry_lock_path / "owner.json"
+        try:
+            owner = json.loads(owner_path.read_text())
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return
+        if owner.get("token") == token:
+            shutil.rmtree(self.registry_lock_path, ignore_errors=True)
+
+    @staticmethod
+    def _pid_is_alive(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
     @staticmethod
     def _write_json(path: Path, payload: object) -> None:
         path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
@@ -331,8 +500,17 @@ class PublicDataStore:
                 output.flush()
                 os.fsync(output.fileno())
             os.replace(temporary, path)
+            PublicDataStore._fsync_directory(path.parent)
         finally:
             temporary.unlink(missing_ok=True)
+
+    @staticmethod
+    def _fsync_directory(path: Path) -> None:
+        descriptor = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
     def _release_path(self, dataset: DatasetKind, version: str) -> Path:
         return self.datasets_root / dataset.value / version

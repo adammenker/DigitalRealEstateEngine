@@ -5,11 +5,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from datetime import date
 from pathlib import Path
 from typing import Any
 
-from rank_rent.public_data.adapters import OfflineFixtureAdapter
+from rank_rent.public_data.adapters import (
+    ACSAdapter,
+    CBPAdapter,
+    FilePublicDataTransport,
+    NESAdapter,
+    OfflineFixtureAdapter,
+    PublicDataAdapter,
+)
 from rank_rent.public_data.catalog import load_dataset_catalog
 from rank_rent.public_data.models import DatasetKind, DatasetRelease
 from rank_rent.public_data.store import PublicDataStore
@@ -34,16 +42,46 @@ def _parser() -> argparse.ArgumentParser:
 
     for command in ("stage", "refresh"):
         ingest = commands.add_parser(command)
-        ingest.add_argument("--dataset", choices=[item.value for item in DatasetKind], required=True)
+        ingest.add_argument(
+            "--dataset", choices=[item.value for item in DatasetKind], required=True
+        )
         ingest.add_argument("--version", required=True)
         ingest.add_argument("--data-year", type=int, required=True)
         ingest.add_argument("--release-date", type=date.fromisoformat, required=True)
-        ingest.add_argument("--source", type=Path, required=True)
+        source_group = ingest.add_mutually_exclusive_group()
+        source_group.add_argument(
+            "--source",
+            type=Path,
+            help="Previously normalized JSON/JSONL records (legacy fixture path).",
+        )
+        source_group.add_argument(
+            "--official-source",
+            type=Path,
+            help="Previously downloaded official Census API JSON or CSV.",
+        )
         ingest.add_argument(
             "--source-url",
             help="Override the authoritative URL from the dataset catalog.",
         )
+        ingest.add_argument(
+            "--endpoint",
+            help="Override the Census API endpoint used for online acquisition.",
+        )
         ingest.add_argument("--notes", default="")
+        ingest.add_argument(
+            "--source-format",
+            choices=["auto", "json", "csv"],
+            default="auto",
+        )
+        ingest.add_argument(
+            "--expected-sha256",
+            help="Reject acquisition unless the official source has this SHA-256.",
+        )
+        ingest.add_argument(
+            "--api-key",
+            default=os.getenv("CENSUS_API_KEY"),
+            help="Census API key; defaults to CENSUS_API_KEY.",
+        )
 
     activate = commands.add_parser("activate")
     activate.add_argument("--dataset", choices=[item.value for item in DatasetKind], required=True)
@@ -81,7 +119,16 @@ def main() -> None:
             adapter="offline_fixture",
             notes=args.notes,
         )
-        staged = store.stage(OfflineFixtureAdapter(release, args.source))
+        adapter = _adapter(
+            release,
+            normalized_source=args.source,
+            official_source=args.official_source,
+            api_key=args.api_key,
+            expected_sha256=args.expected_sha256,
+            source_format=args.source_format,
+            endpoint=args.endpoint,
+        )
+        staged = store.stage(adapter)
         result: dict[str, Any] = {
             "operation": "stage",
             "dataset": staged.dataset.value,
@@ -110,6 +157,53 @@ def main() -> None:
         print(manifest.model_dump_json(indent=2))
         return
     print(store.registry().model_dump_json(indent=2))
+
+
+def _adapter(
+    release: DatasetRelease,
+    *,
+    normalized_source: Path | None,
+    official_source: Path | None,
+    api_key: str | None,
+    expected_sha256: str | None,
+    source_format: str,
+    endpoint: str | None,
+) -> PublicDataAdapter:
+    if normalized_source is not None:
+        return OfflineFixtureAdapter(release, normalized_source)
+    if release.dataset not in {DatasetKind.acs, DatasetKind.cbp, DatasetKind.nes}:
+        raise SystemExit("NOAA and FEMA require a reviewed normalized --source extract.")
+    transport = (
+        FilePublicDataTransport(official_source, source_url=release.source_url)
+        if official_source is not None
+        else None
+    )
+    if release.dataset is DatasetKind.acs:
+        return ACSAdapter(
+            release,
+            transport=transport,
+            endpoint=endpoint,
+            api_key=api_key,
+            expected_sha256=expected_sha256,
+            source_format=source_format,
+        )
+    if release.dataset is DatasetKind.cbp:
+        return CBPAdapter(
+            release,
+            transport=transport,
+            endpoint=endpoint,
+            api_key=api_key,
+            expected_sha256=expected_sha256,
+            source_format=source_format,
+        )
+    return NESAdapter(
+        release,
+        transport=transport,
+        endpoint=endpoint,
+        api_key=api_key,
+        expected_sha256=expected_sha256,
+        source_format=source_format,
+    )
 
 
 if __name__ == "__main__":

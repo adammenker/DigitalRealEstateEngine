@@ -1,13 +1,20 @@
 """Versioned, offline public-data ingestion and query APIs."""
 
 from rank_rent.public_data.adapters import (
+    AcquiredSource,
     ACSAdapter,
     CBPAdapter,
     FEMAAdapter,
+    FilePublicDataTransport,
+    HttpxPublicDataTransport,
     NESAdapter,
     NOAAAdapter,
     OfflineFixtureAdapter,
+    PublicDataAcquisitionError,
     PublicDataAdapter,
+    PublicDataHTTPTransport,
+    PublicDataNormalizationError,
+    SourceRequest,
 )
 from rank_rent.public_data.catalog import (
     DatasetDefinition,
@@ -34,10 +41,12 @@ from rank_rent.public_data.store import (
     DatasetNotFoundError,
     DatasetValidationError,
     PublicDataStore,
+    RegistryLockTimeoutError,
     StagedDataset,
 )
 
 __all__ = [
+    "AcquiredSource",
     "ACSAdapter",
     "CBPAdapter",
     "DatasetDefinition",
@@ -49,6 +58,8 @@ __all__ = [
     "DatasetStatus",
     "DatasetValidationError",
     "FEMAAdapter",
+    "FilePublicDataTransport",
+    "HttpxPublicDataTransport",
     "MappingConfidence",
     "NAICSMapping",
     "NAICSRegistry",
@@ -57,10 +68,15 @@ __all__ = [
     "NOAAAdapter",
     "OfflineFixtureAdapter",
     "PublicDataAdapter",
+    "PublicDataAcquisitionError",
+    "PublicDataHTTPTransport",
+    "PublicDataNormalizationError",
     "PublicDataRegistry",
     "PublicDatasetCatalog",
     "PublicDataStore",
+    "RegistryLockTimeoutError",
     "StagedDataset",
+    "SourceRequest",
     "ServiceNAICSMapping",
     "load_dataset_catalog",
     "load_naics_registry",

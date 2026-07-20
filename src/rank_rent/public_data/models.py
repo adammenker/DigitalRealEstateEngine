@@ -74,6 +74,12 @@ class DatasetRelease(BaseModel):
     source_name: str
     license: str
     source_sha256: str | None = None
+    source_bytes: int | None = Field(default=None, ge=1)
+    source_format: str | None = None
+    source_content_type: str | None = None
+    source_etag: str | None = None
+    source_last_modified: str | None = None
+    acquisition_method: str | None = None
     geographic_granularity: list[str]
     refresh_cadence: str
     retrieved_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -94,6 +100,20 @@ class DatasetRelease(BaseModel):
         if not cleaned:
             raise ValueError("Dataset release metadata cannot be empty.")
         return cleaned
+
+    @field_validator(
+        "source_format",
+        "source_content_type",
+        "source_etag",
+        "source_last_modified",
+        "acquisition_method",
+    )
+    @classmethod
+    def normalize_optional_release_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
 
     @field_validator("geographic_granularity")
     @classmethod
