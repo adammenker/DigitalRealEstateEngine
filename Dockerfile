@@ -16,7 +16,7 @@ COPY src ./src
 COPY scripts ./scripts
 
 RUN pip install --upgrade pip \
-    && pip install -e . \
+    && pip install -e ".[s3]" \
     && chmod +x /app/scripts/docker-entrypoint.sh \
     && mkdir -p /data /app/generated_sites
 

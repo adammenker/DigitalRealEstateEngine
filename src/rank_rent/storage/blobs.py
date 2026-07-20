@@ -195,7 +195,35 @@ class S3BlobStore:
         }
         if self.server_side_encryption:
             request["ServerSideEncryption"] = self.server_side_encryption
-        self.client.put_object(**request)
+        request["IfNoneMatch"] = "*"
+        try:
+            self.client.put_object(**request)
+        except Exception as exc:
+            response = getattr(exc, "response", {})
+            error = response.get("Error", {}) if isinstance(response, dict) else {}
+            error_code = str(error.get("Code", ""))
+            if error_code not in {
+                "409",
+                "412",
+                "ConditionalRequestConflict",
+                "PreconditionFailed",
+            }:
+                raise
+            head = self._head(key)
+            if head is None:
+                raise
+            metadata = head.get("Metadata") or {}
+            actual_checksum = str(metadata.get("sha256") or self.checksum(key))
+            if actual_checksum != expected_checksum:
+                raise ImmutableBlobError(
+                    f"Blob {key!r} was concurrently created with different content."
+                ) from exc
+            return BlobInfo(
+                key,
+                actual_checksum,
+                int(head.get("ContentLength") or len(data)),
+                str(head.get("ContentType") or content_type),
+            )
         return BlobInfo(key, expected_checksum, len(data), content_type)
 
     def get(self, key: str) -> bytes:

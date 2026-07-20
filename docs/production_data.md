@@ -39,9 +39,10 @@ canonical JSON bytes are stored outside PostgreSQL, while `raw_api_responses` re
 - source scan lineage, request/response timestamps, cost, retention classification, and blob
   creation time.
 
-Blob content is create-once: writing the same key with different bytes fails. ORM updates to
-raw-response content or lineage metadata also fail. Cache expiry may still change because it is
-operational cache state rather than purchased evidence.
+Blob content is create-once: filesystem writes use an atomic link and S3-compatible writes use
+`If-None-Match: *`; a concurrent write with different bytes fails. ORM updates to raw-response
+content or lineage metadata also fail. Cache expiry may still change because it is operational
+cache state rather than purchased evidence.
 
 Filesystem configuration:
 
@@ -61,9 +62,10 @@ BLOB_STORE_S3_ENDPOINT_URL=
 BLOB_STORE_S3_SERVER_SIDE_ENCRYPTION=AES256
 ```
 
-Install the optional adapter dependency with `pip install -e ".[s3]"`. The adapter uses the
-standard AWS credential chain and supports a custom endpoint for compatible object stores.
-Tests use an injected in-memory client and never contact S3.
+Install the optional adapter dependency with `pip install -e ".[s3]"`. The repository Docker image
+already includes that extra. The adapter uses the standard AWS credential chain and supports a
+custom endpoint for compatible object stores. Tests use an injected in-memory client and never
+contact S3.
 
 Legacy rows with inline `response_json` remain readable. New live-adapter rows use the blob as
 the authoritative response body and leave the legacy JSON field empty. Database replay and
@@ -71,10 +73,11 @@ bundle export verify the stored checksum before returning evidence.
 
 ## Migration Policy
 
-Revision `c9a4e7d2b6f1` is the only Workstream C migration and directly follows the prior head
-`b7d2f4a9c6e1`. It adds nullable blob-location fields so existing prototype rows remain
-readable, plus required retention/encryption classifications for forward writes. SQLite and
-PostgreSQL both use the same Alembic chain.
+Revision `c9a4e7d2b6f1` is the Workstream C migration and directly follows the prior head
+`b7d2f4a9c6e1`. Workstream D revision `6f4c2d8a9b17` follows it as the current head. The C revision
+adds nullable blob-location fields so existing prototype rows remain readable, plus required
+retention/encryption classifications for forward writes. SQLite and PostgreSQL both use this
+single linear Alembic chain.
 
 Disposable prototype databases may still be wiped at the declared production cutover. From
 that cutover onward, upgrades must use forward migrations; production databases must not be
@@ -101,6 +104,8 @@ lead data, logs, and deleted-opportunity retention are outside Workstream C beca
 models do not exist yet.
 
 No production backup scheduler, cloud bucket, PostgreSQL service, or legal-deletion workflow is
-created by this repository change. A real PostgreSQL concurrency test and restore rehearsal
-remain deployment gates; CI stays deterministic and makes no live infrastructure or provider
-calls.
+created by this repository change. `tests/integration/test_postgres_concurrency.py` exercises
+atomic worker claims and daily spend reservations when `TEST_POSTGRESQL_URL` points to a disposable
+database; the default no-service CI run skips it. A concurrency run against the selected hosted
+PostgreSQL service and a restore rehearsal remain deployment gates. No verification path makes
+live provider calls.

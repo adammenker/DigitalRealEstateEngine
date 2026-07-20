@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 from io import BytesIO
 from typing import Any
@@ -15,6 +16,10 @@ from rank_rent.storage.blobs import FilesystemBlobStore, ImmutableBlobError, S3B
 
 class MissingObjectError(Exception):
     response = {"Error": {"Code": "404"}}
+
+
+class PreconditionFailedError(Exception):
+    response = {"Error": {"Code": "PreconditionFailed"}}
 
 
 class FakeS3Client:
@@ -33,7 +38,10 @@ class FakeS3Client:
         }
 
     def put_object(self, **request: Any) -> None:
-        self.objects[(str(request["Bucket"]), str(request["Key"]))] = request
+        object_id = (str(request["Bucket"]), str(request["Key"]))
+        if request.get("IfNoneMatch") == "*" and object_id in self.objects:
+            raise PreconditionFailedError
+        self.objects[object_id] = request
 
     def get_object(self, *, Bucket: str, Key: str) -> dict[str, BytesIO]:
         return {"Body": BytesIO(self.objects[(Bucket, Key)]["Body"])}
@@ -72,11 +80,36 @@ def test_s3_adapter_uses_injected_client_without_network() -> None:
 
     stored = client.objects[("test-bucket", "unit/raw/response.json")]
     assert stored["ServerSideEncryption"] == "AES256"
+    assert stored["IfNoneMatch"] == "*"
     assert store.get(info.key) == b"payload"
     assert store.exists(info.key)
     assert store.put(info.key, b"payload").checksum == info.checksum
     with pytest.raises(ImmutableBlobError):
         store.put(info.key, b"different")
+
+
+def test_s3_adapter_handles_a_concurrent_immutable_create() -> None:
+    class RacingClient(FakeS3Client):
+        def __init__(self, concurrent_body: bytes) -> None:
+            super().__init__()
+            self.concurrent_body = concurrent_body
+
+        def put_object(self, **request: Any) -> None:
+            object_id = (str(request["Bucket"]), str(request["Key"]))
+            body = self.concurrent_body
+            self.objects[object_id] = {
+                **request,
+                "Body": body,
+                "Metadata": {"sha256": hashlib.sha256(body).hexdigest()},
+            }
+            raise PreconditionFailedError
+
+    matching_store = S3BlobStore("bucket", client=RacingClient(b"payload"))
+    assert matching_store.put("raw/race.json", b"payload").size_bytes == 7
+
+    conflicting_store = S3BlobStore("bucket", client=RacingClient(b"other"))
+    with pytest.raises(ImmutableBlobError, match="concurrently created"):
+        conflicting_store.put("raw/race.json", b"payload")
 
 
 def test_raw_response_blob_metadata_and_lineage_are_immutable(tmp_path) -> None:

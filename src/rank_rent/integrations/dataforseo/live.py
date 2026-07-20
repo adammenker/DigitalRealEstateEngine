@@ -556,6 +556,8 @@ class DataForSEOLiveProvider:
 
         api_call = self._start_api_call(path, normalized)
         reservation: UsageReservation | None = None
+        payload: dict[str, Any] | None = None
+        usage_finalized = False
         try:
             if self.session is not None and api_call is not None:
                 reservation = reserve_provider_call(
@@ -566,8 +568,9 @@ class DataForSEOLiveProvider:
                     adapter_version=self.adapter_version,
                     endpoint=path,
                     estimated_cost_usd=api_call.estimated_cost_usd,
-                    scan_profile=self.scan_depth,
+                    scan_profile="testing" if self.allow_unplanned_requests else self.scan_depth,
                     cache_miss=True,
+                    require_current_qualification=not self.allow_unplanned_requests,
                 )
             async with self._client() as client:
                 if method == "GET":
@@ -576,6 +579,27 @@ class DataForSEOLiveProvider:
                     tasks = cast(list[dict[str, Any]], normalized.get("tasks") or [])
                     response = await client.post(path, json=tasks)
             payload = self._parse_response(response)
+
+            key = self._cache_set(path, normalized, payload, status_code=response.status_code)
+            cached_row = self._cache_row(path, normalized)
+            self._finish_api_call(
+                api_call,
+                status="completed",
+                payload=payload,
+                raw_response_id=cached_row.id if cached_row else None,
+                cache_key_override=key,
+                commit=reservation is None,
+            )
+            if self.session is not None and reservation is not None:
+                actual_cost = self._payload_cost(payload)
+                finish_provider_call(
+                    self.session,
+                    reservation,
+                    actual_cost_usd=actual_cost,
+                    abnormal_cost=actual_cost > self.settings.single_call_abnormal_cost_usd,
+                )
+                usage_finalized = True
+            return payload
         except Exception as exc:
             self._finish_api_call(
                 api_call,
@@ -583,35 +607,15 @@ class DataForSEOLiveProvider:
                 error=exc,
                 commit=reservation is None,
             )
-            if self.session is not None and reservation is not None:
+            if self.session is not None and reservation is not None and not usage_finalized:
                 finish_provider_call(
                     self.session,
                     reservation,
-                    actual_cost_usd=0,
+                    actual_cost_usd=self._payload_cost(payload) if payload is not None else 0,
                     failed=not isinstance(exc, CircuitOpenError),
                     schema_drift=isinstance(exc, DataForSEOSchemaError),
                 )
             raise
-
-        key = self._cache_set(path, normalized, payload, status_code=response.status_code)
-        cached_row = self._cache_row(path, normalized)
-        self._finish_api_call(
-            api_call,
-            status="completed",
-            payload=payload,
-            raw_response_id=cached_row.id if cached_row else None,
-            cache_key_override=key,
-            commit=reservation is None,
-        )
-        if self.session is not None and reservation is not None:
-            actual_cost = self._payload_cost(payload)
-            finish_provider_call(
-                self.session,
-                reservation,
-                actual_cost_usd=actual_cost,
-                abnormal_cost=actual_cost > self.settings.single_call_abnormal_cost_usd,
-            )
-        return payload
 
     def _cache_get(self, path: str, params: dict[str, Any]) -> dict[str, Any] | None:
         if self.cache is None or self.force_refresh:
@@ -794,7 +798,7 @@ class DataForSEOLiveProvider:
             record_unexpected_call(
                 self.session,
                 provider=self.provider_name,
-                scan_profile=self.scan_depth,
+                environment=self.api_environment,
                 endpoint=path,
             )
             raise DataForSEOPlanError(

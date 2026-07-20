@@ -67,7 +67,7 @@ def raw_response_payload(
         store = blob_store or build_blob_store(get_settings())
         try:
             encoded = store.get(row.object_key)
-        except (OSError, KeyError) as exc:
+        except Exception as exc:
             raise RawResponseIntegrityError(
                 f"Raw response blob {row.object_key!r} is unavailable."
             ) from exc

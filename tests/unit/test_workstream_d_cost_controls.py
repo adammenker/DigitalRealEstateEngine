@@ -8,7 +8,12 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 
 from rank_rent.db.base import Base, make_engine
-from rank_rent.db.orm import BillingReconciliationORM, ProviderDailyUsageORM, ScanRunORM
+from rank_rent.db.orm import (
+    ApiCallORM,
+    BillingReconciliationORM,
+    ProviderDailyUsageORM,
+    ScanRunORM,
+)
 from rank_rent.services.cost_controls import (
     CircuitOpenError,
     daily_usage,
@@ -101,7 +106,7 @@ def test_all_four_kill_switches_block_before_reservation(
         assert session.query(ProviderDailyUsageORM).count() == 0
 
 
-def test_production_call_requires_current_matching_qualification_and_reconciliation() -> None:
+def test_production_call_requires_current_qualification_and_timely_reconciliation() -> None:
     Session = make_session()
     now = datetime.now(UTC)
     with Session() as session:
@@ -171,6 +176,32 @@ def test_production_call_requires_current_matching_qualification_and_reconciliat
             ttl_hours=24,
             now=now,
         )
+        bootstrap = reserve_provider_call(
+            session,
+            settings=production_settings(),
+            provider="dataforseo-live",
+            environment="production",
+            adapter_version=DATAFORSEO_ADAPTER_VERSION,
+            endpoint="/paid",
+            estimated_cost_usd=0.01,
+            scan_profile="full",
+            cache_miss=True,
+            now=now,
+        )
+        assert bootstrap.usage_class == "production"
+
+        session.add(
+            ApiCallORM(
+                provider="dataforseo-live",
+                endpoint="/paid",
+                stage="keyword_discovery",
+                cache_key="old-paid-call",
+                status="completed",
+                actual_cost_usd=0.01,
+                completed_at=now - timedelta(hours=72),
+            )
+        )
+        session.commit()
         with pytest.raises(CircuitOpenError, match="billing"):
             reserve_provider_call(
                 session,
@@ -184,6 +215,60 @@ def test_production_call_requires_current_matching_qualification_and_reconciliat
                 cache_miss=True,
                 now=now,
             )
+
+
+def test_testing_depth_on_production_host_uses_production_limits() -> None:
+    Session = make_session()
+    now = datetime.now(UTC)
+    with Session() as session:
+        qualify_and_reconcile(session, now)
+        reservation = reserve_provider_call(
+            session,
+            settings=production_settings(production_daily_request_limit=1),
+            provider="dataforseo-live",
+            environment="production",
+            adapter_version=DATAFORSEO_ADAPTER_VERSION,
+            endpoint="/paid",
+            estimated_cost_usd=0.01,
+            scan_profile="testing",
+            cache_miss=True,
+            now=now,
+        )
+        assert reservation.usage_class == "production"
+        with pytest.raises(CircuitOpenError, match="request limit"):
+            reserve_provider_call(
+                session,
+                settings=production_settings(production_daily_request_limit=1),
+                provider="dataforseo-live",
+                environment="production",
+                adapter_version=DATAFORSEO_ADAPTER_VERSION,
+                endpoint="/paid",
+                estimated_cost_usd=0.01,
+                scan_profile="testing",
+                cache_miss=True,
+                now=now,
+            )
+
+
+def test_explicit_qualification_call_can_bootstrap_without_qualification_record() -> None:
+    Session = make_session()
+    now = datetime.now(UTC)
+    with Session() as session:
+        reservation = reserve_provider_call(
+            session,
+            settings=production_settings(),
+            provider="dataforseo-live",
+            environment="production",
+            adapter_version=DATAFORSEO_ADAPTER_VERSION,
+            endpoint="/v3/appendix/user_data",
+            estimated_cost_usd=0,
+            scan_profile="testing",
+            cache_miss=True,
+            require_current_qualification=False,
+            now=now,
+        )
+
+        assert reservation.usage_class == "production"
 
 
 def test_transactional_request_limit_allows_only_one_concurrent_reservation(tmp_path: Path) -> None:
@@ -224,14 +309,19 @@ def test_transactional_request_limit_allows_only_one_concurrent_reservation(tmp_
 
 def test_durable_counters_endpoint_spend_and_synthetic_alerts() -> None:
     Session = make_session()
-    settings = production_settings(testing_daily_spend_usd=1)
+    settings = production_settings(
+        testing_daily_spend_usd=1,
+        circuit_breaker_minimum_requests=1,
+        provider_failure_rate_threshold=0.5,
+        schema_drift_rate_threshold=0.1,
+    )
     now = datetime.now(UTC)
     with Session() as session:
         reservation = reserve_provider_call(
             session,
             settings=settings,
-            provider="dataforseo-live",
-            environment="production",
+            provider="dataforseo-sandbox",
+            environment="sandbox",
             adapter_version=DATAFORSEO_ADAPTER_VERSION,
             endpoint="/paid",
             estimated_cost_usd=0.6,
@@ -247,8 +337,8 @@ def test_durable_counters_endpoint_spend_and_synthetic_alerts() -> None:
         )
         record_unexpected_call(
             session,
-            provider="dataforseo-live",
-            scan_profile="testing",
+            provider="dataforseo-sandbox",
+            environment="sandbox",
             endpoint="/unexpected",
             now=now,
         )
@@ -259,13 +349,35 @@ def test_durable_counters_endpoint_spend_and_synthetic_alerts() -> None:
                 quarantined_at=now,
             )
         )
+        session.add(
+            ScanRunORM(
+                source="manual_async",
+                status="running",
+                started_at=now - timedelta(hours=2),
+                heartbeat_at=now,
+            )
+        )
+        session.add(
+            ApiCallORM(
+                provider="dataforseo-sandbox",
+                endpoint="/administrative",
+                stage="qualification",
+                cache_key="administrative-paid-call",
+                status="completed",
+                actual_cost_usd=0.01,
+                completed_at=now,
+            )
+        )
+        summary = session.query(ProviderDailyUsageORM).filter_by(endpoint="").one()
+        summary.provider_failure_count = 1
+        summary.schema_drift_count = 1
         session.commit()
 
-        usage = daily_usage(session, provider="dataforseo-live", usage_date=now.date())
+        usage = daily_usage(session, provider="dataforseo-sandbox", usage_date=now.date())
         alerts = evaluate_alerts(
             session,
             settings=settings,
-            provider="dataforseo-live",
+            provider="dataforseo-sandbox",
             usage_date=now.date(),
             now=now,
         )
@@ -282,5 +394,9 @@ def test_durable_counters_endpoint_spend_and_synthetic_alerts() -> None:
     assert "paid_testing_response" in alerts
     assert "daily_spend_50_percent" in alerts
     assert "unexpected_paid_call" in alerts
+    assert "paid_call_without_plan" in alerts
     assert "abnormal_endpoint_cost" in alerts
+    assert "high_provider_error_rate" in alerts
+    assert "schema_drift_rate" in alerts
+    assert "long_running_scan" in alerts
     assert "poison_job" in alerts

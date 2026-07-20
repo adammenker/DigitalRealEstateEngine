@@ -178,6 +178,10 @@ python -m ruff check src tests scripts
 python -m mypy --strict src
 python -m pytest -q
 
+# Optional disposable PostgreSQL race checks
+TEST_POSTGRESQL_URL=postgresql+psycopg://... \
+  python -m pytest -q tests/integration/test_postgres_concurrency.py
+
 cd frontend
 npm ci
 npm run lint
@@ -195,6 +199,7 @@ rank-rent worker --concurrency 2
 
 Paid-call limits, kill switches, qualification expiry, billing reconciliation, and worker retry /
 quarantine operations are documented in `docs/workstream_d_operations.md`.
+Production-host calls always consume production counters, even when the scan depth is `testing`.
 
 ## Repository Layout
 

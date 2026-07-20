@@ -46,11 +46,11 @@ class Settings(BaseSettings):
     allow_full_scans: bool = False
     live_scan_depth: str = "testing"
     us_geography_database_path: Path = Path("data/us_geography.sqlite3")
-    scan_worker_enabled: bool = False
     scan_worker_concurrency: int = Field(default=1, ge=1, le=32)
     scan_worker_poll_seconds: float = Field(default=1.0, ge=0.1)
     scan_worker_heartbeat_seconds: float = Field(default=5.0, ge=0.5)
     scan_worker_stale_after_seconds: float = Field(default=30.0, ge=1.0)
+    scan_worker_long_running_seconds: float = Field(default=3600.0, ge=1.0)
     scan_worker_max_attempts: int = Field(default=4, ge=1, le=20)
     scan_worker_retry_base_seconds: float = Field(default=2.0, ge=0.1)
     scan_worker_retry_max_seconds: float = Field(default=300.0, ge=1.0)

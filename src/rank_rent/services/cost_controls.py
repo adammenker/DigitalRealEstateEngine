@@ -3,12 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from rank_rent.db.orm import (
+    ApiCallORM,
     BillingReconciliationORM,
     ProviderDailyUsageORM,
     ScanRunORM,
@@ -41,10 +42,11 @@ def reserve_provider_call(
     estimated_cost_usd: float,
     scan_profile: str,
     cache_miss: bool,
+    require_current_qualification: bool = True,
     now: datetime | None = None,
 ) -> UsageReservation:
     called_at = now or datetime.now(UTC)
-    usage_class = "production" if scan_profile == "full" else "testing"
+    usage_class = _usage_class(environment)
     _assert_switches(settings, environment=environment, scan_profile=scan_profile)
     if estimated_cost_usd > settings.single_call_abnormal_cost_usd:
         raise CircuitOpenError(
@@ -75,6 +77,7 @@ def reserve_provider_call(
         adapter_version=adapter_version,
         usage_class=usage_class,
         estimated_cost_usd=estimated_cost_usd,
+        require_current_qualification=require_current_qualification,
         now=called_at,
     )
     summary.request_count += 1
@@ -129,12 +132,12 @@ def record_unexpected_call(
     session: Session,
     *,
     provider: str,
-    scan_profile: str,
+    environment: str,
     endpoint: str,
     now: datetime | None = None,
 ) -> None:
     called_at = now or datetime.now(UTC)
-    usage_class = "production" if scan_profile == "full" else "testing"
+    usage_class = _usage_class(environment)
     for bucket_endpoint in ("", endpoint):
         bucket = _locked_bucket(
             session,
@@ -238,8 +241,36 @@ def evaluate_alerts(
         .limit(1)
     ):
         alerts.append("stale_worker")
+    long_running_cutoff = checked_at - timedelta(
+        seconds=settings.scan_worker_long_running_seconds
+    )
+    if session.scalar(
+        select(ScanRunORM.id)
+        .where(
+            ScanRunORM.status == "running",
+            ScanRunORM.started_at.is_not(None),
+            ScanRunORM.started_at < long_running_cutoff,
+        )
+        .limit(1)
+    ):
+        alerts.append("long_running_scan")
     if session.scalar(select(ScanRunORM.id).where(ScanRunORM.status == "quarantined").limit(1)):
         alerts.append("poison_job")
+    day_start = datetime.combine(usage_date, datetime.min.time(), UTC)
+    day_end = day_start + timedelta(days=1)
+    if session.scalar(
+        select(ApiCallORM.id)
+        .where(
+            ApiCallORM.provider == provider,
+            ApiCallORM.status == "completed",
+            ApiCallORM.actual_cost_usd > 0,
+            ApiCallORM.planned_request_id.is_(None),
+            ApiCallORM.completed_at >= day_start,
+            ApiCallORM.completed_at < day_end,
+        )
+        .limit(1)
+    ):
+        alerts.append("paid_call_without_plan")
     latest_reconciliation = session.scalars(
         select(BillingReconciliationORM)
         .where(BillingReconciliationORM.provider == provider)
@@ -272,6 +303,7 @@ def _assert_durable_breakers(
     adapter_version: str,
     usage_class: str,
     estimated_cost_usd: float,
+    require_current_qualification: bool,
     now: datetime,
 ) -> None:
     projected_spend = summary.spend_usd + summary.reserved_spend_usd + estimated_cost_usd
@@ -293,17 +325,19 @@ def _assert_durable_breakers(
             raise CircuitOpenError("Provider schema-drift threshold exceeded.")
     if environment != "production" or usage_class != "production":
         return
-    qualification = current_qualification(
-        session,
-        provider=provider,
-        environment=environment,
-        adapter_version=adapter_version,
-        now=now,
-    )
-    if qualification is None:
-        raise CircuitOpenError(
-            "Production qualification is missing, stale, failing, or for another adapter version."
+    if require_current_qualification:
+        qualification = current_qualification(
+            session,
+            provider=provider,
+            environment=environment,
+            adapter_version=adapter_version,
+            now=now,
         )
+        if qualification is None:
+            raise CircuitOpenError(
+                "Production qualification is missing, stale, failing, or for another "
+                "adapter version."
+            )
     latest_reconciliation = session.scalars(
         select(BillingReconciliationORM)
         .where(
@@ -314,12 +348,26 @@ def _assert_durable_breakers(
         .limit(1)
     ).first()
     reconciliation_cutoff = now - timedelta(hours=settings.billing_reconciliation_max_age_hours)
-    if (
-        latest_reconciliation is None
-        or latest_reconciliation.status != "clean"
+    if latest_reconciliation is not None and (
+        latest_reconciliation.status != "clean"
         or _aware_utc(latest_reconciliation.reconciled_at) < reconciliation_cutoff
     ):
         raise CircuitOpenError("Provider billing is not currently reconciled.")
+    if latest_reconciliation is None:
+        oldest_paid_call = session.scalar(
+            select(func.min(ApiCallORM.completed_at)).where(
+                ApiCallORM.provider == provider,
+                ApiCallORM.status == "completed",
+                ApiCallORM.actual_cost_usd > 0,
+                ApiCallORM.completed_at.is_not(None),
+            )
+        )
+        if oldest_paid_call is not None and _aware_utc(oldest_paid_call) < reconciliation_cutoff:
+            raise CircuitOpenError("Provider billing is not currently reconciled.")
+
+
+def _usage_class(environment: str) -> str:
+    return "production" if environment.strip().lower() == "production" else "testing"
 
 
 def _locked_bucket(

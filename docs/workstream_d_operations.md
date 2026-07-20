@@ -40,8 +40,8 @@ rank-rent data usage
 Counters cover production/testing requests and spend, endpoint spend, cache misses, unexpected
 calls, provider failures, and schema drift. Pull-based alerts cover unexpected calls, paid testing
 responses, repeated cache misses, 50/80/100 percent spend thresholds, high provider/schema error
-rates, stale workers, poison jobs, and billing mismatches. External pager/metrics delivery remains
-outside Workstream D.
+rates, paid calls without plan IDs, long-running scans, stale workers, poison jobs, and billing
+mismatches. External pager/metrics delivery remains outside Workstream D.
 
 All applicable switches must permit a call:
 
@@ -65,15 +65,21 @@ TESTING_DAILY_SPEND_USD=2.00
 SINGLE_CALL_ABNORMAL_COST_USD=1.00
 ```
 
-Production full calls also fail closed without current qualification and recent clean billing
-reconciliation, after repeated unexpected calls, or when provider/schema failure rates exceed
-configured thresholds.
+Every call to the production provider host, including a testing-depth scan, uses production
+counters and requires current qualification. `ALLOW_FULL_SCANS` remains specific to the full scan
+profile. A new installation has one reconciliation grace window, controlled by
+`BILLING_RECONCILIATION_MAX_AGE_HOURS`; after paid history ages beyond that window, production
+calls fail closed until a recent clean billing reconciliation exists. A mismatch opens the circuit
+immediately. Repeated unexpected calls and excessive provider/schema failure rates also open it.
 
 ## Qualification Matrix
 
 The adapter version is `dataforseo-v3-workstream-d-1`. A qualification is current only when every
 required check passes, it has not expired, its provider/environment match, and its adapter version
-is exact. Adapter changes therefore invalidate previous results.
+is exact. Adapter changes therefore invalidate previous results. The explicit qualification
+adapter path may run before that record exists, but it still honors credentials, production opt-in,
+the global paid-call switch, and all daily request/spend limits. Ordinary market scans cannot use
+this exception.
 
 Required JSON keys are:
 
@@ -104,7 +110,9 @@ rank-rent billing reconcile dataforseo-billing.csv
 Required columns are `provider_request_id`, `provider_task_id`, `endpoint`, `cost_usd`, and
 `billed_at` (ISO-8601). Matching prefers request ID and falls back to task ID. The durable report
 contains internal/provider call counts and costs, unmatched charges/calls, the difference, and a
-`clean` or `mismatch` status. A mismatch or stale reconciliation opens the production-full circuit.
+`clean` or `mismatch` status. A mismatch or stale reconciliation opens the production-provider
+circuit. The initial grace window avoids an impossible requirement to reconcile charges before
+the first charge exists.
 
 ## Verification Boundary
 

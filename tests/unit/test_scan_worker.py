@@ -1,18 +1,22 @@
 from __future__ import annotations
 
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
 from sqlalchemy.orm import sessionmaker
 
 from rank_rent.db.base import Base, make_engine
 from rank_rent.db.orm import ScanRunORM
+from rank_rent.domain.models import Market, ServiceFamily
 from rank_rent.services.scan_worker import (
     active_retry_for_scan,
     claim_next_scan,
     recover_stale_scans,
     retry_delay_seconds,
+    run_scan_by_id,
 )
 from rank_rent.settings import Settings
 
@@ -206,3 +210,116 @@ def test_stale_poison_job_is_quarantined_at_max_attempts() -> None:
         assert scan.status == "quarantined"
         assert scan.quarantined_at == now
         assert scan.partial_outputs["poison_job"] is True
+
+
+def _queued_request() -> dict[str, object]:
+    return {
+        "service_payload": ServiceFamily(
+            id="drywall",
+            display_name="Drywall",
+            seed_queries=["drywall"],
+        ).model_dump(mode="json"),
+        "market_payload": Market(
+            id="st-louis-mo",
+            display_name="St. Louis, MO",
+        ).model_dump(mode="json"),
+        "data_mode": "fixture",
+        "scan_profile": "testing",
+    }
+
+
+def test_terminal_scan_clears_its_lease(monkeypatch: pytest.MonkeyPatch) -> None:
+    Session = session_factory()
+    with Session() as session:
+        scan = ScanRunORM(
+            source="manual_async",
+            status="queued",
+            request_parameters=_queued_request(),
+        )
+        session.add(scan)
+        session.commit()
+        scan_id = scan.id
+        lease = claim_next_scan(session, worker_id="worker-a")
+    assert lease is not None
+
+    class CompletingPipeline:
+        def __init__(self, session, **_: object) -> None:
+            self.session = session
+
+        async def run(self, *_: object, existing_scan_id: int, **__: object) -> dict[str, object]:
+            stored = self.session.get(ScanRunORM, existing_scan_id)
+            assert stored is not None
+            stored.status = "completed"
+            stored.progress_stage = "completed"
+            stored.completed_at = datetime.now(UTC)
+            self.session.commit()
+            return {}
+
+    monkeypatch.setattr("rank_rent.services.scan_worker.ScanPipeline", CompletingPipeline)
+    asyncio.run(
+        run_scan_by_id(
+            lease,
+            session_factory=Session,
+            heartbeat_seconds=0.01,
+            lease_seconds=1,
+            settings=Settings(),
+        )
+    )
+
+    with Session() as session:
+        stored = session.get(ScanRunORM, scan_id)
+        assert stored is not None
+        assert stored.status == "completed"
+        assert stored.worker_id is None
+        assert stored.lease_token is None
+        assert stored.lease_expires_at is None
+
+
+def test_retryable_failure_requeues_and_releases_lease(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    Session = session_factory()
+    with Session() as session:
+        scan = ScanRunORM(
+            source="manual_async",
+            status="queued",
+            request_parameters=_queued_request(),
+        )
+        session.add(scan)
+        session.commit()
+        scan_id = scan.id
+        lease = claim_next_scan(session, worker_id="worker-a")
+    assert lease is not None
+
+    class FailingPipeline:
+        def __init__(self, session, **_: object) -> None:
+            self.session = session
+
+        async def run(self, *_: object, existing_scan_id: int, **__: object) -> dict[str, object]:
+            stored = self.session.get(ScanRunORM, existing_scan_id)
+            assert stored is not None
+            stored.status = "failed"
+            stored.progress_stage = "failed"
+            stored.partial_outputs = {"failed_stage": "fetching_serps"}
+            self.session.commit()
+            raise TimeoutError("transient provider timeout")
+
+    monkeypatch.setattr("rank_rent.services.scan_worker.ScanPipeline", FailingPipeline)
+    asyncio.run(
+        run_scan_by_id(
+            lease,
+            session_factory=Session,
+            heartbeat_seconds=0.01,
+            lease_seconds=1,
+            settings=Settings(scan_worker_retry_base_seconds=1),
+        )
+    )
+
+    with Session() as session:
+        stored = session.get(ScanRunORM, scan_id)
+        assert stored is not None
+        assert stored.status == "queued"
+        assert stored.retry_count == 1
+        assert stored.next_attempt_at is not None
+        assert stored.worker_id is None
+        assert stored.lease_token is None

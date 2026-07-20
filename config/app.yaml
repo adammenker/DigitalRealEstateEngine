@@ -5,8 +5,3 @@ scan_limits:
 cache_ttl_seconds:
   default: 604800
   serp: 86400
-production_limits:
-  daily_request_limit: 100
-  daily_spend_usd: 25.00
-  testing_daily_spend_usd: 2.00
-  single_call_abnormal_cost_usd: 1.00
