@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-DATASET_VERSION = "us-geography-2024.1"
+DATASET_VERSION = "us-geography-2024.2"
 REFERENCE_YEAR = 2024
 STATE_BY_FIPS = {
     "01": "AL",
@@ -90,6 +90,22 @@ SOURCE_URLS = {
         "https://www2.census.gov/programs-surveys/acs/summary_file/2024/"
         "table-based-SF/data/5YRData/acsdt5y2024-b01003.dat"
     ),
+    "households.dat": (
+        "https://www2.census.gov/programs-surveys/acs/summary_file/2024/"
+        "table-based-SF/data/5YRData/acsdt5y2024-b11001.dat"
+    ),
+    "housing_units.dat": (
+        "https://www2.census.gov/programs-surveys/acs/summary_file/2024/"
+        "table-based-SF/data/5YRData/acsdt5y2024-b25001.dat"
+    ),
+    "housing_tenure.dat": (
+        "https://www2.census.gov/programs-surveys/acs/summary_file/2024/"
+        "table-based-SF/data/5YRData/acsdt5y2024-b25003.dat"
+    ),
+    "median_year_built.dat": (
+        "https://www2.census.gov/programs-surveys/acs/summary_file/2024/"
+        "table-based-SF/data/5YRData/acsdt5y2024-b25035.dat"
+    ),
     "place_county.txt": (
         "https://www2.census.gov/geo/docs/reference/codes2020/"
         "national_place_by_county2020.txt"
@@ -156,6 +172,10 @@ class GeographyRow:
     longitude: float
     population: int
     reference_population: int
+    households: int | None
+    housing_units: int | None
+    owner_occupied_units: int | None
+    median_year_built: int | None
     aliases: list[str]
     postal_codes: list[str]
     boundary_radius_km: float
@@ -206,6 +226,16 @@ def _download_sources(source_dir: Path) -> dict[str, Path]:
 
 def _build_rows(sources: dict[str, Path]) -> tuple[list[GeographyRow], dict[str, int]]:
     population = _read_population(sources["population.dat"])
+    households = _read_acs_values(sources["households.dat"], "B11001_E001")
+    housing_units = _read_acs_values(sources["housing_units.dat"], "B25001_E001")
+    owner_occupied_units = _read_acs_values(
+        sources["housing_tenure.dat"],
+        "B25003_E002",
+    )
+    median_year_built = _read_acs_values(
+        sources["median_year_built.dat"],
+        "B25035_E001",
+    )
     reference_population = population["0100000US"]
     places = _read_gazetteer(sources["places.zip"], kind="place")
     zctas = _read_gazetteer(sources["zcta.zip"], kind="zcta")
@@ -267,6 +297,14 @@ def _build_rows(sources: dict[str, Path]) -> tuple[list[GeographyRow], dict[str,
                 longitude=place.longitude,
                 population=place_population,
                 reference_population=reference_population,
+                households=households.get(f"1600000US{place.geoid}"),
+                housing_units=housing_units.get(f"1600000US{place.geoid}"),
+                owner_occupied_units=owner_occupied_units.get(
+                    f"1600000US{place.geoid}"
+                ),
+                median_year_built=median_year_built.get(
+                    f"1600000US{place.geoid}"
+                ),
                 aliases=aliases,
                 postal_codes=postal_codes,
                 boundary_radius_km=_boundary_radius(
@@ -326,6 +364,14 @@ def _build_rows(sources: dict[str, Path]) -> tuple[list[GeographyRow], dict[str,
                 longitude=zcta.longitude,
                 population=zip_population,
                 reference_population=reference_population,
+                households=households.get(f"860Z200US{zcta.geoid}"),
+                housing_units=housing_units.get(f"860Z200US{zcta.geoid}"),
+                owner_occupied_units=owner_occupied_units.get(
+                    f"860Z200US{zcta.geoid}"
+                ),
+                median_year_built=median_year_built.get(
+                    f"860Z200US{zcta.geoid}"
+                ),
                 aliases=sorted(set([zcta.geoid, *aliases])),
                 postal_codes=[zcta.geoid],
                 boundary_radius_km=_boundary_radius(
@@ -343,6 +389,13 @@ def _build_rows(sources: dict[str, Path]) -> tuple[list[GeographyRow], dict[str,
         "excluded_city_count": excluded_cities,
         "excluded_zip_count": excluded_zips,
         "reference_population": reference_population,
+        "complete_housing_signal_count": sum(
+            row.households is not None
+            and row.housing_units is not None
+            and row.owner_occupied_units is not None
+            and row.median_year_built is not None
+            for row in rows
+        ),
     }
 
 
@@ -353,6 +406,17 @@ def _read_population(path: Path) -> dict[str, int]:
             row["GEO_ID"]: int(row["B01003_E001"])
             for row in reader
             if row.get("GEO_ID") and _positive_int(row.get("B01003_E001")) is not None
+        }
+
+
+def _read_acs_values(path: Path, variable: str) -> dict[str, int]:
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle, delimiter="|")
+        return {
+            row["GEO_ID"]: value
+            for row in reader
+            if row.get("GEO_ID")
+            and (value := _positive_int(row.get(variable))) is not None
         }
 
 
@@ -686,6 +750,11 @@ def _write_database(
                 longitude REAL NOT NULL,
                 population INTEGER NOT NULL CHECK (population > 0),
                 reference_population INTEGER NOT NULL CHECK (reference_population > 0),
+                households INTEGER,
+                housing_units INTEGER,
+                owner_occupied_units INTEGER,
+                median_year_built INTEGER,
+                public_data_year INTEGER NOT NULL,
                 aliases_json TEXT NOT NULL,
                 postal_codes_json TEXT NOT NULL,
                 boundary_radius_km REAL NOT NULL CHECK (boundary_radius_km >= 1),
@@ -715,9 +784,11 @@ def _write_database(
             INSERT INTO geographies (
                 id, kind, city, state, postal_code, county, county_fips, metro,
                 metro_code, metro_type, latitude, longitude, population,
-                reference_population, aliases_json, postal_codes_json,
+                reference_population, households, housing_units,
+                owner_occupied_units, median_year_built, public_data_year,
+                aliases_json, postal_codes_json,
                 boundary_radius_km, land_area_sq_km, source_geoid, dataset_version
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -735,6 +806,11 @@ def _write_database(
                     row.longitude,
                     row.population,
                     row.reference_population,
+                    row.households,
+                    row.housing_units,
+                    row.owner_occupied_units,
+                    row.median_year_built,
+                    REFERENCE_YEAR,
                     json.dumps(row.aliases, separators=(",", ":")),
                     json.dumps(row.postal_codes, separators=(",", ":")),
                     row.boundary_radius_km,

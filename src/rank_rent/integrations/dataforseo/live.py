@@ -358,15 +358,39 @@ class DataForSEOLiveProvider:
             )
             result = self._first_result(payload)
             row = cast(dict[str, Any], result[0]) if result and isinstance(result[0], dict) else {}
+            domain_referring_domains = self._to_int(row.get("referring_domains"))
+            domain_backlinks = self._to_int(row.get("backlinks"))
+            domain_authority = self._to_float(
+                row.get("rank")
+                if row.get("rank") is not None
+                else row.get("domain_rank")
+                if row.get("domain_rank") is not None
+                else row.get("page_rank")
+            )
             metrics.append(
                 CompetitorMetric(
                     url=url,
                     domain=target,
-                    referring_domains=self._to_int(row.get("referring_domains")),
-                    backlinks=self._to_int(row.get("backlinks")),
-                    authority=self._to_float(
-                        row.get("rank") or row.get("domain_rank") or row.get("page_rank")
+                    page_url=url,
+                    normalized_domain=target,
+                    referring_domains=domain_referring_domains,
+                    backlinks=domain_backlinks,
+                    authority=domain_authority,
+                    domain_referring_domains=domain_referring_domains,
+                    domain_backlinks=domain_backlinks,
+                    domain_authority=domain_authority,
+                    domain_metrics_available=any(
+                        value is not None
+                        for value in (
+                            domain_referring_domains,
+                            domain_backlinks,
+                            domain_authority,
+                        )
                     ),
+                    page_referring_domains=None,
+                    page_backlinks=None,
+                    page_authority=None,
+                    page_metrics_available=False,
                     page_type="unknown",
                 )
             )
@@ -447,7 +471,8 @@ class DataForSEOLiveProvider:
 
     @property
     def scan_depth(self) -> str:
-        return self.settings.live_scan_depth.lower().strip()
+        override = getattr(self, "scan_profile_override", None)
+        return str(override or self.settings.live_scan_depth).lower().strip()
 
     @property
     def keyword_seed_limit(self) -> int:

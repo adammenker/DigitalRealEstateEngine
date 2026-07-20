@@ -56,17 +56,18 @@ def build_scan_plan(
     service: ServiceFamily,
     market: Market,
     session: Session | None = None,
+    scan_profile: str | None = None,
 ) -> ScanPlan:
     maximum = Decimal(str(settings.max_scan_cost_usd))
+    profile = _scan_profile(scan_profile or settings.live_scan_depth)
     if mode != DataMode.live:
         return ScanPlan(
-            scan_profile=settings.live_scan_depth,
+            scan_profile=profile,
             maximum_allowed_cost_usd=maximum,
             maximum_request_count=settings.max_scan_requests,
         )
 
     validate_market_against_index(market, settings)
-    profile = settings.live_scan_depth.lower().strip()
     provider = dataforseo_provider_name(settings)
     api_environment = normalize_dataforseo_environment(settings)
     free_sandbox = api_environment == "sandbox"
@@ -256,3 +257,10 @@ def _labs_location_payload(market: Market) -> dict[str, Any]:
     if market.country_code.upper() == "US":
         return {"location_code": DataForSEOLiveProvider.us_labs_location_code}
     return {"location_name": market.country_code.upper()}
+
+
+def _scan_profile(value: str) -> str:
+    profile = value.lower().strip()
+    if profile not in {"testing", "full"}:
+        raise ValueError("scan_profile must be 'testing' or 'full'.")
+    return profile

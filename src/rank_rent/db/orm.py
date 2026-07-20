@@ -85,6 +85,45 @@ class OpportunityORM(TimestampMixin, Base):
     market: Mapped[MarketORM] = relationship()
 
 
+class MarketPrefilterRunORM(TimestampMixin, Base):
+    __tablename__ = "market_prefilter_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    service_text: Mapped[str] = mapped_column(String(240))
+    service_profile: Mapped[str] = mapped_column(String(80))
+    geography_kind: Mapped[str] = mapped_column(String(40), default="city")
+    state_filters: Mapped[list[str]] = mapped_column(JSON, default=list)
+    minimum_population: Mapped[int] = mapped_column(Integer)
+    candidate_count: Mapped[int] = mapped_column(Integer)
+    returned_count: Mapped[int] = mapped_column(Integer)
+    assessment_version: Mapped[str] = mapped_column(String(40))
+    config_hash: Mapped[str] = mapped_column(String(40))
+    geography_dataset_version: Mapped[str] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(40), default="completed")
+
+
+class MarketPrefilterAssessmentORM(TimestampMixin, Base):
+    __tablename__ = "market_prefilter_assessments"
+    __table_args__ = (
+        UniqueConstraint(
+            "prefilter_run_id",
+            "geography_id",
+            name="uq_market_prefilter_run_geography",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    prefilter_run_id: Mapped[int] = mapped_column(
+        ForeignKey("market_prefilter_runs.id")
+    )
+    geography_id: Mapped[str] = mapped_column(String(80), index=True)
+    rank: Mapped[int] = mapped_column(Integer)
+    score: Mapped[float] = mapped_column(Float)
+    recommendation: Mapped[str] = mapped_column(String(40))
+    confidence: Mapped[str] = mapped_column(String(20))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
 class ScanRunORM(TimestampMixin, Base):
     __tablename__ = "scan_runs"
 
@@ -317,9 +356,19 @@ class CompetitorMetricORM(TimestampMixin, Base):
     opportunity_id: Mapped[int | None] = mapped_column(ForeignKey("opportunities.id"), nullable=True)
     url: Mapped[str] = mapped_column(Text)
     domain: Mapped[str] = mapped_column(String(240))
+    page_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    normalized_domain: Mapped[str | None] = mapped_column(String(240), nullable=True)
     referring_domains: Mapped[int | None] = mapped_column(Integer, nullable=True)
     backlinks: Mapped[int | None] = mapped_column(Integer, nullable=True)
     authority: Mapped[float | None] = mapped_column(Float, nullable=True)
+    page_referring_domains: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    page_backlinks: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    page_authority: Mapped[float | None] = mapped_column(Float, nullable=True)
+    domain_referring_domains: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    domain_backlinks: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    domain_authority: Mapped[float | None] = mapped_column(Float, nullable=True)
+    page_metrics_available: Mapped[bool] = mapped_column(Boolean, default=False)
+    domain_metrics_available: Mapped[bool] = mapped_column(Boolean, default=False)
     page_relevance_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     local_relevance: Mapped[float | None] = mapped_column(Float, nullable=True)
     page_type: Mapped[str] = mapped_column(String(80))
@@ -327,6 +376,9 @@ class CompetitorMetricORM(TimestampMixin, Base):
     representative_query: Mapped[str | None] = mapped_column(Text, nullable=True)
     serp_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
     serp_observations: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    serp_observation_records: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list
+    )
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 

@@ -133,6 +133,38 @@ def test_preliminary_scan_does_not_clear_existing_full_score(monkeypatch) -> Non
         assert opportunity.confidence == "high"
 
 
+def test_explicit_full_profile_overrides_testing_process_default(monkeypatch) -> None:
+    monkeypatch.setenv("LIVE_SCAN_DEPTH", "testing")
+    get_settings.cache_clear()
+    engine = make_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    service = ServiceFamily(
+        id="drywall",
+        display_name="Drywall",
+        seed_queries=["drywall"],
+    )
+    market = canonical_market()
+
+    with Session() as session:
+        result = asyncio.run(
+            ScanPipeline(
+                session,
+                research_provider=MinimalResearchProvider(),
+                domain_provider=StaticDomainProvider(),
+                data_mode="live",
+                scan_profile="full",
+            ).run(service, market, source="manual")
+        )
+
+        scan = session.get(ScanRunORM, result["scan_id"])
+        assert scan is not None
+        assert result["assessment_type"] == "full"
+        assert scan.scan_profile == "full"
+        assert scan.request_parameters["scan_profile"] == "full"
+        assert len(session.scalars(select(ScanPlanCallORM)).all()) == 13
+
+
 def test_unusable_full_scan_does_not_replace_ranked_score(monkeypatch) -> None:
     monkeypatch.setenv("LIVE_SCAN_DEPTH", "full")
     get_settings.cache_clear()
@@ -162,7 +194,7 @@ def test_unusable_full_scan_does_not_replace_ranked_score(monkeypatch) -> None:
 
         assert result["assessment_type"] == "full"
         assert result["score"].evidence_status == "unusable"
-        assert opportunity.status == "unusable_review"
+        assert opportunity.status == "evidence_rejected"
         assert opportunity.latest_score == 77.0
         assert opportunity.confidence == "high"
         assert opportunity.score_version == "v1"
@@ -224,7 +256,7 @@ def test_scan_reuses_queued_row_and_writes_typed_records(monkeypatch) -> None:
         assert scan.adapter_names["market_research"] == "minimal-test-provider"
         assert scan.cache_policy_version == "v2"
         assert scan.planned_cost_usd == scan.estimated_cost_usd
-        assert scan.scoring_version == "v2.6"
+        assert scan.scoring_version == "v2.12"
         assert scan.request_parameters["market_payload"]["geography_id"] == "place:2965000"
         assert scan.request_parameters["final_market_payload"]["geography_id"] == "place:2965000"
         assert len(session.scalars(select(ScanPlanCallORM)).all()) == 4

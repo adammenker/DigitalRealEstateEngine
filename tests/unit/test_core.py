@@ -7,6 +7,7 @@ import yaml
 
 from rank_rent.domain.models import (
     CompetitorMetric,
+    CompetitorSerpObservation,
     KeywordCandidate,
     KeywordMetric,
     Market,
@@ -231,6 +232,7 @@ def _snapshot(features: list[str] | None = None) -> SerpSnapshot:
                 url="https://local.example/drywall-repair",
                 domain="local.example",
                 title="Drywall Repair Contractor",
+                classification="local_provider",
             )
         ],
     )
@@ -361,6 +363,50 @@ def test_more_relevant_competitor_reduces_competitor_weakness_with_same_backlink
     )
 
 
+def test_service_and_local_relevance_are_distinct_competitor_threat_signals() -> None:
+    scorer = OpportunityScorer()
+
+    def score_relevance(
+        service_relevance: float,
+        local_relevance: float,
+    ):
+        return scorer.score(
+            [_metric()],
+            [_snapshot()],
+            [
+                CompetitorMetric(
+                    url="https://competitor.example",
+                    domain="competitor.example",
+                    referring_domains=75,
+                    page_relevance_score=service_relevance,
+                    local_relevance=local_relevance,
+                )
+            ],
+            [_provider()],
+        )
+
+    service_only = score_relevance(1, 0)
+    local_only = score_relevance(0, 1)
+    service_and_local = score_relevance(1, 1)
+
+    assert (
+        service_and_local.component_scores["competitor_weakness"]
+        < service_only.component_scores["competitor_weakness"]
+        < local_only.component_scores["competitor_weakness"]
+    )
+    trace = service_and_local.component_details["competitor_weakness"]
+    competitor = trace.inputs["per_competitor"][0]
+    assert competitor["service_relevance"] == 1
+    assert competitor["local_relevance"] == 1
+    assert competitor["relevance_interaction"] == 1
+    assert competitor["direct_relevance"] == 1
+    assert trace.inputs["normalized_relevance_signal_weights"] == {
+        "service": 0.55,
+        "local": 0.25,
+        "interaction": 0.2,
+    }
+
+
 def test_higher_ranked_strong_competitor_reduces_weakness_more() -> None:
     scorer = OpportunityScorer()
 
@@ -397,6 +443,146 @@ def test_higher_ranked_strong_competitor_reduces_weakness_more() -> None:
     assert (
         strong_first.component_scores["competitor_weakness"]
         < weak_first.component_scores["competitor_weakness"]
+    )
+
+
+def test_competitor_repeated_across_queries_has_more_influence() -> None:
+    metrics = [
+        _metric().model_copy(
+            update={
+                "keyword": query,
+                "canonical_keyword": query,
+                "search_volume": 100,
+                "cpc": 10,
+            }
+        )
+        for query in ("query one", "query two", "query three")
+    ]
+
+    def competitor(
+        domain: str,
+        referring_domains: int,
+        queries: tuple[str, ...],
+    ) -> CompetitorMetric:
+        return CompetitorMetric(
+            url=f"https://{domain}",
+            domain=domain,
+            referring_domains=referring_domains,
+            page_relevance_score=0.8,
+            local_relevance=0.8,
+            representative_query=queries[0],
+            serp_position=1,
+            serp_observations=[
+                CompetitorSerpObservation(
+                    query=query,
+                    position=1,
+                    url=f"https://{domain}/{index}",
+                )
+                for index, query in enumerate(queries, start=1)
+            ],
+        )
+
+    strong_once = competitor("strong.example", 500, ("query one",))
+    strong_everywhere = competitor(
+        "strong.example",
+        500,
+        ("query one", "query two", "query three"),
+    )
+    weak_once = competitor("weak.example", 10, ("query one",))
+    scorer = OpportunityScorer()
+
+    single_query = scorer.score(
+        metrics,
+        [_snapshot()],
+        [strong_once, weak_once],
+        [_provider()],
+    )
+    repeated = scorer.score(
+        metrics,
+        [_snapshot()],
+        [strong_everywhere, weak_once],
+        [_provider()],
+    )
+
+    assert (
+        repeated.component_scores["competitor_weakness"]
+        < single_query.component_scores["competitor_weakness"]
+    )
+    detail = repeated.component_details["competitor_weakness"]
+    assert detail.inputs["competitor_count"] == 2
+    assert detail.inputs["observation_count"] == 4
+    strong_trace = next(
+        item
+        for item in detail.inputs["per_competitor"]
+        if item["domain"] == "strong.example"
+    )
+    assert strong_trace["observation_count"] == 3
+    assert strong_trace["total_exposure_weight"] == 3
+
+
+def test_high_value_query_weights_competitor_exposure_more_heavily() -> None:
+    high_value = _metric().model_copy(
+        update={
+            "keyword": "high value query",
+            "canonical_keyword": "high value query",
+            "search_volume": 1_000,
+            "cpc": 20,
+        }
+    )
+    low_value = high_value.model_copy(
+        update={
+            "keyword": "low value query",
+            "canonical_keyword": "low value query",
+            "search_volume": 100,
+            "cpc": 2,
+        }
+    )
+
+    def competitor(
+        domain: str,
+        referring_domains: int,
+        query: str,
+    ) -> CompetitorMetric:
+        return CompetitorMetric(
+            url=f"https://{domain}",
+            domain=domain,
+            referring_domains=referring_domains,
+            page_relevance_score=0.8,
+            local_relevance=0.8,
+            representative_query=query,
+            serp_position=1,
+            serp_observations=[
+                CompetitorSerpObservation(
+                    query=query,
+                    position=1,
+                    url=f"https://{domain}",
+                )
+            ],
+        )
+
+    scorer = OpportunityScorer()
+    strong_on_high_value = scorer.score(
+        [high_value, low_value],
+        [_snapshot()],
+        [
+            competitor("strong.example", 500, high_value.keyword),
+            competitor("weak.example", 10, low_value.keyword),
+        ],
+        [_provider()],
+    )
+    strong_on_low_value = scorer.score(
+        [high_value, low_value],
+        [_snapshot()],
+        [
+            competitor("strong.example", 500, low_value.keyword),
+            competitor("weak.example", 10, high_value.keyword),
+        ],
+        [_provider()],
+    )
+
+    assert (
+        strong_on_high_value.component_scores["competitor_weakness"]
+        < strong_on_low_value.component_scores["competitor_weakness"]
     )
 
 
@@ -640,7 +826,9 @@ def test_component_traces_are_fact_specific_and_reconcile_to_component_scores() 
     assert "per_competitor" in competitor.inputs
     assert "average_cpc" not in competitor.inputs
     assert "average_cpc" in commercial.inputs
-    assert competitor.formula.startswith("position_weighted_mean(clamp(")
+    assert competitor.formula.startswith(
+        "query_and_position_exposure_weighted_mean(clamp("
+    )
 
 
 def test_commercial_signal_shares_scale_with_component_weight(
@@ -754,6 +942,100 @@ def test_top_ranked_directory_causes_more_displacement_than_rank_ten() -> None:
         "classification_weighted_shares"
     ]["directory"]
     assert first_share > tenth_share
+
+
+def test_unknown_results_receive_position_weighted_uncertainty_penalty() -> None:
+    scorer = OpportunityScorer()
+    known_result = _snapshot().results[0]
+    unknown_result = known_result.model_copy(update={"classification": "unknown"})
+    position_one = scorer.score(
+        [_metric()],
+        [
+            _snapshot().model_copy(
+                update={
+                    "results": [unknown_result.model_copy(update={"order": 1})],
+                }
+            )
+        ],
+        [],
+        [_provider()],
+    )
+    position_ten = scorer.score(
+        [_metric()],
+        [
+            _snapshot().model_copy(
+                update={
+                    "results": [unknown_result.model_copy(update={"order": 10})],
+                }
+            )
+        ],
+        [],
+        [_provider()],
+    )
+    known = scorer.score(
+        [_metric()],
+        [_snapshot()],
+        [],
+        [_provider()],
+    )
+
+    assert (
+        position_one.component_scores["organic_click_availability"]
+        < position_ten.component_scores["organic_click_availability"]
+        < known.component_scores["organic_click_availability"]
+    )
+    detail = position_one.component_details["organic_click_availability"]
+    assert detail.inputs["classification_penalties"]["unknown"] == 0.08
+    assert detail.inputs["classification_weighted_shares"]["unknown"] > 0
+
+
+def test_high_unknown_serp_share_caps_confidence() -> None:
+    metric = _metric().model_copy(
+        update={
+            "market_granularity": "city",
+            "source": "dataforseo:historical_search_volume",
+        }
+    )
+    snapshots = [
+        SerpSnapshot(
+            query=f"drywall repair {query_index}",
+            market_id="st-louis-mo",
+            results=[
+                SerpResult(
+                    order=position,
+                    result_type="organic",
+                    url=f"https://unknown-{query_index}-{position}.example",
+                    domain=f"unknown-{query_index}-{position}.example",
+                    title="Ambiguous result",
+                    classification="unknown",
+                )
+                for position in range(1, 11)
+            ],
+        )
+        for query_index in range(3)
+    ]
+
+    score = OpportunityScorer().score(
+        [metric],
+        snapshots,
+        _complete_competitor_sample(),
+        _complete_provider_sample(),
+        source_mode="live",
+    )
+
+    confidence = score.input_measurements["confidence_model"]
+    assert confidence["weighted_unknown_serp_share"] == 1
+    assert confidence["classification_coverage"] == 0
+    assert score.confidence.value == "medium"
+    assert any(
+        item["factor"] == "unknown_serp_classification"
+        and item["points"] == 10
+        for item in confidence["deductions"]
+    )
+    assert any(
+        "classification coverage" in item["reason"]
+        for item in confidence["caps"]
+    )
 
 
 def test_feature_penalties_scale_with_affected_serp_share() -> None:
@@ -914,7 +1196,14 @@ def test_irrelevant_provider_rows_do_not_trigger_oversupply() -> None:
         for index in range(20)
     ]
 
-    score = OpportunityScorer().score(
+    scorer = OpportunityScorer()
+    baseline = scorer.score(
+        [_metric()],
+        [_snapshot()],
+        [],
+        suitable,
+    )
+    score = scorer.score(
         [_metric()],
         [_snapshot()],
         [],
@@ -927,6 +1216,14 @@ def test_irrelevant_provider_rows_do_not_trigger_oversupply() -> None:
     assert detail.inputs["saturation_supply_count"] == 2
     assert detail.inputs["supply_count_basis"] == "suitable_provider_count"
     assert detail.inputs["supply_multiplier"] == 1
+    assert detail.inputs["average_top_suitable_provider_score"] == 80
+    assert detail.inputs["median_suitable_provider_score"] == 80
+    assert detail.inputs["suitable_provider_share"] == 0.0909
+    assert detail.inputs["raw_average_suitability_score"] == 25.45
+    assert (
+        score.component_scores["provider_suitability"]
+        == baseline.component_scores["provider_suitability"]
+    )
     assert not any(
         step.label == "Supply saturation adjustment"
         for step in detail.calculation_steps
@@ -1001,7 +1298,7 @@ def test_missing_cpc_has_small_configured_attractiveness_impact() -> None:
         assert missing_cpc.component_scores[component] == complete.component_scores[component]
 
 
-def test_missing_local_demand_has_larger_confidence_than_score_impact() -> None:
+def test_missing_local_demand_has_larger_confidence_than_configured_score_impact() -> None:
     metric, serps, competitors, providers = _rankable_evidence()
     scorer = OpportunityScorer()
     complete = scorer.score(
@@ -1030,15 +1327,18 @@ def test_missing_local_demand_has_larger_confidence_than_score_impact() -> None:
     assert national_only.missing_data_penalties == {"local_demand": 3.0}
     assert national_only.score_cap is None
     assert national_only.confidence.value == "low"
-    assert 0 < complete.total_score - national_only.total_score < 10
+    attractiveness_impact = complete.total_score - national_only.total_score
+    assert 10 < attractiveness_impact < 12
     confidence_deductions = national_only.input_measurements["confidence_model"][
         "deductions"
     ]
-    assert next(
+    confidence_impact = next(
         item["points"]
         for item in confidence_deductions
         if item["factor"] == "missing_local_demand"
-    ) == 20
+    )
+    assert confidence_impact == 20
+    assert confidence_impact > attractiveness_impact
 
 
 def test_missing_competitors_makes_full_assessment_unusable() -> None:
@@ -1151,7 +1451,7 @@ def test_country_level_keyword_volume_is_labeled_as_national_demand() -> None:
 def test_local_only_demand_does_not_earn_service_attractiveness_points() -> None:
     metric = _metric().model_copy(
         update={
-            "search_volume": 1_800,
+            "search_volume": 50,
             "market_granularity": "city",
             "source": "dataforseo:historical_search_volume",
         }
@@ -1167,12 +1467,15 @@ def test_local_only_demand_does_not_earn_service_attractiveness_points() -> None
 
     demand_inputs = score.input_measurements["demand_score_inputs"]
     assert score.input_measurements["national_service_demand"] is None
-    assert score.input_measurements["provider_reported_local_demand"] == 1_800
+    assert score.input_measurements["provider_reported_local_demand"] == 50
     assert score.input_measurements["service_attractiveness_demand"] is None
     assert demand_inputs["service_demand_kind"] == "missing"
     assert demand_inputs["service_score"] == 0
-    assert demand_inputs["market_score"] == demand_inputs["market_weight"] == 15.6
-    assert score.component_scores["demand_evidence"] == 15.6
+    assert demand_inputs["market_demand_evidence_type"] == "measured_local"
+    assert demand_inputs["market_threshold"] == 50
+    assert demand_inputs["market_maximum_credit"] == 1
+    assert demand_inputs["market_score"] == demand_inputs["market_weight"] == 8.4
+    assert score.component_scores["demand_evidence"] == 8.4
     assert score.component_scores["demand_evidence"] < 24
     assert any(
         "market attractiveness only" in assumption
@@ -1210,12 +1513,12 @@ def test_mixed_national_and_local_demand_use_distinct_subcomponents() -> None:
     assert score.input_measurements["service_attractiveness_demand"] == 900
     assert score.input_measurements["estimated_market_demand"] == 900
     assert demand_inputs["service_demand_kind"] == "provider_reported_national"
-    assert demand_inputs["service_score"] == demand_inputs["service_weight"] == 8.4
-    assert demand_inputs["market_score"] == demand_inputs["market_weight"] == 15.6
+    assert demand_inputs["service_score"] == demand_inputs["service_weight"] == 15.6
+    assert demand_inputs["market_score"] == demand_inputs["market_weight"] == 8.4
     assert score.component_scores["demand_evidence"] == 24
 
 
-def test_national_only_demand_cannot_match_measured_local_demand_or_high_confidence() -> None:
+def test_national_only_demand_has_lower_confidence_despite_larger_service_weight() -> None:
     scorer = OpportunityScorer()
     market = Market(id="st-louis", display_name="St. Louis, MO")
     national_metric = _metric().model_copy(
@@ -1245,10 +1548,8 @@ def test_national_only_demand_cannot_match_measured_local_demand_or_high_confide
         source_mode="live",
     )
 
-    assert (
-        national.component_scores["demand_evidence"]
-        < local.component_scores["demand_evidence"]
-    )
+    assert national.component_scores["demand_evidence"] == 15.6
+    assert local.component_scores["demand_evidence"] == 8.4
     assert national.confidence.value == "low"
     assert local.confidence.value == "high"
     assert national.input_measurements["confidence_model"]["market_demand_kind"] == "missing"
@@ -1285,10 +1586,16 @@ def test_population_estimates_differentiate_markets_with_same_national_demand() 
     assert small.input_measurements["national_service_demand"] == 900
     assert small.input_measurements["estimated_market_demand"] == 0.9
     assert large.input_measurements["estimated_market_demand"] == 90
-    assert (
-        large.component_scores["demand_evidence"]
-        > small.component_scores["demand_evidence"]
-    )
+    small_inputs = small.input_measurements["demand_score_inputs"]
+    large_inputs = large.input_measurements["demand_score_inputs"]
+    assert small_inputs["market_demand_evidence_type"] == "population_estimated"
+    assert small_inputs["market_threshold"] == 15
+    assert small_inputs["market_maximum_credit"] == 0.4
+    assert small_inputs["market_score_cap"] == 3.36
+    assert small_inputs["market_score"] == 0.5
+    assert small.component_scores["demand_evidence"] == 16.1
+    assert large_inputs["market_score"] == large_inputs["market_score_cap"] == 3.36
+    assert large.component_scores["demand_evidence"] == 18.96
     assert small.confidence.value == "medium"
     assert large.confidence.value == "medium"
 

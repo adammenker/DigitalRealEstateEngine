@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy.orm import Session
 
@@ -18,7 +18,7 @@ from rank_rent.integrations.factory import (
     build_domain_availability_provider,
     build_market_research_provider,
 )
-from rank_rent.planning import build_scan_plan
+from rank_rent.planning import ScanPlan, build_scan_plan
 from rank_rent.replay import DatabaseReplayTransport
 from rank_rent.repositories import (
     get_or_create_opportunity,
@@ -36,14 +36,17 @@ from rank_rent.services.discovery_report import (
     build_discovery_report,
 )
 from rank_rent.services.domains import generate_domain_candidates
+from rank_rent.services.evidence_quality import EvidenceQualityEvaluator
 from rank_rent.services.keywords import (
     plan_keyword_candidates,
     rank_and_cluster_keyword_metrics,
     service_keyword_terms,
 )
+from rank_rent.services.market_prefilter import MarketPrefilter
 from rank_rent.services.outreach import generate_initial_email
 from rank_rent.services.providers import score_provider_suitability
 from rank_rent.services.records import save_scan_plan_calls, save_scan_records
+from rank_rent.services.service_catalog import load_service_catalog
 from rank_rent.settings import get_settings
 from rank_rent.site_generator.generator import build_site_config, generate_static_site
 
@@ -59,6 +62,7 @@ class ScanPipeline:
         research_provider: MarketResearchProvider | None = None,
         domain_provider: DomainAvailabilityProvider | None = None,
         data_mode: DataMode | str | None = None,
+        scan_profile: str | None = None,
     ) -> None:
         self.session = session
         self.settings = get_settings()
@@ -78,8 +82,16 @@ class ScanPipeline:
             self.settings,
             self.data_mode,
         )
-        self.live_scan_depth = self.settings.live_scan_depth.lower().strip()
+        self.scan_profile = _scan_profile(
+            scan_profile or self.settings.live_scan_depth
+        )
+        if self.data_mode == DataMode.live:
+            provider = cast(Any, self.research_provider)
+            provider.scan_profile_override = self.scan_profile
         self.scorer = OpportunityScorer()
+        self.evidence_quality = EvidenceQualityEvaluator(
+            self.settings.project_root / "config/evidence_quality.yaml"
+        )
 
     async def run(
         self,
@@ -90,7 +102,22 @@ class ScanPipeline:
         build_site: bool = False,
         existing_scan_id: int | None = None,
     ) -> dict[str, Any]:
-        plan = build_scan_plan(self.settings, self.data_mode, service, market, session=self.session)
+        public_data_prefilter = MarketPrefilter.from_settings(
+            self.settings
+        ).assess_market(service, market)
+        public_data_prefilter_payload = (
+            public_data_prefilter.model_dump(mode="json")
+            if public_data_prefilter
+            else None
+        )
+        plan = build_scan_plan(
+            self.settings,
+            self.data_mode,
+            service,
+            market,
+            session=self.session,
+            scan_profile=self.scan_profile,
+        )
         if plan.blocked:
             raise RuntimeError(plan.block_reason or "Scan blocked by cost policy.")
         service_row = upsert_service(self.session, service)
@@ -103,6 +130,7 @@ class ScanPipeline:
             service=service,
             market=market,
             plan=plan,
+            public_data_prefilter=public_data_prefilter_payload,
         )
         self.session.flush()
         if hasattr(self.research_provider, "current_scan_run_id"):
@@ -110,7 +138,6 @@ class ScanPipeline:
         save_scan_plan_calls(self.session, scan.id, plan)
 
         try:
-            self._ensure_not_cancelled(scan)
             self._ensure_not_cancelled(scan)
             self._set_stage(scan, "discovering_keywords")
             candidates = await self.research_provider.discover_keywords(service, market)
@@ -168,6 +195,16 @@ class ScanPipeline:
             self._ensure_not_cancelled(scan)
             self._set_stage(scan, "scoring")
             is_preliminary = self.is_preliminary_assessment
+            assessment_type = "preliminary" if is_preliminary else "full"
+            evidence_quality = self.evidence_quality.assess(
+                service=service,
+                metrics=keyword_metrics.scoring_metrics,
+                serp_snapshots=serp_snapshots,
+                competitors=competitors,
+                providers=providers,
+                assessment_type=assessment_type,
+                service_configured=self._service_is_configured(service),
+            )
             score = self.scorer.score(
                 keyword_metrics.scoring_metrics,
                 serp_snapshots,
@@ -175,8 +212,14 @@ class ScanPipeline:
                 providers,
                 market,
                 source_mode=self.evidence_source_mode,
-                assessment_type="preliminary" if is_preliminary else "full",
+                assessment_type=assessment_type,
             )
+            score = self.evidence_quality.apply_to_score(score, evidence_quality)
+            evidence_quality_payload = evidence_quality.model_dump(mode="json")
+            scan.partial_outputs = {
+                **(scan.partial_outputs or {}),
+                "evidence_quality": evidence_quality_payload,
+            }
             save_scan_records(
                 self.session,
                 scan_run_id=scan.id,
@@ -205,7 +248,9 @@ class ScanPipeline:
             site_path: Path | None = generate_static_site(site_config) if build_site and site_config else None
 
             opportunity.status = (
-                "preliminary_review"
+                "evidence_rejected"
+                if evidence_quality.status == "fail"
+                else "preliminary_review"
                 if is_preliminary
                 else "full_review"
                 if score.evidence_status == "complete"
@@ -213,7 +258,11 @@ class ScanPipeline:
             )
             if is_preliminary:
                 if opportunity.latest_score is None:
-                    opportunity.confidence = "preliminary"
+                    opportunity.confidence = (
+                        "insufficient"
+                        if evidence_quality.status == "fail"
+                        else "preliminary"
+                    )
                     opportunity.score_version = score.scoring_version
             elif score.evidence_status == "complete":
                 opportunity.latest_score = score.total_score
@@ -246,6 +295,7 @@ class ScanPipeline:
                 "normalization_version": scan.normalization_version,
                 "cache_policy_version": scan.cache_policy_version,
                 "api_cost_ledger": cost_ledger,
+                "evidence_quality": evidence_quality_payload,
             }
             discovery_report = build_discovery_report(
                 service=service,
@@ -257,6 +307,8 @@ class ScanPipeline:
                 score=score,
                 scan_metadata=scan_metadata,
                 demand_estimator=self.scorer.market_demand_estimator,
+                public_data_prefilter=public_data_prefilter_payload,
+                evidence_quality=evidence_quality_payload,
             )
 
             save_artifact(
@@ -266,12 +318,14 @@ class ScanPipeline:
                 {
                     "data_mode": self.data_mode.value,
                     "evidence_source_mode": self.evidence_source_mode,
-                    "live_scan_depth": self.live_scan_depth if self.data_mode == DataMode.live else None,
+                    "live_scan_depth": self.scan_profile if self.data_mode == DataMode.live else None,
                     "estimated_paid_api_calls": self.estimated_paid_api_calls,
                     "assessment_type": "preliminary" if is_preliminary else "full",
                     "unavailable_components": self.unavailable_components,
                     "additional_calls_required_for_full_scan": self.additional_calls_required_for_full_scan,
                     "demand_evidence": self._demand_evidence(metrics, market),
+                    "public_data_prefilter": public_data_prefilter_payload,
+                    "evidence_quality": evidence_quality_payload,
                     "scan_plan": plan.model_dump(mode="json"),
                     "keywords": [k.model_dump(mode="json") for k in keyword_candidates.candidates],
                     "keyword_clusters": [
@@ -318,6 +372,8 @@ class ScanPipeline:
                 "scan_plan": plan,
                 "domains": domains,
                 "providers": providers,
+                "public_data_prefilter": public_data_prefilter,
+                "evidence_quality": evidence_quality,
                 "site_path": site_path,
             }
         except ScanCancelled:
@@ -359,7 +415,8 @@ class ScanPipeline:
         source: str,
         service: ServiceFamily,
         market: Market,
-        plan: Any,
+        plan: ScanPlan,
+        public_data_prefilter: dict[str, Any] | None,
     ) -> ScanRunORM:
         scan = self.session.get(ScanRunORM, existing_scan_id) if existing_scan_id else None
         if scan is None:
@@ -369,7 +426,7 @@ class ScanPipeline:
         scan.source = source
         scan.status = "running"
         scan.data_mode = self.data_mode.value
-        scan.scan_profile = self.live_scan_depth if self.data_mode == DataMode.live else "full"
+        scan.scan_profile = self.scan_profile
         scan.adapter_names = {
             "market_research": getattr(
                 self.research_provider,
@@ -405,24 +462,26 @@ class ScanPipeline:
                 type(self.research_provider).__name__,
             ),
             "domain_provider": type(self.domain_provider).__name__,
-            "live_scan_depth": self.live_scan_depth if self.data_mode == DataMode.live else None,
+            "live_scan_depth": self.scan_profile if self.data_mode == DataMode.live else None,
             "cache_policy_version": "v2",
         }
         scan.request_parameters = {
             "service": service.slug,
             "market": market.slug,
             "data_mode": self.data_mode.value,
+            "scan_profile": self.scan_profile,
             "evidence_source_mode": self.evidence_source_mode,
             "dataforseo_environment": (
                 self.settings.dataforseo_environment
                 if self.data_mode == DataMode.live
                 else None
             ),
-            "live_scan_depth": self.live_scan_depth if self.data_mode == DataMode.live else None,
+            "live_scan_depth": self.scan_profile if self.data_mode == DataMode.live else None,
             "scan_plan": plan.model_dump(mode="json"),
             "service_payload": service.model_dump(mode="json"),
             "market_payload": market.model_dump(mode="json"),
             "final_market_payload": market.model_dump(mode="json"),
+            "public_data_prefilter": public_data_prefilter,
         }
         return scan
 
@@ -528,6 +587,15 @@ class ScanPipeline:
             "warning": warning,
         }
 
+    def _service_is_configured(self, service: ServiceFamily) -> bool:
+        catalog = load_service_catalog(
+            self.settings.project_root / "config/services.yaml"
+        )
+        return (
+            catalog.resolve(service.id) is not None
+            or catalog.resolve(service.display_name) is not None
+        )
+
     @property
     def evidence_source_mode(self) -> str:
         if self.data_mode == DataMode.live:
@@ -542,19 +610,19 @@ class ScanPipeline:
     def serp_keyword_limit(self) -> int:
         if self.data_mode != DataMode.live:
             return 3
-        return 1 if self.live_scan_depth == "testing" else 3
+        return 1 if self.scan_profile == "testing" else 3
 
     @property
     def backlink_competitor_limit(self) -> int:
         if self.data_mode != DataMode.live:
             return 5
-        return 0 if self.live_scan_depth == "testing" else 5
+        return 0 if self.scan_profile == "testing" else 5
 
     @property
     def estimated_paid_api_calls(self) -> int:
         if self.data_mode != DataMode.live:
             return 0
-        keyword_suggestion_calls = 1 if self.live_scan_depth == "testing" else 3
+        keyword_suggestion_calls = 1 if self.scan_profile == "testing" else 3
         keyword_metrics_calls = 1
         serp_calls = self.serp_keyword_limit
         backlink_calls = self.backlink_competitor_limit
@@ -569,7 +637,7 @@ class ScanPipeline:
 
     @property
     def is_preliminary_assessment(self) -> bool:
-        return self.data_mode == DataMode.live and self.live_scan_depth == "testing"
+        return self.data_mode == DataMode.live and self.scan_profile == "testing"
 
     @property
     def unavailable_components(self) -> list[str]:
@@ -581,3 +649,10 @@ class ScanPipeline:
 
 def score_summary(score: OpportunityScore) -> str:
     return f"{score.total_score} ({score.confidence.value}) - {score.explanation}"
+
+
+def _scan_profile(value: str) -> str:
+    profile = value.lower().strip()
+    if profile not in {"testing", "full"}:
+        raise ValueError("scan_profile must be 'testing' or 'full'.")
+    return profile

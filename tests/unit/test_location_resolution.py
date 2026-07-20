@@ -68,7 +68,7 @@ def test_city_state_resolves_to_complete_canonical_market() -> None:
 
     assert market.display_name == "London, KY, US"
     assert market.geography_id == "place:2147476"
-    assert market.geography_dataset_version == "us-geography-2024.1"
+    assert market.geography_dataset_version == "us-geography-2024.2"
     assert market.state == "KY"
     assert market.cities == ["London"]
     assert market.county == "Laurel County"
@@ -273,7 +273,7 @@ def test_checked_in_geography_database_is_healthy_and_substantial() -> None:
     index = USGeographyIndex(ROOT / "data" / "us_geography.sqlite3")
     metadata = index.metadata()
 
-    assert metadata["dataset_version"] == "us-geography-2024.1"
+    assert metadata["dataset_version"] == "us-geography-2024.2"
     assert int(metadata["city_count"]) > 30_000
     assert int(metadata["zip_count"]) > 32_000
     with sqlite3.connect(index.path) as connection:

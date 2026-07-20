@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from rank_rent.integrations.dataforseo.live import DataForSEOLiveProvider, dataforseo_provider_name
+from rank_rent.integrations.dataforseo.live import (
+    DataForSEOLiveProvider,
+    dataforseo_provider_name,
+    normalize_dataforseo_environment,
+)
 from rank_rent.replay import ReplayMissError, ReplayTransport
 from rank_rent.services.cache import normalize_request
 from rank_rent.settings import Settings, get_settings
@@ -21,6 +25,8 @@ class DataForSEOReplayProvider(DataForSEOLiveProvider):
         self.cache = None
         self.force_refresh = False
         self.transport = transport
+        self.api_environment = normalize_dataforseo_environment(self.settings)
+        self.current_scan_run_id: int | None = None
 
     async def _get(self, path: str) -> dict[str, Any]:
         return await self._get_stored_response(path, {})

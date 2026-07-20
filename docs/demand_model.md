@@ -18,10 +18,19 @@ Its output remains `low` confidence.
 
 The demand score has two configured sub-signals:
 
-- Service attractiveness uses national demand when it exists, otherwise provider-local demand.
-- Market attractiveness uses measured local demand or the explicitly labeled population-share estimate.
+- Service attractiveness uses national demand when it exists and receives 65% of the
+  demand-component point budget.
+- Market attractiveness uses measured local demand or the explicitly labeled
+  population-share estimate and receives 35% of the point budget.
 
 National-only evidence therefore earns only the service-attractiveness share. It cannot receive market-attractiveness points until local demand is measured or estimated, and missing local demand caps overall confidence at `low`. Population-derived estimates are labeled `low` confidence and cap overall confidence at `medium`.
+
+Market-attractiveness thresholds are calibrated by evidence type. Measured local demand
+reaches full strength at 50 monthly searches. Population-estimated demand reaches its
+evidence-type ceiling at 15 estimated monthly searches, but that ceiling is limited to 40%
+of the market-attractiveness allocation. Population estimates can therefore contribute no
+more than 3.36 of 24 demand points. This lets them differentiate markets on their natural
+scale without allowing a crude population proxy to control opportunity ranking.
 
 This keeps sandbox, fixture, replay, and production scans comparable without hiding weak geography evidence.
 

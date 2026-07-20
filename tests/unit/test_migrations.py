@@ -25,6 +25,8 @@ def test_alembic_upgrade_head_creates_v1_schema(tmp_path, monkeypatch) -> None:
     assert "raw_api_responses" in tables
     assert "preliminary_assessments" in tables
     assert "full_opportunity_scores" in tables
+    assert "market_prefilter_runs" in tables
+    assert "market_prefilter_assessments" in tables
     assert "api_calls" in tables
     scan_columns = {column["name"] for column in inspector.get_columns("scan_runs")}
     assert {

@@ -40,6 +40,8 @@ def test_data_audit_reports_current_local_counts() -> None:
         assert audit["opportunity_count"] == 1
         assert audit["raw_response_count"] == 0
         assert audit["typed_record_counts"] == {
+            "market_prefilter_runs": 0,
+            "market_prefilter_assessments": 0,
             "keyword_metrics": 0,
             "serp_snapshots": 0,
             "competitor_metrics": 0,

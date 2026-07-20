@@ -183,6 +183,39 @@ def test_suitable_threshold_is_configuration_driven() -> None:
     assert strict["suitable_provider_count"] == 0
 
 
+def test_summary_separates_suitable_quality_from_raw_listing_noise() -> None:
+    config = _config()
+    providers = [
+        ProviderCandidate(
+            name=f"Suitable Provider {index}",
+            business_status="open",
+            suitability_score=score,
+        )
+        for index, score in enumerate([100, 90, 80, 70, 60, 55], start=1)
+    ]
+    providers.append(
+        ProviderCandidate(
+            name="Closed Irrelevant Listing",
+            business_status="closed_forever",
+            suitability_score=10,
+        )
+    )
+
+    summary = provider_suitability_summary(providers, config)
+
+    assert summary["suitable_provider_count"] == 6
+    assert summary["suitable_provider_share"] == 0.8571
+    assert summary["median_suitable_provider_score"] == 75
+    assert summary["average_top_suitable_provider_score"] == 80
+    assert summary["top_suitable_sample_size"] == 5
+    assert summary["raw_average_suitability_score"] == 66.43
+    assert len(summary["top_suitable_providers"]) == 5
+    assert all(
+        provider["score"] >= config["suitable_threshold"]
+        for provider in summary["top_suitable_providers"]
+    )
+
+
 def test_provider_signal_weights_are_configuration_driven() -> None:
     config = _config()
     config["signal_weights"] = {

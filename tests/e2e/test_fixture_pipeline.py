@@ -14,7 +14,7 @@ def test_fixture_pipeline_records_scan_without_site_side_effects(tmp_path, monke
     (tmp_path / "config/outreach_templates").mkdir(parents=True)
     (tmp_path / "config/scoring.yaml").write_text(
         """
-version: v2.6
+version: v2.12
 weights:
   demand_evidence: 24
   commercial_value: 16
@@ -38,10 +38,16 @@ missing_evidence_score_caps:
 data_completeness_expected_groups: 7
 demand:
   market_estimator: population_share
-  strong_national_monthly_volume: 900
-  strong_market_monthly_volume: 900
-  service_attractiveness_share: 0.35
-  market_attractiveness_share: 0.65
+  service_attractiveness_share: 0.65
+  market_attractiveness_share: 0.35
+  national:
+    strong_monthly_volume: 900
+  measured_local:
+    strong_monthly_volume: 50
+    maximum_component_credit: 1.00
+  population_estimated:
+    strong_monthly_volume: 15
+    maximum_component_credit: 0.40
 confidence:
   thresholds:
     high: 85
@@ -52,6 +58,7 @@ confidence:
   representative_serp_target: 3
   competitor_sample_target: 3
   provider_sample_target: 2
+  maximum_unknown_serp_share_for_high: 0.25
   source_mode_penalties:
     live: 0
     replay: 5
@@ -68,6 +75,7 @@ confidence:
     limited_serp_sample: 10
     limited_competitor_sample: 10
     limited_provider_sample: 8
+    unknown_serp_classification: 10
 commercial:
   strong_cpc: 28
   strong_paid_competition: 0.8
@@ -80,6 +88,10 @@ competitors:
   strong_referring_domains: 260
   unknown_referring_domains_weakness: 0.45
   relevance_threat_strength: 0.65
+  relevance_signal_weights:
+    service: 0.55
+    local: 0.25
+    interaction: 0.20
   unpositioned_weight: 1.0
   serp_position_weights:
     1: 1.00
@@ -123,6 +135,7 @@ organic_click:
   national_brand_penalty: 0.3
   lead_generator_penalty: 0.2
   informational_publisher_penalty: 0.1
+  unknown_penalty: 0.08
   shopping_product_penalty: 0.16
   shopping_product_result_types:
     - shopping
@@ -134,6 +147,7 @@ organic_click:
   ads_top_penalty: 0.12
 providers:
   suitable_threshold: 55
+  quality_sample_size: 5
   inactive_score_cap: 40
   signal_weights:
     service_fit: 30

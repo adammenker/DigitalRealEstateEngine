@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 ACTIVE_SCAN_STATUSES = {"queued", "running"}
 TERMINAL_SCAN_STATUSES = {"completed", "failed", "cancelled"}
 WORKER_SCAN_SOURCE = "manual_async"
+WORKER_SCAN_SOURCES = {WORKER_SCAN_SOURCE, "promotion_async"}
 
 SessionFactory = Callable[[], Session]
 
@@ -55,7 +56,7 @@ def recover_stale_scans(
     stale_scans = session.scalars(
         select(ScanRunORM)
         .where(
-            ScanRunORM.source == WORKER_SCAN_SOURCE,
+            ScanRunORM.source.in_(WORKER_SCAN_SOURCES),
             ScanRunORM.status == "running",
             ScanRunORM.completed_at.is_(None),
             or_(ScanRunORM.heartbeat_at.is_(None), ScanRunORM.heartbeat_at < cutoff),
@@ -97,7 +98,10 @@ def recover_stale_scans(
 def claim_next_scan(session: Session, *, worker_id: str) -> int | None:
     queued_ids = session.scalars(
         select(ScanRunORM.id)
-        .where(ScanRunORM.source == WORKER_SCAN_SOURCE, ScanRunORM.status == "queued")
+        .where(
+            ScanRunORM.source.in_(WORKER_SCAN_SOURCES),
+            ScanRunORM.status == "queued",
+        )
         .order_by(ScanRunORM.id)
         .limit(10)
     ).all()
@@ -177,6 +181,8 @@ async def run_scan_by_id(
         service_payload = request.get("service_payload")
         market_payload = request.get("market_payload")
         data_mode = str(request.get("data_mode") or scan.data_mode)
+        scan_profile = str(request.get("scan_profile") or scan.scan_profile)
+        scan_source = scan.source
         if not isinstance(service_payload, dict) or not isinstance(market_payload, dict):
             _fail_claimed_scan(
                 session,
@@ -200,10 +206,14 @@ async def run_scan_by_id(
     )
     try:
         with factory() as session:
-            await ScanPipeline(session, data_mode=data_mode).run(
+            await ScanPipeline(
+                session,
+                data_mode=data_mode,
+                scan_profile=scan_profile,
+            ).run(
                 service,
                 market,
-                source=WORKER_SCAN_SOURCE,
+                source=scan_source,
                 existing_scan_id=scan_id,
             )
     except ScanCancelled:

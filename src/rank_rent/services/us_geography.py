@@ -86,6 +86,11 @@ class USGeographyRecord:
     longitude: float
     population: int
     reference_population: int
+    households: int | None
+    housing_units: int | None
+    owner_occupied_units: int | None
+    median_year_built: int | None
+    public_data_year: int
     aliases: list[str]
     postal_codes: list[str]
     boundary_radius_km: float
@@ -198,6 +203,36 @@ class USGeographyIndex:
         with self._connect() as connection:
             rows = connection.execute("SELECT key, value FROM metadata").fetchall()
         return {str(row["key"]): str(row["value"]) for row in rows}
+
+    def list_markets(
+        self,
+        *,
+        kind: str = "city",
+        states: list[str] | None = None,
+        minimum_population: int = 1,
+    ) -> list[USGeographyRecord]:
+        normalized_states = sorted(
+            {
+                state.strip().upper()
+                for state in (states or [])
+                if state.strip().upper() in STATE_NAMES
+            }
+        )
+        placeholders = ",".join("?" for _ in normalized_states)
+        state_clause = f"AND state IN ({placeholders})" if normalized_states else ""
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT *
+                FROM geographies
+                WHERE kind = ?
+                  AND population >= ?
+                  {state_clause}
+                ORDER BY population DESC, state, city
+                """,
+                (kind, max(1, minimum_population), *normalized_states),
+            ).fetchall()
+        return [_record(row) for row in rows]
 
     def _search_zip(self, postal_code: str) -> list[USGeographyMatch]:
         with self._connect() as connection:
@@ -351,6 +386,11 @@ def _record(row: sqlite3.Row) -> USGeographyRecord:
         longitude=float(row["longitude"]),
         population=int(row["population"]),
         reference_population=int(row["reference_population"]),
+        households=_optional_int(row["households"]),
+        housing_units=_optional_int(row["housing_units"]),
+        owner_occupied_units=_optional_int(row["owner_occupied_units"]),
+        median_year_built=_optional_int(row["median_year_built"]),
+        public_data_year=int(row["public_data_year"]),
         aliases=list(json.loads(row["aliases_json"])),
         postal_codes=list(json.loads(row["postal_codes_json"])),
         boundary_radius_km=float(row["boundary_radius_km"]),
@@ -358,3 +398,7 @@ def _record(row: sqlite3.Row) -> USGeographyRecord:
         source_geoid=str(row["source_geoid"]),
         dataset_version=str(row["dataset_version"]),
     )
+
+
+def _optional_int(value: Any) -> int | None:
+    return int(value) if value is not None else None

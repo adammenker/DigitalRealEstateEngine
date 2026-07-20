@@ -1,0 +1,19 @@
+version: "v1"
+minimum_keyword_service_relevance_share: 0.60
+minimum_representative_query_relevance_share: 0.67
+minimum_provider_service_relevance_share: 0.20
+minimum_provider_geographic_relevance_share: 0.50
+minimum_full_competitor_count: 3
+maximum_unknown_serp_share: 0.60
+unusable_score_cap: 35
+generic_service_tokens:
+  - company
+  - contractor
+  - emergency
+  - installation
+  - local
+  - near
+  - repair
+  - replacement
+  - service
+  - services

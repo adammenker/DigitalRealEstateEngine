@@ -1,0 +1,257 @@
+version: "2026.07.1"
+services:
+  - id: plumbing
+    slug: plumbing
+    display_name: Plumbing
+    aliases:
+      - plumber
+      - plumbing repair
+      - emergency plumbing
+    description: Residential plumbing repair, installation, and emergency service
+    seed_queries:
+      - plumber
+      - plumbing repair
+      - emergency plumber
+    intent_modifiers:
+      - repair
+      - emergency
+      - installation
+      - same day
+    negative_terms:
+      - diy
+      - jobs
+      - salary
+      - course
+    negative_product_terms:
+      - parts
+      - supplies
+      - home depot
+      - lowes
+    provider_categories:
+      - plumber
+      - plumbing service
+    regulated: false
+    enabled: true
+
+  - id: water_heater_services
+    slug: water-heater-services
+    display_name: Water Heater Services
+    aliases:
+      - water heater repair
+      - water heater replacement
+      - hot water heater repair
+      - tankless water heater installation
+    description: Repair, replacement, installation, and emergency service
+    seed_queries:
+      - water heater repair
+      - water heater replacement
+      - emergency water heater repair
+      - tankless water heater installation
+    intent_modifiers:
+      - repair
+      - replacement
+      - emergency
+      - installation
+    negative_terms:
+      - diy
+      - jobs
+      - salary
+    negative_product_terms:
+      - parts
+      - manual
+      - kit
+      - lowes
+      - home depot
+    provider_categories:
+      - plumber
+      - water heater installation service
+    regulated: false
+    enabled: true
+
+  - id: drywall_services
+    slug: drywall-services
+    display_name: Drywall Services
+    aliases:
+      - drywall
+      - drywall repair
+      - drywall installation
+      - sheetrock repair
+    description: Drywall repair, installation, finishing, and patching
+    seed_queries:
+      - drywall repair
+      - drywall contractor
+      - drywall installation
+    intent_modifiers:
+      - repair
+      - contractor
+      - installation
+      - patching
+    negative_terms:
+      - diy
+      - jobs
+      - salary
+    negative_product_terms:
+      - kit
+      - tools
+      - home depot
+      - lowes
+    provider_categories:
+      - drywall contractor
+    regulated: false
+    enabled: true
+
+  - id: hvac_services
+    slug: hvac-services
+    display_name: HVAC Services
+    aliases:
+      - hvac
+      - hvac repair
+      - air conditioning repair
+      - furnace repair
+    description: Heating, ventilation, and air-conditioning repair and installation
+    seed_queries:
+      - hvac repair
+      - air conditioning repair
+      - furnace repair
+    intent_modifiers:
+      - emergency
+      - repair
+      - installation
+      - replacement
+    negative_terms:
+      - diy
+      - jobs
+      - salary
+      - training
+    negative_product_terms:
+      - filter
+      - parts
+      - manual
+    provider_categories:
+      - hvac contractor
+      - air conditioning repair service
+    regulated: false
+    enabled: true
+
+  - id: roofing
+    slug: roofing
+    display_name: Roofing
+    aliases:
+      - roof repair
+      - roofer
+      - roofing contractor
+    description: Residential roof repair, replacement, and emergency service
+    seed_queries:
+      - roof repair
+      - roofing contractor
+      - roof replacement
+    intent_modifiers:
+      - repair
+      - replacement
+      - emergency
+      - contractor
+    negative_terms:
+      - diy
+      - jobs
+      - salary
+    negative_product_terms:
+      - shingles
+      - materials
+      - home depot
+    provider_categories:
+      - roofing contractor
+    regulated: false
+    enabled: true
+
+  - id: electrical_services
+    slug: electrical-services
+    display_name: Electrical Services
+    aliases:
+      - electrician
+      - electrical repair
+      - emergency electrician
+    description: Residential electrical repair, troubleshooting, and installation
+    seed_queries:
+      - electrician
+      - electrical repair
+      - emergency electrician
+    intent_modifiers:
+      - emergency
+      - repair
+      - installation
+      - same day
+    negative_terms:
+      - diy
+      - jobs
+      - salary
+      - course
+    negative_product_terms:
+      - parts
+      - wire
+      - tools
+    provider_categories:
+      - electrician
+      - electrical installation service
+    regulated: true
+    enabled: true
+
+  - id: garage_door_services
+    slug: garage-door-services
+    display_name: Garage Door Services
+    aliases:
+      - garage door repair
+      - garage door installation
+      - garage door opener repair
+    description: Garage door, spring, track, and opener repair and installation
+    seed_queries:
+      - garage door repair
+      - garage door spring repair
+      - garage door opener repair
+    intent_modifiers:
+      - emergency
+      - repair
+      - installation
+      - replacement
+    negative_terms:
+      - diy
+      - jobs
+      - salary
+    negative_product_terms:
+      - remote
+      - parts
+      - lubricant
+    provider_categories:
+      - garage door supplier
+      - garage door repair service
+    regulated: false
+    enabled: true
+
+  - id: epoxy_flooring
+    slug: epoxy-flooring
+    display_name: Epoxy Flooring
+    aliases:
+      - epoxy floor installation
+      - epoxy floor installers
+      - garage epoxy flooring
+      - garage floor coating
+    description: Residential and light commercial epoxy floor coatings
+    seed_queries:
+      - epoxy flooring
+      - garage epoxy floor
+      - epoxy floor installers
+    intent_modifiers:
+      - installer
+      - contractor
+      - coating
+      - commercial
+    negative_terms:
+      - diy
+      - jobs
+    negative_product_terms:
+      - kit
+      - paint
+      - home depot
+    provider_categories:
+      - flooring contractor
+    regulated: false
+    enabled: true

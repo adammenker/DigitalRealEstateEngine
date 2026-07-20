@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from statistics import median
 from typing import Any
 
 from rank_rent.domain.models import Market, ProviderCandidate, ServiceFamily, slugify
@@ -20,44 +21,94 @@ def provider_suitability_summary(
     config: dict[str, Any],
 ) -> dict[str, object]:
     threshold = float(config["suitable_threshold"])
-    usable = [
-        provider
-        for provider in providers
-        if (provider.suitability_score or 0) >= threshold
-        and _status_value(provider.business_status, config) > 0
+    suitable_providers = sorted(
+        [
+            provider
+            for provider in providers
+            if (provider.suitability_score or 0) >= threshold
+            and _status_value(provider.business_status, config) > 0
+        ],
+        key=lambda item: item.suitability_score or 0,
+        reverse=True,
+    )
+    raw_scores = [provider.suitability_score or 0 for provider in providers]
+    suitable_scores = [
+        provider.suitability_score or 0 for provider in suitable_providers
     ]
-    scores = [provider.suitability_score or 0 for provider in providers]
+    quality_sample_size = max(1, int(config["quality_sample_size"]))
+    top_suitable_scores = suitable_scores[:quality_sample_size]
+    raw_sorted_providers = sorted(
+        providers,
+        key=lambda item: item.suitability_score or 0,
+        reverse=True,
+    )
     signal_names = list(config["signal_weights"])
+
+    def average_signal(
+        candidates: list[ProviderCandidate],
+        signal: str,
+    ) -> float:
+        return round(
+            sum(
+                float(
+                    provider.suitability_signals.get(signal, {}).get(
+                        "normalized",
+                        0,
+                    )
+                )
+                for provider in candidates
+            )
+            / max(1, len(candidates)),
+            3,
+        )
+
+    def provider_payload(provider: ProviderCandidate) -> dict[str, object]:
+        return {
+            "name": provider.name,
+            "website": provider.website,
+            "phone": provider.phone,
+            "score": provider.suitability_score,
+            "reasons": provider.suitability_reasons,
+            "signals": provider.suitability_signals,
+        }
+
     return {
         "provider_count": len(providers),
-        "suitable_provider_count": len(usable),
+        "suitable_provider_count": len(suitable_providers),
+        "suitable_provider_share": round(
+            len(suitable_providers) / max(1, len(providers)),
+            4,
+        ),
         "suitable_threshold": threshold,
-        "average_suitability_score": round(sum(scores) / max(1, len(scores)), 2),
-        "average_signal_scores": {
-            signal: round(
-                sum(
-                    float(provider.suitability_signals.get(signal, {}).get("normalized", 0))
-                    for provider in providers
-                )
-                / max(1, len(providers)),
-                3,
-            )
+        "median_suitable_provider_score": (
+            round(float(median(suitable_scores)), 2)
+            if suitable_scores
+            else None
+        ),
+        "average_top_suitable_provider_score": round(
+            sum(top_suitable_scores) / max(1, len(top_suitable_scores)),
+            2,
+        ),
+        "top_suitable_sample_size": quality_sample_size,
+        "raw_average_suitability_score": round(
+            sum(raw_scores) / max(1, len(raw_scores)),
+            2,
+        ),
+        "suitable_average_signal_scores": {
+            signal: average_signal(suitable_providers, signal)
             for signal in signal_names
         },
-        "top_providers": [
-            {
-                "name": provider.name,
-                "website": provider.website,
-                "phone": provider.phone,
-                "score": provider.suitability_score,
-                "reasons": provider.suitability_reasons,
-                "signals": provider.suitability_signals,
-            }
-            for provider in sorted(
-                providers,
-                key=lambda item: item.suitability_score or 0,
-                reverse=True,
-            )[:5]
+        "raw_average_signal_scores": {
+            signal: average_signal(providers, signal)
+            for signal in signal_names
+        },
+        "top_suitable_providers": [
+            provider_payload(provider)
+            for provider in suitable_providers[:quality_sample_size]
+        ],
+        "raw_top_providers": [
+            provider_payload(provider)
+            for provider in raw_sorted_providers[:quality_sample_size]
         ],
     }
 

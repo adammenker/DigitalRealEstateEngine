@@ -16,6 +16,7 @@ from rank_rent.db.orm import (
 )
 from rank_rent.domain.models import (
     CompetitorMetric,
+    CompetitorSerpObservation,
     KeywordMetric,
     ProviderCandidate,
     SerpSnapshot,
@@ -164,9 +165,19 @@ def save_scan_records(
                 opportunity_id=opportunity_id,
                 url=competitor.url,
                 domain=competitor.domain,
+                page_url=competitor.page_url,
+                normalized_domain=competitor.normalized_domain,
                 referring_domains=competitor.referring_domains,
                 backlinks=competitor.backlinks,
                 authority=competitor.authority,
+                page_referring_domains=competitor.page_referring_domains,
+                page_backlinks=competitor.page_backlinks,
+                page_authority=competitor.page_authority,
+                domain_referring_domains=competitor.domain_referring_domains,
+                domain_backlinks=competitor.domain_backlinks,
+                domain_authority=competitor.domain_authority,
+                page_metrics_available=competitor.page_metrics_available,
+                domain_metrics_available=competitor.domain_metrics_available,
                 page_relevance_score=competitor.page_relevance_score,
                 local_relevance=competitor.local_relevance,
                 page_type=competitor.page_type,
@@ -174,6 +185,10 @@ def save_scan_records(
                 representative_query=competitor.representative_query,
                 serp_position=competitor.serp_position,
                 serp_observations=[
+                    observation.model_dump(mode="json", exclude={"observed_at"})
+                    for observation in competitor.serp_observations
+                ],
+                serp_observation_records=[
                     observation.model_dump(mode="json")
                     for observation in competitor.serp_observations
                 ],
@@ -211,6 +226,38 @@ def save_scan_records(
             )
         )
     session.flush()
+
+
+def competitor_metric_from_orm(row: CompetitorMetricORM) -> CompetitorMetric:
+    observation_payloads = row.serp_observation_records or row.serp_observations
+    return CompetitorMetric(
+        url=row.url,
+        domain=row.domain,
+        page_url=row.page_url,
+        normalized_domain=row.normalized_domain,
+        referring_domains=row.referring_domains,
+        backlinks=row.backlinks,
+        authority=row.authority,
+        page_referring_domains=row.page_referring_domains,
+        page_backlinks=row.page_backlinks,
+        page_authority=row.page_authority,
+        domain_referring_domains=row.domain_referring_domains,
+        domain_backlinks=row.domain_backlinks,
+        domain_authority=row.domain_authority,
+        page_metrics_available=row.page_metrics_available,
+        domain_metrics_available=row.domain_metrics_available,
+        page_relevance_score=row.page_relevance_score,
+        local_relevance=row.local_relevance,
+        page_type=row.page_type,
+        relevance_signals=row.relevance_signals,
+        representative_query=row.representative_query,
+        serp_position=row.serp_position,
+        serp_observations=[
+            CompetitorSerpObservation.model_validate(payload)
+            for payload in observation_payloads
+        ],
+        captured_at=row.captured_at,
+    )
 
 
 def _clear_scan_records(session: Session, scan_run_id: int) -> None:

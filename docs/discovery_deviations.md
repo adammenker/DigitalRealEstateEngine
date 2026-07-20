@@ -1,15 +1,26 @@
 # Discovery Completion Deviations
 
-This implementation keeps the discovery process focused on opportunity evidence.
+The implemented discovery system intentionally keeps several boundaries narrow.
 
-## Intentional Deviations
+## Intentional Scope Limits
 
-- No domain, outreach, site generation, deployment, lead routing, or billing features were added.
-- Manual SERP classification override fields were added to the model/database, but no override UI was added.
-- Local demand estimation remains conservative. It does not use fuzzy national/local market modeling unless population metadata is available.
-- Async scans remain an in-process database-backed worker, not an external queue service.
-- Geography is still lightweight. A fuller Pelias/local gazetteer setup remains in the production backlog.
+- Geography is limited to canonical U.S. populated places and ZCTAs. Address-level and
+  international discovery are outside the current product scope.
+- The public-data prefilter uses a documented ACS signal set. Business-count, climate,
+  service-incidence, and other datasets remain deferred until their value is validated.
+- Population-share demand is retained as low-confidence estimated evidence; it is not a
+  substitute for measured local demand.
+- The service catalog covers the configured initial families. Unconfigured drafts may be
+  tested but cannot produce full rankable assessments.
+- Page-level competitor metrics remain unavailable when the provider returns only domain
+  metrics. The engine records the distinction instead of manufacturing page evidence.
+- Async execution uses a database-backed in-process worker rather than an external queue.
+- Discovery does not include domain acquisition, site generation, outreach, lead routing,
+  billing, or launch approval workflows.
 
-## Verification Note
+## Remaining Validation
 
-Backend checks pass locally. Direct frontend build cannot run with the host Node 16 runtime; use Docker-backed `make frontend-build` or `make verify`.
+The architecture and offline replay path are implemented, but production claims require
+empirical calibration with representative live evidence and outcomes. Production database,
+operations, security, and downstream product workflow also remain open in
+`docs/production_backlog.md`.

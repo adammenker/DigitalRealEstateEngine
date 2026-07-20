@@ -153,6 +153,7 @@ def _serp_observations_by_domain(
                     query=snapshot.query,
                     position=result.order,
                     url=result.url,
+                    observed_at=snapshot.captured_at,
                 )
             )
     for observations in by_domain.values():

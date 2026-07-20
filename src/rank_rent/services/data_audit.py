@@ -10,6 +10,8 @@ from rank_rent.db.orm import (
     CompetitorMetricORM,
     JsonArtifactORM,
     KeywordMetricORM,
+    MarketPrefilterAssessmentORM,
+    MarketPrefilterRunORM,
     OpportunityORM,
     ProviderCandidateORM,
     RawApiResponseORM,
@@ -32,6 +34,11 @@ def audit_data(session: Session) -> dict[str, Any]:
         "raw_response_count": len(raw_responses),
         "raw_response_cost_usd": round(sum(row.cost_usd or 0 for row in raw_responses), 6),
         "typed_record_counts": {
+            "market_prefilter_runs": _count(session, MarketPrefilterRunORM),
+            "market_prefilter_assessments": _count(
+                session,
+                MarketPrefilterAssessmentORM,
+            ),
             "keyword_metrics": _count(session, KeywordMetricORM),
             "serp_snapshots": _count(session, SerpSnapshotORM),
             "competitor_metrics": _count(session, CompetitorMetricORM),

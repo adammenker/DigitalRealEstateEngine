@@ -177,12 +177,26 @@ def normalize_country(value: str) -> str:
 
 
 def market_from_geography_record(record: USGeographyRecord) -> Market:
-    return _candidate_from_record(
+    return location_candidate_from_geography_record(
         record,
-        confidence=1.0,
         match_reason="canonical_geography_record",
         matched_alias=record.city,
     ).to_market()
+
+
+def location_candidate_from_geography_record(
+    record: USGeographyRecord,
+    *,
+    match_reason: str,
+    matched_alias: str,
+    confidence: float = 1.0,
+) -> LocationCandidate:
+    return _candidate_from_record(
+        record,
+        confidence=confidence,
+        match_reason=match_reason,
+        matched_alias=matched_alias,
+    )
 
 
 def _candidate_from_match(match: USGeographyMatch) -> LocationCandidate:

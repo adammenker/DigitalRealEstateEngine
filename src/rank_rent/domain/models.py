@@ -153,14 +153,25 @@ class CompetitorSerpObservation(BaseModel):
     query: str
     position: int = Field(ge=1)
     url: str
+    observed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class CompetitorMetric(BaseModel):
     url: str
     domain: str
+    page_url: str | None = None
+    normalized_domain: str | None = None
     referring_domains: int | None = None
     backlinks: int | None = None
     authority: float | None = None
+    page_referring_domains: int | None = None
+    page_backlinks: int | None = None
+    page_authority: float | None = None
+    domain_referring_domains: int | None = None
+    domain_backlinks: int | None = None
+    domain_authority: float | None = None
+    page_metrics_available: bool = False
+    domain_metrics_available: bool = False
     page_relevance_score: float | None = None
     local_relevance: float | None = None
     page_type: str = "unknown"
@@ -169,6 +180,58 @@ class CompetitorMetric(BaseModel):
     serp_position: int | None = Field(default=None, ge=1)
     serp_observations: list[CompetitorSerpObservation] = Field(default_factory=list)
     captured_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @model_validator(mode="after")
+    def preserve_aggregate_compatibility(self) -> CompetitorMetric:
+        self.page_url = self.page_url or self.url
+        self.normalized_domain = (
+            self.normalized_domain
+            or self.domain.lower().removeprefix("www.").strip()
+        )
+
+        self.domain_referring_domains = (
+            self.domain_referring_domains
+            if self.domain_referring_domains is not None
+            else self.referring_domains
+        )
+        self.domain_backlinks = (
+            self.domain_backlinks
+            if self.domain_backlinks is not None
+            else self.backlinks
+        )
+        self.domain_authority = (
+            self.domain_authority
+            if self.domain_authority is not None
+            else self.authority
+        )
+        self.referring_domains = (
+            self.referring_domains
+            if self.referring_domains is not None
+            else self.domain_referring_domains
+        )
+        self.backlinks = (
+            self.backlinks if self.backlinks is not None else self.domain_backlinks
+        )
+        self.authority = (
+            self.authority if self.authority is not None else self.domain_authority
+        )
+        self.page_metrics_available = self.page_metrics_available or any(
+            value is not None
+            for value in (
+                self.page_referring_domains,
+                self.page_backlinks,
+                self.page_authority,
+            )
+        )
+        self.domain_metrics_available = self.domain_metrics_available or any(
+            value is not None
+            for value in (
+                self.domain_referring_domains,
+                self.domain_backlinks,
+                self.domain_authority,
+            )
+        )
+        return self
 
 
 class ProviderCandidate(BaseModel):

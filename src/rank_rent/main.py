@@ -5,14 +5,14 @@ import logging
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -25,6 +25,8 @@ from rank_rent.db.orm import (
     KeywordClusterORM,
     KeywordDecisionORM,
     KeywordMetricORM,
+    MarketPrefilterAssessmentORM,
+    MarketPrefilterRunORM,
     OpportunityORM,
     PreliminaryAssessmentORM,
     ProviderCandidateORM,
@@ -52,6 +54,7 @@ from rank_rent.services.discovery_report import (
     build_api_cost_ledger,
     build_discovery_report,
 )
+from rank_rent.services.evidence_quality import EvidenceQualityEvaluator
 from rank_rent.services.keywords import (
     DEFAULT_AD_HOC_INTENT_MODIFIERS,
     DEFAULT_NEGATIVE_PRODUCT_TERMS,
@@ -62,10 +65,20 @@ from rank_rent.services.locations import (
     resolve_market_for_scan,
     search_locations,
 )
+from rank_rent.services.market_prefilter import MarketPrefilter
 from rank_rent.services.records import save_scan_plan_calls
 from rank_rent.services.scan_worker import active_retry_for_scan, scan_worker_loop
 from rank_rent.services.scanner import ScanPipeline
-from rank_rent.services.us_geography import USGeographyError, USGeographyIndex
+from rank_rent.services.service_catalog import (
+    ServiceCatalog,
+    ServiceCatalogError,
+    ServiceResolution,
+    load_service_catalog,
+)
+from rank_rent.services.us_geography import (
+    STATE_NAMES,
+    USGeographyError,
+)
 from rank_rent.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -117,7 +130,8 @@ app.mount("/static", StaticFiles(directory="src/rank_rent/web/static"), name="st
 
 
 class ScanRequest(BaseModel):
-    service_text: str
+    service_id: str | None = None
+    service_text: str = ""
     location_text: str
     country: str = "US"
     selected_location: LocationCandidate | None = None
@@ -125,6 +139,99 @@ class ScanRequest(BaseModel):
     async_run: bool = False
     confirm_live_cost: bool = False
     data_mode: str | None = None
+    scan_profile: Literal["testing", "full"] | None = None
+
+
+class MarketPrefilterRequest(BaseModel):
+    service_id: str | None = None
+    service_text: str = Field(default="", max_length=240)
+    states: list[str] = Field(default_factory=list)
+    geography_kind: Literal["city", "postal_code"] = "city"
+    minimum_population: int | None = Field(default=None, ge=1)
+    limit: int = Field(default=20, ge=1, le=100)
+
+    @field_validator("service_text")
+    @classmethod
+    def normalize_service_text(cls, value: str) -> str:
+        normalized = " ".join(value.split())
+        if normalized and len(normalized) < 2:
+            raise ValueError("service_text must contain at least two non-space characters.")
+        return normalized
+
+    @field_validator("states")
+    @classmethod
+    def normalize_states(cls, values: list[str]) -> list[str]:
+        normalized = sorted({value.strip().upper() for value in values if value.strip()})
+        invalid = [value for value in normalized if value not in STATE_NAMES]
+        if invalid:
+            raise ValueError(f"Unknown U.S. state abbreviations: {', '.join(invalid)}.")
+        return normalized
+
+
+class RescoreRequest(BaseModel):
+    reason: str = Field(
+        default="Manual rescore using the current scoring and classification configuration.",
+        min_length=3,
+        max_length=500,
+    )
+
+
+class PromoteScanRequest(BaseModel):
+    dry_run: bool = True
+    confirm_live_cost: bool = False
+
+
+def _service_catalog() -> ServiceCatalog:
+    settings = get_settings()
+    try:
+        return load_service_catalog(
+            settings.project_root / "config/services.yaml"
+        )
+    except ServiceCatalogError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def _resolve_service(
+    *,
+    service_id: str | None,
+    service_text: str,
+    allow_draft: bool = True,
+) -> ServiceResolution:
+    catalog = _service_catalog()
+    if service_id:
+        resolution = catalog.resolve(service_id)
+        if resolution is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unknown configured service id: {service_id}.",
+            )
+        return resolution
+    resolution = catalog.resolve(service_text)
+    if resolution is not None:
+        return resolution
+    if not allow_draft:
+        raise HTTPException(
+            status_code=422,
+            detail="Select a configured service before running a full scan.",
+        )
+    try:
+        draft = catalog.create_draft(service_text)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Select a configured service or enter a draft service name.",
+        ) from exc
+    draft.service.negative_terms = ["diy", "jobs", "salary"]
+    draft.service.intent_modifiers = list(DEFAULT_AD_HOC_INTENT_MODIFIERS)
+    draft.service.negative_product_terms = list(DEFAULT_NEGATIVE_PRODUCT_TERMS)
+    return draft
+
+
+def _ad_hoc_service(service_text: str) -> ServiceFamily:
+    return _resolve_service(
+        service_id=None,
+        service_text=service_text,
+    ).service
 
 
 def _opportunity_summary(row: OpportunityORM) -> dict[str, Any]:
@@ -336,6 +443,182 @@ def _latest_score_payload(session: Session, opportunity_id: int) -> dict[str, An
     return None
 
 
+def _score_history(session: Session, opportunity_id: int) -> list[dict[str, Any]]:
+    artifacts = session.scalars(
+        select(JsonArtifactORM)
+        .where(
+            JsonArtifactORM.opportunity_id == opportunity_id,
+            JsonArtifactORM.kind.in_(
+                ["scan_result", "preliminary_assessment", "rescore_result"]
+            ),
+        )
+        .order_by(JsonArtifactORM.created_at.desc(), JsonArtifactORM.id.desc())
+    ).all()
+    history: list[dict[str, Any]] = []
+    for artifact in artifacts:
+        score = artifact.payload.get("score")
+        if not isinstance(score, dict):
+            continue
+        history.append(
+            {
+                "artifact_id": artifact.id,
+                "artifact_kind": artifact.kind,
+                "created_at": artifact.created_at.isoformat()
+                if artifact.created_at
+                else None,
+                "assessment_type": artifact.payload.get("assessment_type"),
+                "source_scan_run_id": artifact.payload.get("source_scan_run_id"),
+                "reason": artifact.payload.get("reason"),
+                "diff": artifact.payload.get("diff"),
+                "score": score,
+            }
+        )
+    return history
+
+
+def _score_diff(
+    previous: dict[str, Any] | None,
+    current: OpportunityScore,
+) -> dict[str, Any]:
+    previous_total = (
+        float(previous["total_score"])
+        if previous and isinstance(previous.get("total_score"), (int, float))
+        else None
+    )
+    previous_components_raw = previous.get("component_scores") if previous else None
+    previous_components: dict[str, Any] = (
+        previous_components_raw
+        if isinstance(previous_components_raw, dict)
+        else {}
+    )
+    component_deltas = {
+        component: round(
+            value - float(previous_components.get(component, 0)),
+            4,
+        )
+        for component, value in current.component_scores.items()
+    }
+    return {
+        "previous_total_score": previous_total,
+        "new_total_score": current.total_score,
+        "total_delta": (
+            round(current.total_score - previous_total, 4)
+            if previous_total is not None
+            else None
+        ),
+        "component_deltas": component_deltas,
+        "previous_scoring_version": previous.get("scoring_version")
+        if previous
+        else None,
+        "new_scoring_version": current.scoring_version,
+    }
+
+
+def _latest_assessment(
+    session: Session,
+    opportunity_id: int,
+) -> dict[str, Any] | None:
+    artifact = _latest_score_artifact(session, opportunity_id)
+    if artifact is None:
+        return None
+    score = artifact.payload.get("score")
+    if not isinstance(score, dict):
+        return None
+    report = artifact.payload.get("discovery_report")
+    if not isinstance(report, dict):
+        report = _latest_report_payload(session, opportunity_id)
+    report = report if isinstance(report, dict) else {}
+    scan_metadata_raw = report.get("scan_metadata")
+    scan_metadata: dict[str, Any] = (
+        scan_metadata_raw if isinstance(scan_metadata_raw, dict) else {}
+    )
+    scan_id = artifact.payload.get("source_scan_run_id") or scan_metadata.get(
+        "scan_run_id"
+    )
+    scan = (
+        session.get(ScanRunORM, int(scan_id))
+        if isinstance(scan_id, (int, str)) and str(scan_id).isdigit()
+        else None
+    )
+    assessment_type = str(
+        artifact.payload.get("assessment_type")
+        or scan_metadata.get("assessment_type")
+        or ("preliminary" if artifact.kind == "preliminary_assessment" else "full")
+    )
+    evidence_status = str(score.get("evidence_status") or "complete")
+    artifact_quality = artifact.payload.get("evidence_quality")
+    report_quality = report.get("evidence_quality")
+    quality: dict[str, Any] = (
+        artifact_quality
+        if isinstance(artifact_quality, dict)
+        else report_quality
+        if isinstance(report_quality, dict)
+        else {}
+    )
+    rankable = (
+        assessment_type == "full"
+        and evidence_status == "complete"
+        and quality.get("status") != "fail"
+    )
+    return {
+        "assessment_type": assessment_type,
+        "rankable": rankable,
+        "score": score,
+        "report": report,
+        "evidence_quality": quality,
+        "freshness": report.get("data_freshness"),
+        "scan": _scan_summary(scan, session) if scan else None,
+        "cost_ledger": build_api_cost_ledger(session, scan.id) if scan else None,
+        "created_at": artifact.created_at.isoformat() if artifact.created_at else None,
+        "artifact_kind": artifact.kind,
+    }
+
+
+def _promotion_status(
+    session: Session,
+    opportunity_id: int,
+    assessment: dict[str, Any] | None,
+) -> dict[str, Any]:
+    active = session.scalar(
+        select(ScanRunORM)
+        .where(
+            ScanRunORM.opportunity_id == opportunity_id,
+            ScanRunORM.status.in_(["queued", "running"]),
+        )
+        .order_by(ScanRunORM.id.desc())
+        .limit(1)
+    )
+    scan = assessment.get("scan") if assessment else None
+    quality = assessment.get("evidence_quality") if assessment else {}
+    already_full = bool(scan and scan.get("scan_profile") == "full")
+    eligible = bool(
+        scan
+        and scan.get("status") == "completed"
+        and scan.get("data_mode") == "live"
+        and scan.get("scan_profile") == "testing"
+        and not active
+        and (not isinstance(quality, dict) or quality.get("status") != "fail")
+    )
+    reason = (
+        None
+        if eligible
+        else f"Scan {active.id} is already active."
+        if active
+        else "The latest assessment already uses the full scan profile."
+        if already_full
+        else "Resolve evidence-quality errors before promoting this testing assessment."
+        if isinstance(quality, dict) and quality.get("status") == "fail"
+        else "A completed live testing assessment is required."
+    )
+    return {
+        "eligible": eligible,
+        "reason": reason,
+        "source_scan_run_id": scan.get("id") if scan else None,
+        "active_scan_id": active.id if active else None,
+        "already_full": already_full,
+    }
+
+
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
@@ -346,7 +629,8 @@ def api_meta() -> dict[str, Any]:
     settings = get_settings()
     data_mode = validate_runtime_mode(settings)
     try:
-        geography_metadata = USGeographyIndex.from_settings(settings).metadata()
+        prefilter = MarketPrefilter.from_settings(settings)
+        geography_metadata = prefilter.index.metadata()
         geography_status: dict[str, Any] = {
             "mode": "offline_us_geography",
             "dataset_available": True,
@@ -354,6 +638,16 @@ def api_meta() -> dict[str, Any]:
             "reference_year": geography_metadata.get("reference_year"),
             "city_count": int(geography_metadata.get("city_count", 0)),
             "zip_count": int(geography_metadata.get("zip_count", 0)),
+            "public_data_signals": [
+                "households",
+                "housing_units",
+                "owner_occupied_units",
+                "median_year_built",
+            ],
+            "complete_housing_signal_count": int(
+                geography_metadata.get("complete_housing_signal_count", 0)
+            ),
+            "market_prefilter_version": prefilter.config.version,
         }
     except (USGeographyError, OSError, ValueError):
         geography_status = {
@@ -393,6 +687,100 @@ async def api_location_search(
     return {"locations": [candidate.model_dump(mode="json") for candidate in candidates]}
 
 
+@app.get("/api/services")
+def api_services(q: str = "", limit: int = 50) -> dict[str, Any]:
+    catalog = _service_catalog()
+    records = catalog.search(q, limit=max(1, min(limit, 100)))
+    return {
+        "catalog_version": catalog.version,
+        "services": [
+            {
+                **record.service.model_dump(mode="json"),
+                "aliases": record.aliases,
+                "configured": record.configured,
+            }
+            for record in records
+        ],
+    }
+
+
+@app.post("/api/market-prefilter")
+def api_market_prefilter(
+    payload: MarketPrefilterRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    settings = get_settings()
+    service_resolution = _resolve_service(
+        service_id=payload.service_id,
+        service_text=payload.service_text,
+    )
+    service = service_resolution.service
+    prefilter = MarketPrefilter.from_settings(settings)
+    assessments, candidate_count = prefilter.rank_markets(
+        service,
+        states=payload.states,
+        geography_kind=payload.geography_kind,
+        limit=payload.limit,
+        minimum_population=payload.minimum_population,
+    )
+    metadata = prefilter.index.metadata()
+    profile = (
+        assessments[0].service_profile
+        if assessments
+        else prefilter.profile_for_service(service)[0]
+    )
+    run = MarketPrefilterRunORM(
+        service_text=service.display_name,
+        service_profile=profile,
+        geography_kind=payload.geography_kind,
+        state_filters=sorted({state.strip().upper() for state in payload.states}),
+        minimum_population=(
+            payload.minimum_population
+            if payload.minimum_population is not None
+            else prefilter.config.minimum_population
+        ),
+        candidate_count=candidate_count,
+        returned_count=len(assessments),
+        assessment_version=prefilter.config.version,
+        config_hash=prefilter.config_hash,
+        geography_dataset_version=str(metadata.get("dataset_version") or "unknown"),
+        status="completed",
+    )
+    session.add(run)
+    session.flush()
+    session.add_all(
+        [
+            MarketPrefilterAssessmentORM(
+                prefilter_run_id=run.id,
+                geography_id=assessment.location.geography_id,
+                rank=assessment.rank or 0,
+                score=assessment.score,
+                recommendation=assessment.recommendation,
+                confidence=assessment.confidence,
+                payload=assessment.model_dump(mode="json"),
+            )
+            for assessment in assessments
+        ]
+    )
+    session.commit()
+    return {
+        "prefilter_run_id": run.id,
+        "service": service.display_name,
+        "service_resolution": service_resolution.model_dump(mode="json"),
+        "zero_cost": True,
+        "paid_api_calls": 0,
+        "candidate_count": candidate_count,
+        "returned_count": len(assessments),
+        "assessment_version": run.assessment_version,
+        "config_hash": run.config_hash,
+        "geography_dataset_version": run.geography_dataset_version,
+        "service_profile": profile,
+        "assessments": [
+            assessment.model_dump(mode="json") for assessment in assessments
+        ],
+    }
+
+
 @app.get("/api/opportunities")
 def api_opportunities(session: Session = Depends(get_session)) -> dict[str, Any]:
     settings = get_settings()
@@ -403,7 +791,13 @@ def api_opportunities(session: Session = Depends(get_session)) -> dict[str, Any]
         "synthetic_fixture_data": data_mode.value == "fixture",
         "live_scan_depth": settings.live_scan_depth,
         "dataforseo_environment": settings.dataforseo_environment,
-        "opportunities": [_opportunity_summary(row) for row in opportunities],
+        "opportunities": [
+            {
+                **_opportunity_summary(row),
+                "latest_assessment": _latest_assessment(session, row.id),
+            }
+            for row in opportunities
+        ],
     }
 
 
@@ -415,16 +809,34 @@ def api_opportunity_compare(ids: str, session: Session = Depends(get_session)) -
     rows = session.scalars(
         select(OpportunityORM).where(OpportunityORM.id.in_(opportunity_ids)).order_by(OpportunityORM.id)
     ).all()
-    return {
-        "opportunities": [
-            {
-                "opportunity": _opportunity_summary(row),
-                "latest_report": _latest_report_payload(session, row.id),
-                "latest_score": _latest_score_payload(session, row.id),
-            }
-            for row in rows
-        ]
-    }
+    items = []
+    rejected = []
+    for row in rows:
+        assessment = _latest_assessment(session, row.id)
+        item = {
+            "opportunity": _opportunity_summary(row),
+            "latest_report": _latest_report_payload(session, row.id),
+            "latest_score": _latest_score_payload(session, row.id),
+            "latest_assessment": assessment,
+        }
+        if assessment is None or not assessment["rankable"]:
+            rejected.append(
+                {
+                    "opportunity_id": row.id,
+                    "reason": "Only complete full assessments can be compared.",
+                }
+            )
+        else:
+            items.append(item)
+    if rejected:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Comparison accepts complete full assessments only.",
+                "rejected": rejected,
+            },
+        )
+    return {"opportunities": items}
 
 
 @app.get("/api/opportunities/{opportunity_id}")
@@ -445,6 +857,7 @@ def api_opportunity_detail(
         .order_by(ScanRunORM.id.desc())
         .limit(1)
     )
+    latest_assessment = _latest_assessment(session, opportunity_id)
     return {
         "data_mode": _artifact_data_mode(artifacts),
         "opportunity": _opportunity_summary(opportunity),
@@ -452,6 +865,13 @@ def api_opportunity_detail(
         "keyword_clusters": _keyword_cluster_rows(session, latest_scan.id) if latest_scan else [],
         "latest_scan": _scan_summary(latest_scan, session) if latest_scan else None,
         "api_calls": _api_call_rows(session, latest_scan.id) if latest_scan else [],
+        "score_history": _score_history(session, opportunity_id),
+        "latest_assessment": latest_assessment,
+        "promotion": _promotion_status(
+            session,
+            opportunity_id,
+            latest_assessment,
+        ),
         "artifacts": [
             {
                 "id": artifact.id,
@@ -466,7 +886,9 @@ def api_opportunity_detail(
 
 @app.post("/api/opportunities/{opportunity_id}/rescore")
 def api_opportunity_rescore(
-    opportunity_id: int, session: Session = Depends(get_session)
+    opportunity_id: int,
+    payload: RescoreRequest | None = None,
+    session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     opportunity = session.get(OpportunityORM, opportunity_id)
     if opportunity is None:
@@ -500,6 +922,7 @@ def api_opportunity_rescore(
     assessment_type = _assessment_type_for_payload(artifact, latest_scan)
     is_preliminary = assessment_type == "preliminary"
     evidence_source_mode = _scan_evidence_source_mode(latest_scan)
+    previous_score = _latest_score_payload(session, opportunity_id)
     scorer = OpportunityScorer()
     score = scorer.score(
         metrics,
@@ -509,6 +932,24 @@ def api_opportunity_rescore(
         market,
         source_mode=evidence_source_mode,
         assessment_type=assessment_type,
+    )
+    quality_evaluator = EvidenceQualityEvaluator(
+        get_settings().project_root / "config/evidence_quality.yaml"
+    )
+    evidence_quality = quality_evaluator.assess(
+        service=service,
+        metrics=metrics,
+        serp_snapshots=serp_snapshots,
+        competitors=competitors,
+        providers=providers,
+        assessment_type=assessment_type,
+    )
+    score = quality_evaluator.apply_to_score(score, evidence_quality)
+    score_diff = _score_diff(previous_score, score)
+    reason = (
+        payload.reason
+        if payload is not None
+        else "Manual rescore using the current scoring and classification configuration."
     )
     cost_ledger = build_api_cost_ledger(session, latest_scan.id)
     report = build_discovery_report(
@@ -532,8 +973,15 @@ def api_opportunity_rescore(
             else None,
             "api_cost_ledger": cost_ledger,
             "assessment_type": assessment_type,
+            "evidence_quality": evidence_quality.model_dump(mode="json"),
         },
         demand_estimator=scorer.market_demand_estimator,
+        public_data_prefilter=(
+            artifact.get("public_data_prefilter")
+            if isinstance(artifact.get("public_data_prefilter"), dict)
+            else None
+        ),
+        evidence_quality=evidence_quality.model_dump(mode="json"),
     )
     _save_rescore_assessment_records(
         session,
@@ -544,9 +992,17 @@ def api_opportunity_rescore(
     )
     if is_preliminary:
         if opportunity.latest_score is None:
-            opportunity.status = "preliminary_review"
+            opportunity.status = (
+                "evidence_rejected"
+                if evidence_quality.status == "fail"
+                else "preliminary_review"
+            )
             opportunity.score_version = score.scoring_version
-            opportunity.confidence = "preliminary"
+            opportunity.confidence = (
+                "insufficient"
+                if evidence_quality.status == "fail"
+                else "preliminary"
+            )
             opportunity.missing_data_flags = score.missing_fields
     elif score.evidence_status == "complete":
         opportunity.status = "full_review"
@@ -569,6 +1025,9 @@ def api_opportunity_rescore(
                 "score": score.model_dump(mode="json"),
                 "discovery_report": report,
                 "source_scan_run_id": latest_scan.id,
+                "reason": reason,
+                "diff": score_diff,
+                "evidence_quality": evidence_quality.model_dump(mode="json"),
             },
         )
     )
@@ -578,7 +1037,166 @@ def api_opportunity_rescore(
         "assessment_type": assessment_type,
         "opportunity": _opportunity_summary(opportunity),
         "score": score.model_dump(mode="json"),
+        "reason": reason,
+        "diff": score_diff,
+        "evidence_quality": evidence_quality.model_dump(mode="json"),
         "discovery_report": report,
+    }
+
+
+@app.post("/api/opportunities/{opportunity_id}/promote")
+def api_opportunity_promote(
+    opportunity_id: int,
+    payload: PromoteScanRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    opportunity = session.get(OpportunityORM, opportunity_id)
+    if opportunity is None:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+    active_scan = session.scalar(
+        select(ScanRunORM)
+        .where(
+            ScanRunORM.opportunity_id == opportunity_id,
+            ScanRunORM.status.in_(["queued", "running"]),
+        )
+        .order_by(ScanRunORM.id.desc())
+        .limit(1)
+    )
+    if active_scan is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Scan {active_scan.id} is already active for this opportunity.",
+        )
+    source_scan = session.scalar(
+        select(ScanRunORM)
+        .where(
+            ScanRunORM.opportunity_id == opportunity_id,
+            ScanRunORM.status == "completed",
+            ScanRunORM.scan_profile == "testing",
+        )
+        .order_by(ScanRunORM.id.desc())
+        .limit(1)
+    )
+    if source_scan is None:
+        completed_full = session.scalar(
+            select(ScanRunORM.id)
+            .where(
+                ScanRunORM.opportunity_id == opportunity_id,
+                ScanRunORM.status == "completed",
+                ScanRunORM.scan_profile == "full",
+            )
+            .limit(1)
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This opportunity already has a completed full assessment."
+                if completed_full is not None
+                else "No completed testing scan is available to promote."
+            ),
+        )
+    source_quality = (source_scan.partial_outputs or {}).get("evidence_quality")
+    if isinstance(source_quality, dict) and source_quality.get("status") == "fail":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Resolve evidence-quality errors before promoting this testing "
+                "assessment to a full scan."
+            ),
+        )
+    request = source_scan.request_parameters or {}
+    service_payload = request.get("service_payload")
+    market_payload = request.get("final_market_payload") or request.get(
+        "market_payload"
+    )
+    if not isinstance(service_payload, dict) or not isinstance(market_payload, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="The source scan is missing structured service or market metadata.",
+        )
+    data_mode = resolve_data_mode(str(request.get("data_mode") or source_scan.data_mode))
+    if data_mode.value != "live":
+        raise HTTPException(
+            status_code=400,
+            detail="Only a live testing assessment can be promoted to a full scan.",
+        )
+    settings = get_settings()
+    validate_runtime_mode(settings, data_mode)
+    source_service = ServiceFamily(**service_payload)
+    service_resolution = _service_catalog().resolve(source_service.id)
+    if service_resolution is None:
+        service_resolution = _service_catalog().resolve(
+            source_service.display_name
+        )
+    if service_resolution is None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "This opportunity uses an unconfigured draft service. Select or "
+                "create an authoritative service definition before a full scan."
+            ),
+        )
+    service = service_resolution.service
+    market = Market(**market_payload)
+    plan = build_scan_plan(
+        settings,
+        data_mode,
+        service,
+        market,
+        session=session,
+        scan_profile="full",
+    )
+    if plan.blocked:
+        raise HTTPException(
+            status_code=400,
+            detail=plan.block_reason or "Full scan blocked by cost policy.",
+        )
+    response = {
+        "promotion": True,
+        "dry_run": payload.dry_run,
+        "source_scan_run_id": source_scan.id,
+        "opportunity_id": opportunity_id,
+        "scan_plan": plan.model_dump(mode="json"),
+        "additional_uncached_call_count": sum(
+            not call.cache_hit for call in plan.planned_calls
+        ),
+        "additional_estimated_cost_usd": float(plan.estimated_uncached_cost_usd),
+    }
+    if payload.dry_run:
+        return response
+    if (
+        plan.estimated_uncached_cost_usd > 0
+        and not payload.confirm_live_cost
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Full scan promotion requires explicit cost confirmation. "
+                f"Estimated uncached cost: ${plan.estimated_uncached_cost_usd}."
+            ),
+        )
+    queued = _queue_scan(
+        session,
+        service,
+        market,
+        data_mode.value,
+        plan.model_dump(mode="json"),
+        source_scan_run_id=source_scan.id,
+        public_data_prefilter=(
+            request.get("public_data_prefilter")
+            if isinstance(request.get("public_data_prefilter"), dict)
+            else None
+        ),
+        source="promotion_async",
+    )
+    return {
+        **response,
+        "dry_run": False,
+        "queued": True,
+        "scan_id": queued.id,
+        "message": (
+            f"Queued full scan {queued.id} from preliminary scan {source_scan.id}."
+        ),
     }
 
 
@@ -790,9 +1408,17 @@ def api_retry_scan(
             detail="This scan does not have structured retry metadata. Run a new scan instead.",
         )
     data_mode = str(request.get("data_mode") or scan.data_mode)
+    scan_profile = str(request.get("scan_profile") or scan.scan_profile)
     service = ServiceFamily(**service_payload)
     market = Market(**market_payload)
-    plan = build_scan_plan(get_settings(), resolve_data_mode(data_mode), service, market, session=session)
+    plan = build_scan_plan(
+        get_settings(),
+        resolve_data_mode(data_mode),
+        service,
+        market,
+        session=session,
+        scan_profile=scan_profile,
+    )
     if plan.blocked:
         raise HTTPException(status_code=400, detail=plan.block_reason or "Retry blocked by cost policy.")
     retry = _queue_scan(
@@ -822,14 +1448,13 @@ async def api_scan(
     data_mode = validate_runtime_mode(settings)
     requested_mode = resolve_data_mode(payload.data_mode or data_mode)
     validate_runtime_mode(settings, requested_mode)
-    service = ServiceFamily(
-        id=payload.service_text,
-        display_name=payload.service_text.title(),
-        seed_queries=[payload.service_text],
-        negative_terms=["diy", "jobs", "salary"],
-        intent_modifiers=DEFAULT_AD_HOC_INTENT_MODIFIERS,
-        negative_product_terms=DEFAULT_NEGATIVE_PRODUCT_TERMS,
+    requested_profile = payload.scan_profile or settings.live_scan_depth
+    service_resolution = _resolve_service(
+        service_id=payload.service_id,
+        service_text=payload.service_text,
+        allow_draft=requested_profile != "full",
     )
+    service = service_resolution.service
     try:
         market = await resolve_market_for_scan(
             session=session,
@@ -846,8 +1471,19 @@ async def api_scan(
                 "candidates": [candidate.model_dump(mode="json") for candidate in exc.candidates],
             },
         ) from exc
+    prefilter_assessment = MarketPrefilter.from_settings(settings).assess_market(
+        service,
+        market,
+    )
     if payload.dry_run:
-        plan = build_scan_plan(settings, requested_mode, service, market, session=session)
+        plan = build_scan_plan(
+            settings,
+            requested_mode,
+            service,
+            market,
+            session=session,
+            scan_profile=requested_profile,
+        )
         return {
             "dry_run": True,
             "data_mode": requested_mode.value,
@@ -859,10 +1495,23 @@ async def api_scan(
             ),
             "resolved": {
                 "service": service.display_name,
+                "service_resolution": service_resolution.model_dump(mode="json"),
                 "market": market.model_dump(mode="json"),
             },
+            "public_data_prefilter": (
+                prefilter_assessment.model_dump(mode="json")
+                if prefilter_assessment
+                else None
+            ),
         }
-    plan = build_scan_plan(settings, requested_mode, service, market, session=session)
+    plan = build_scan_plan(
+        settings,
+        requested_mode,
+        service,
+        market,
+        session=session,
+        scan_profile=requested_profile,
+    )
     if plan.blocked:
         raise HTTPException(status_code=400, detail=plan.block_reason or "Scan blocked by cost policy.")
     if (
@@ -878,20 +1527,36 @@ async def api_scan(
             ),
         )
     if payload.async_run:
-        scan = _queue_scan(session, service, market, requested_mode.value, plan.model_dump(mode="json"))
+        scan = _queue_scan(
+            session,
+            service,
+            market,
+            requested_mode.value,
+            plan.model_dump(mode="json"),
+            public_data_prefilter=(
+                prefilter_assessment.model_dump(mode="json")
+                if prefilter_assessment
+                else None
+            ),
+        )
         return {
             "dry_run": False,
             "queued": True,
             "data_mode": requested_mode.value,
             "synthetic_fixture_data": requested_mode.value == "fixture",
             "assessment_type": "pending",
+            "service_resolution": service_resolution.model_dump(mode="json"),
             "scan_plan": plan.model_dump(mode="json"),
             "message": f"Queued scan {scan.id}.",
             "scan_id": scan.id,
             "opportunity_id": scan.opportunity_id,
         }
     try:
-        result = await ScanPipeline(session, data_mode=requested_mode).run(
+        result = await ScanPipeline(
+            session,
+            data_mode=requested_mode,
+            scan_profile=requested_profile,
+        ).run(
             service,
             market,
             source="manual",
@@ -905,6 +1570,7 @@ async def api_scan(
         "data_mode": result["data_mode"],
         "synthetic_fixture_data": result["data_mode"] == "fixture",
         "assessment_type": result["assessment_type"],
+        "service_resolution": service_resolution.model_dump(mode="json"),
         "scan_plan": result["scan_plan"].model_dump(mode="json"),
         "message": (
             f"Created opportunity {result['opportunity_id']} "
@@ -925,13 +1591,15 @@ def _queue_scan(
     scan_plan: dict[str, Any],
     source_scan_run_id: int | None = None,
     retry_count: int = 0,
+    public_data_prefilter: dict[str, Any] | None = None,
+    source: str = "manual_async",
 ) -> ScanRunORM:
     service_row = upsert_service(session, service)
     market_row = upsert_market(session, market)
     opportunity = get_or_create_opportunity(session, service_row, market_row)
     scan = ScanRunORM(
         opportunity_id=opportunity.id,
-        source="manual_async",
+        source=source,
         status="queued",
         estimated_cost_usd=float(scan_plan.get("estimated_uncached_cost_usd") or 0),
         planned_cost_usd=float(scan_plan.get("estimated_uncached_cost_usd") or 0),
@@ -950,15 +1618,24 @@ def _queue_scan(
             "service": service.slug,
             "market": market.slug,
             "data_mode": data_mode,
+            "scan_profile": str(scan_plan.get("scan_profile") or "testing"),
             "scan_plan": scan_plan,
             "service_payload": service.model_dump(mode="json"),
             "market_payload": market.model_dump(mode="json"),
             "final_market_payload": market.model_dump(mode="json"),
+            "public_data_prefilter": public_data_prefilter,
         },
     )
     session.add(scan)
     session.flush()
-    plan = build_scan_plan(get_settings(), resolve_data_mode(data_mode), service, market, session=session)
+    plan = build_scan_plan(
+        get_settings(),
+        resolve_data_mode(data_mode),
+        service,
+        market,
+        session=session,
+        scan_profile=str(scan_plan.get("scan_profile") or "testing"),
+    )
     save_scan_plan_calls(session, scan.id, plan)
     session.commit()
     return scan
@@ -983,14 +1660,7 @@ async def scan(
 ) -> HTMLResponse:
     settings = get_settings()
     data_mode = validate_runtime_mode(settings)
-    service = ServiceFamily(
-        id=service_text,
-        display_name=service_text.title(),
-        seed_queries=[service_text],
-        negative_terms=["diy", "jobs", "salary"],
-        intent_modifiers=DEFAULT_AD_HOC_INTENT_MODIFIERS,
-        negative_product_terms=DEFAULT_NEGATIVE_PRODUCT_TERMS,
-    )
+    service = _ad_hoc_service(service_text)
     try:
         market = await resolve_market_for_scan(
             session=session,
