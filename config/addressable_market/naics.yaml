@@ -1,0 +1,93 @@
+registry_version: "2022-naics-review-v1"
+cbp_dataset_year: 2022
+cbp_release_date: 2024-06-27
+nes_dataset_year: 2022
+nes_release_date: 2024-12-12
+services:
+  - service_family_id: plumbing
+    reviewed_by: project_configuration_review
+    reviewed_at: 2026-07-19
+    naics_version: "2022"
+    mappings:
+      - code: "238220"
+        relationship: broad_parent
+        confidence: medium
+        title: Plumbing, Heating, and Air-Conditioning Contractors
+        notes: Includes plumbing but also HVAC specialties; use only as a discounted industry-supply estimate.
+
+  - service_family_id: water_heater_services
+    reviewed_by: project_configuration_review
+    reviewed_at: 2026-07-19
+    naics_version: "2022"
+    mappings:
+      - code: "238220"
+        relationship: broad_parent
+        confidence: medium
+        title: Plumbing, Heating, and Air-Conditioning Contractors
+        notes: Water-heater specialists are not separately identified; broad plumbing/HVAC counts must be discounted.
+
+  - service_family_id: drywall_services
+    reviewed_by: project_configuration_review
+    reviewed_at: 2026-07-19
+    naics_version: "2022"
+    mappings:
+      - code: "238311"
+        relationship: broad_parent
+        confidence: medium
+        title: Drywall and Insulation Contractors
+        notes: Drywall is explicit, but the code also includes insulation contractors and is not an exact drywall-provider count.
+
+  - service_family_id: hvac_services
+    reviewed_by: project_configuration_review
+    reviewed_at: 2026-07-19
+    naics_version: "2022"
+    mappings:
+      - code: "238220"
+        relationship: broad_parent
+        confidence: medium
+        title: Plumbing, Heating, and Air-Conditioning Contractors
+        notes: HVAC is explicit, but plumbing establishments share the code; treat counts as broad supply evidence.
+
+  - service_family_id: roofing
+    reviewed_by: project_configuration_review
+    reviewed_at: 2026-07-19
+    naics_version: "2022"
+    mappings:
+      - code: "238160"
+        relationship: exact
+        confidence: high
+        title: Roofing Contractors
+        notes: Direct industry mapping, while still representing establishments rather than verified active providers.
+
+  - service_family_id: electrical_services
+    reviewed_by: project_configuration_review
+    reviewed_at: 2026-07-19
+    naics_version: "2022"
+    mappings:
+      - code: "238210"
+        relationship: exact
+        confidence: high
+        title: Electrical Contractors and Other Wiring Installation Contractors
+        notes: Direct electrical-contractor mapping; security and low-voltage wiring firms may also be included.
+
+  - service_family_id: garage_door_services
+    reviewed_by: project_configuration_review
+    reviewed_at: 2026-07-19
+    naics_version: "2022"
+    mappings:
+      - code: "238290"
+        relationship: broad_parent
+        confidence: low
+        title: Other Building Equipment Contractors
+        notes: Includes garage-door work among unrelated equipment installation; use as weak directional evidence only.
+
+  - service_family_id: epoxy_flooring
+    reviewed_by: project_configuration_review
+    reviewed_at: 2026-07-19
+    naics_version: "2022"
+    mappings:
+      - code: "238330"
+        relationship: broad_parent
+        confidence: low
+        title: Flooring Contractors
+        notes: Epoxy installers are not separated from other flooring contractors; use as weak broad-market evidence.

@@ -1,0 +1,67 @@
+catalog_version: "2026.07.1"
+datasets:
+  - dataset: acs
+    enabled: true
+    required: true
+    source_name: U.S. Census Bureau American Community Survey 5-Year Estimates
+    source_url: https://www.census.gov/programs-surveys/acs/data.html
+    license: U.S. Government public domain
+    refresh_cadence: annual
+    geographic_granularity: [place, county, ZIP approximation]
+    data_age_warning_days: 900
+    purpose: Household, housing-stock, tenure, structure, and purchasing-power evidence.
+    limitations:
+      - Five-year estimates smooth recent changes.
+      - ZIP evidence uses Census approximations rather than USPS delivery boundaries.
+  - dataset: cbp
+    enabled: true
+    required: false
+    source_name: U.S. Census Bureau County Business Patterns
+    source_url: https://www.census.gov/programs-surveys/cbp.html
+    license: U.S. Government public domain
+    refresh_cadence: annual
+    geographic_granularity: [county]
+    data_age_warning_days: 1200
+    purpose: Employer-establishment density after reviewed service-to-NAICS mapping.
+    limitations:
+      - Establishments are industry records, not verified service providers or tenants.
+      - Some values are suppressed or aggregated.
+  - dataset: nes
+    enabled: true
+    required: false
+    source_name: U.S. Census Bureau Nonemployer Statistics
+    source_url: https://www.census.gov/programs-surveys/nonemployer-statistics.html
+    license: U.S. Government public domain
+    refresh_cadence: annual
+    geographic_granularity: [county]
+    data_age_warning_days: 1200
+    purpose: Nonemployer-business density after reviewed service-to-NAICS mapping.
+    limitations:
+      - Businesses may be inactive, part-time, or serve a broader area.
+      - Broad NAICS mappings cannot identify an exact service specialty.
+  - dataset: noaa
+    enabled: false
+    required: false
+    source_name: NOAA Storm Events Database
+    source_url: https://www.ncei.noaa.gov/stormevents/
+    license: U.S. Government public domain
+    refresh_cadence: annual reviewed extract
+    geographic_granularity: [county]
+    data_age_warning_days: 730
+    purpose: Optional service-specific severe-weather exposure.
+    limitations:
+      - Event reporting practices vary by period and location.
+      - Exposure does not directly establish paid service demand.
+  - dataset: fema
+    enabled: false
+    required: false
+    source_name: FEMA National Risk Index
+    source_url: https://hazards.fema.gov/nri/
+    license: U.S. Government public data
+    refresh_cadence: on published release
+    geographic_granularity: [county]
+    data_age_warning_days: 1500
+    purpose: Optional hazard exposure for explicitly relevant service profiles.
+    limitations:
+      - Modeled risk is not observed service incidence.
+      - National normalization can mask local building differences.

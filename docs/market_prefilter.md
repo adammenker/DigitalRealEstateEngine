@@ -1,54 +1,119 @@
-# Public-Data Market Prefilter
+# Addressable-Market Prefilter V2
 
-The market prefilter is a separate, zero-cost assessment stage that runs before any
-DataForSEO scan. It narrows thousands of canonical U.S. markets to a shortlist using
-checked-in public evidence:
+The former market-prefilter result is now `AddressableMarketAssessment`. The new name makes
+its scope explicit: it measures whether a market has a plausible addressable property and
+provider base. It does not measure SEO opportunity.
+
+Compatibility aliases retain `MarketPrefilter`, `MarketPrefilterAssessment`,
+`MarketPrefilterProfile`, and `MarketPrefilterConfig` for existing API and scanner imports.
+
+## Pipeline Position
 
 ```text
 service x canonical U.S. markets
--> ACS public-data prefilter
+-> zero-cost AddressableMarketAssessment batch
 -> selected candidates
--> DataForSEO testing scans
+-> paid DataForSEO testing scans
 -> finalists
 -> full scans
 ```
 
-## Evidence
+Addressable-market points never feed the SEO-opportunity score. A recommendation means
+`advance_to_testing`, `review`, `defer`, or `insufficient_evidence`; it is a shortlist aid,
+not a profitability claim.
 
-The `us-geography-2024.2` index adds 2024 ACS five-year:
+## Service Profiles
 
-- households (`B11001`);
-- housing units (`B25001`);
-- owner-occupied units (`B25003`);
-- median year built (`B25035`).
+`config/addressable_market/profiles.yaml` has a versioned profile for every enabled service
+family plus a generic fallback. Profiles differ in evidence selection, weights, strong-value
+thresholds, ideal supply ranges, and required coverage.
 
-The index retains the exact source URLs, checksums, build timestamp, and dataset version.
-No Census API call occurs at runtime.
+Every signal declares:
 
-## Assessment
+- source dataset and measure;
+- causal rationale;
+- expected direction;
+- missing-data treatment;
+- geographic granularity;
+- refresh cadence;
+- normalization and maximum credit.
 
-`config/market_prefilter.yaml` contains versioned service-profile matching, signal weights,
-normalization targets, population floor, result limit, and recommendation thresholds.
-Home-service searches use household, housing-stock, ownership, and housing-age evidence.
-Other local services use the generic population, household, housing-unit, and household-density
-profile.
+Higher-is-better signals use a documented linear or log ceiling. Provider supply uses an
+ideal range with tapered credit on both sides; lower supply is not assumed to be universally
+better. Missing signals receive zero points and reduce evidence coverage. When coverage is
+below the profile minimum, `score` is null and the result is `insufficient_evidence`.
 
-Each assessment stores its component points, raw inputs, weights, normalization targets,
-missing fields, confidence, recommendation, config hash, and geography dataset version.
-Prefilter runs and returned assessments are persisted in `market_prefilter_runs` and
-`market_prefilter_assessments`.
+Each assessment includes component points, raw values, source versions, data years, release
+dates, limitations, missing signals, config hash, geography version, confidence, and
+data-age warnings.
 
-The dashboard's **Find markets** command ranks city markets without paid calls. Selecting a
-result fills the normal canonical location control. Dry runs and completed discovery reports
-also include the selected market's prefilter assessment.
+## Provider Density
 
-## Boundary
+The reviewed mapping registry is `config/addressable_market/naics.yaml`. It covers every
+enabled service family and distinguishes:
 
-The prefilter measures addressable market structure. It does not claim to measure Google
-demand, ranking difficulty, provider quality, or expected revenue, and it does not feed its
-score into the opportunity score. A weak prefilter result does not automatically block a
-manual scan.
+- `exact`;
+- `broad_parent`;
+- `adjacent`.
 
-County Business Patterns, Nonemployer Statistics, climate, and validated trend signals can
-be added as independent modules after service-to-NAICS mappings and cross-market validation
-are available. Until then, the assessment remains `medium` confidence at best.
+Each mapping also has high, medium, or low confidence, review date, NAICS version, title, and
+notes. Broad and adjacent records are discounted before scoring. The assessment exposes both
+raw industry counts and weighted estimates, and always labels them as industry evidence rather
+than exact provider or tenant counts.
+
+The derived evidence is:
+
+```text
+weighted employer establishments / target households x 10,000
+weighted nonemployer businesses / target households x 10,000
+combined supply density
+combined supply band
+mapping/data confidence
+```
+
+Target households are profile-specific: usually owner-occupied units for residential property
+services and all households where renter-occupied demand is also plausible.
+
+## Batch APIs
+
+Application code can call:
+
+- `AddressableMarketPrefilter.assess_batch(service, records, limit=...)`;
+- `AddressableMarketPrefilter.assess_geography_ids(service, ids, limit=...)`;
+- `AddressableMarketPrefilter.rank_markets(...)`.
+
+`AddressableMarketBatch` explicitly returns `zero_cost: true` and `paid_api_calls: 0`. The
+module imports no DataForSEO provider, and tests patch HTTP clients to fail if any network
+request is attempted.
+
+Standalone commands provide the requested workflow without changing the central CLI:
+
+```bash
+PYTHONPATH=src python scripts/addressable_market.py top \
+  --service roofing --state MO --limit 100
+
+PYTHONPATH=src python scripts/addressable_market.py batch \
+  --service roofing --markets /path/to/geography-ids.json
+```
+
+The market file can be a JSON string list or newline-delimited canonical geography IDs.
+
+## Integration Note
+
+The existing `/api/market-prefilter` endpoint automatically receives the V2 assessment
+through compatibility aliases. Its route and persistence schema retain the older naming.
+
+The exact master-spec commands:
+
+```text
+rank-rent prefilter batch
+rank-rent prefilter top
+```
+
+still require thin command registration in `src/rank_rent/cli.py`. That file was intentionally
+left untouched in this focused workstream. The standalone script and service APIs contain all
+business logic needed for that wiring.
+
+The frontend can continue consuming existing fields while progressively adopting
+`assessment_type`, `service_family_id`, `profile_version`, `evidence`, `provider_density`,
+`dataset_versions`, and `data_age_warnings`.

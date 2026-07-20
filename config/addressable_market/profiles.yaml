@@ -1,0 +1,279 @@
+assessment_version: "addressable-market-v2.0"
+minimum_population: 5000
+maximum_results: 500
+recommendation_thresholds:
+  advance_to_testing: 65
+  review: 45
+
+# Anchored definitions keep source and causal documentation identical wherever a
+# signal is reused. Profiles override only weights and, where justified, thresholds.
+signal_templates:
+  population: &population
+    weight: 0.01
+    source_dataset: acs
+    source_measure: B01003_001E
+    causal_rationale: Population is a broad ceiling on residents who may require local service.
+    expected_direction: higher
+    missing_data_treatment: Mark unavailable; do not infer from another geography.
+    geographic_granularity: Census place or ZIP approximation
+    refresh_cadence: Annual ACS five-year release
+    transform: log
+    strong_value: 300000
+  households: &households
+    weight: 0.01
+    source_dataset: acs
+    source_measure: B11001_001E
+    causal_rationale: Households are a closer demand base for property services than total population.
+    expected_direction: higher
+    missing_data_treatment: Mark unavailable and reduce evidence coverage.
+    geographic_granularity: Census place or ZIP approximation
+    refresh_cadence: Annual ACS five-year release
+    transform: log
+    strong_value: 120000
+  housing_units: &housing_units
+    weight: 0.01
+    source_dataset: acs
+    source_measure: B25001_001E
+    causal_rationale: Housing units approximate the installed property base requiring maintenance.
+    expected_direction: higher
+    missing_data_treatment: Mark unavailable and reduce evidence coverage.
+    geographic_granularity: Census place or ZIP approximation
+    refresh_cadence: Annual ACS five-year release
+    transform: log
+    strong_value: 140000
+  owner_occupied_units: &owner_occupied_units
+    weight: 0.01
+    source_dataset: acs
+    source_measure: B25003_002E
+    causal_rationale: Owner occupants are more likely than renters to directly purchase property repairs.
+    expected_direction: higher
+    missing_data_treatment: Mark unavailable; do not substitute all households.
+    geographic_granularity: Census place or ZIP approximation
+    refresh_cadence: Annual ACS five-year release
+    transform: log
+    strong_value: 80000
+  homeownership_rate: &homeownership_rate
+    weight: 0.01
+    source_dataset: acs
+    source_measure: B25003_002E / B11001_001E
+    causal_rationale: A higher owner share increases the portion of households directly buying repairs.
+    expected_direction: higher
+    missing_data_treatment: Derive only when both numerator and denominator are present.
+    geographic_granularity: Census place or ZIP approximation
+    refresh_cadence: Annual ACS five-year release
+    transform: linear
+    strong_value: 0.75
+  housing_age: &housing_age
+    weight: 0.01
+    source_dataset: acs
+    source_measure: ACS data year - B25035_001E
+    causal_rationale: Older housing generally has more accumulated repair and replacement needs.
+    expected_direction: higher
+    missing_data_treatment: Derive only from a reported median year built.
+    geographic_granularity: Census place
+    refresh_cadence: Annual ACS five-year release
+    transform: linear
+    strong_value: 60
+  household_density: &household_density
+    weight: 0.01
+    source_dataset: acs
+    source_measure: B11001_001E / Census land area
+    causal_rationale: Denser households can reduce travel cost for recurring local-service coverage.
+    expected_direction: higher
+    missing_data_treatment: Derive only when households and land area are valid.
+    geographic_granularity: Census place
+    refresh_cadence: Annual ACS five-year release
+    transform: log
+    strong_value: 1200
+  detached_housing_share: &detached_housing_share
+    weight: 0.01
+    source_dataset: acs
+    source_measure: B25024 detached structures / B25001 housing units
+    causal_rationale: Detached structures expose owners to more exterior and whole-property systems.
+    expected_direction: higher
+    missing_data_treatment: Mark unavailable; do not infer from ownership rate.
+    geographic_granularity: Census place or county
+    refresh_cadence: Annual ACS five-year release
+    transform: linear
+    strong_value: 0.75
+  purchasing_power: &purchasing_power
+    weight: 0.01
+    source_dataset: acs
+    source_measure: B19013_001E median household income
+    causal_rationale: Household purchasing power affects ability to fund discretionary and major repairs.
+    expected_direction: higher
+    missing_data_treatment: Mark unavailable; never substitute national income.
+    geographic_granularity: Census place or county
+    refresh_cadence: Annual ACS five-year release
+    transform: log
+    strong_value: 110000
+    maximum_credit: 0.75
+  storm_exposure: &storm_exposure
+    weight: 0.01
+    source_dataset: noaa
+    source_measure: normalized severe-weather event exposure
+    causal_rationale: Service-relevant severe weather can increase repair incidence.
+    expected_direction: higher
+    missing_data_treatment: Mark unavailable; absence of NOAA data is not zero exposure.
+    geographic_granularity: County
+    refresh_cadence: Annual reviewed NOAA release
+    transform: linear
+    strong_value: 1
+    maximum_credit: 0.60
+  combined_supply_density: &combined_supply_density
+    weight: 0.01
+    source_dataset: cbp
+    source_measure: weighted CBP establishments plus NES businesses per 10,000 target households
+    causal_rationale: A middle supply band indicates both tenant availability and room for another lead asset.
+    expected_direction: ideal_range
+    missing_data_treatment: Mark unavailable unless reviewed NAICS records and target households exist.
+    geographic_granularity: County applied to contained place
+    refresh_cadence: Annual CBP and NES releases
+    transform: linear
+    ideal_range:
+      minimum: 12
+      maximum: 42
+      hard_minimum: 0
+      hard_maximum: 100
+    maximum_credit: 0.75
+
+profiles:
+  plumbing:
+    service_family_id: plumbing
+    profile_version: 2
+    legacy_profile_name: home_services
+    target_household_signal: owner_occupied_units
+    minimum_evidence_coverage: 0.55
+    signals:
+      households: {<<: *households, weight: 0.25}
+      owner_occupied_units: {<<: *owner_occupied_units, weight: 0.25}
+      housing_age: {<<: *housing_age, weight: 0.20}
+      homeownership_rate: {<<: *homeownership_rate, weight: 0.15}
+      combined_supply_density: {<<: *combined_supply_density, weight: 0.15}
+
+  water_heater_services:
+    service_family_id: water_heater_services
+    profile_version: 2
+    legacy_profile_name: home_services
+    target_household_signal: owner_occupied_units
+    minimum_evidence_coverage: 0.55
+    signals:
+      owner_occupied_units: {<<: *owner_occupied_units, weight: 0.25}
+      housing_age: {<<: *housing_age, weight: 0.25, strong_value: 50}
+      housing_units: {<<: *housing_units, weight: 0.20}
+      homeownership_rate: {<<: *homeownership_rate, weight: 0.15}
+      combined_supply_density:
+        <<: *combined_supply_density
+        weight: 0.15
+        ideal_range: {minimum: 10, maximum: 38, hard_minimum: 0, hard_maximum: 90}
+
+  drywall_services:
+    service_family_id: drywall_services
+    profile_version: 2
+    legacy_profile_name: home_services
+    target_household_signal: households
+    minimum_evidence_coverage: 0.60
+    signals:
+      housing_units: {<<: *housing_units, weight: 0.30}
+      households: {<<: *households, weight: 0.20}
+      housing_age: {<<: *housing_age, weight: 0.15}
+      purchasing_power: {<<: *purchasing_power, weight: 0.15}
+      combined_supply_density:
+        <<: *combined_supply_density
+        weight: 0.20
+        ideal_range: {minimum: 4, maximum: 24, hard_minimum: 0, hard_maximum: 65}
+
+  hvac_services:
+    service_family_id: hvac_services
+    profile_version: 2
+    legacy_profile_name: home_services
+    target_household_signal: owner_occupied_units
+    minimum_evidence_coverage: 0.60
+    signals:
+      households: {<<: *households, weight: 0.25}
+      housing_age: {<<: *housing_age, weight: 0.20, strong_value: 50}
+      owner_occupied_units: {<<: *owner_occupied_units, weight: 0.20}
+      storm_exposure: {<<: *storm_exposure, weight: 0.15}
+      combined_supply_density:
+        <<: *combined_supply_density
+        weight: 0.20
+        ideal_range: {minimum: 14, maximum: 46, hard_minimum: 0, hard_maximum: 110}
+
+  roofing:
+    service_family_id: roofing
+    profile_version: 2
+    legacy_profile_name: home_services
+    target_household_signal: owner_occupied_units
+    minimum_evidence_coverage: 0.50
+    signals:
+      owner_occupied_units: {<<: *owner_occupied_units, weight: 0.20}
+      housing_age: {<<: *housing_age, weight: 0.20}
+      detached_housing_share: {<<: *detached_housing_share, weight: 0.15}
+      storm_exposure: {<<: *storm_exposure, weight: 0.20}
+      combined_supply_density:
+        <<: *combined_supply_density
+        weight: 0.15
+        ideal_range: {minimum: 8, maximum: 34, hard_minimum: 0, hard_maximum: 90}
+      households: {<<: *households, weight: 0.10}
+
+  electrical_services:
+    service_family_id: electrical_services
+    profile_version: 2
+    legacy_profile_name: home_services
+    target_household_signal: owner_occupied_units
+    minimum_evidence_coverage: 0.55
+    signals:
+      households: {<<: *households, weight: 0.25}
+      owner_occupied_units: {<<: *owner_occupied_units, weight: 0.20}
+      housing_age: {<<: *housing_age, weight: 0.15}
+      purchasing_power: {<<: *purchasing_power, weight: 0.15}
+      combined_supply_density:
+        <<: *combined_supply_density
+        weight: 0.25
+        ideal_range: {minimum: 12, maximum: 40, hard_minimum: 0, hard_maximum: 100}
+
+  garage_door_services:
+    service_family_id: garage_door_services
+    profile_version: 2
+    legacy_profile_name: home_services
+    target_household_signal: owner_occupied_units
+    minimum_evidence_coverage: 0.50
+    signals:
+      owner_occupied_units: {<<: *owner_occupied_units, weight: 0.20}
+      housing_units: {<<: *housing_units, weight: 0.20}
+      households: {<<: *households, weight: 0.15}
+      detached_housing_share: {<<: *detached_housing_share, weight: 0.15}
+      purchasing_power: {<<: *purchasing_power, weight: 0.10}
+      combined_supply_density:
+        <<: *combined_supply_density
+        weight: 0.20
+        ideal_range: {minimum: 5, maximum: 22, hard_minimum: 0, hard_maximum: 65}
+
+  epoxy_flooring:
+    service_family_id: epoxy_flooring
+    profile_version: 2
+    legacy_profile_name: home_services
+    target_household_signal: owner_occupied_units
+    minimum_evidence_coverage: 0.50
+    signals:
+      purchasing_power: {<<: *purchasing_power, weight: 0.15, strong_value: 125000}
+      owner_occupied_units: {<<: *owner_occupied_units, weight: 0.20}
+      housing_units: {<<: *housing_units, weight: 0.15}
+      households: {<<: *households, weight: 0.15}
+      detached_housing_share: {<<: *detached_housing_share, weight: 0.15}
+      combined_supply_density:
+        <<: *combined_supply_density
+        weight: 0.20
+        ideal_range: {minimum: 3, maximum: 18, hard_minimum: 0, hard_maximum: 55}
+
+  generic_local_service:
+    service_family_id: generic_local_service
+    profile_version: 2
+    legacy_profile_name: generic_local_service
+    target_household_signal: households
+    minimum_evidence_coverage: 0.75
+    signals:
+      population: {<<: *population, weight: 0.30}
+      households: {<<: *households, weight: 0.30}
+      housing_units: {<<: *housing_units, weight: 0.20}
+      household_density: {<<: *household_density, weight: 0.20}

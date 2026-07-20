@@ -9,6 +9,7 @@ __pycache__/
 *.pyc
 *.egg-info/
 rank_rent.db
+data/public_data/
 generated_sites/*
 !generated_sites/.gitkeep
 frontend/node_modules/
