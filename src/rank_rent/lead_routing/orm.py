@@ -80,6 +80,25 @@ class ProviderAssignmentORM(TimestampMixin, Base):
     replaced_assignment_id: Mapped[int | None] = mapped_column(
         ForeignKey("provider_assignments.id"), nullable=True
     )
+    # Workstream I validates this reference in its service. Keeping the ORM
+    # column decoupled lets lead-routing fixtures remain independently creatable;
+    # the production migration adds the database foreign key.
+    logo_asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    hours: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    service_radius: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    credentials: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    license_numbers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    approved_claims: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    attributed_testimonials: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    provider_photos: Mapped[list[int]] = mapped_column(JSON, default=list)
+    claims_reviewed_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    claims_reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    claims_review_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    activation_approved_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    activation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    replacement_approved_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
 
 class LeadORM(TimestampMixin, Base):

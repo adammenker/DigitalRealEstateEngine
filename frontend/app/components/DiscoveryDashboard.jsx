@@ -29,6 +29,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   Sparkles,
+  SquareStack,
   TrendingUp,
   X
 } from "lucide-react";
@@ -64,7 +65,7 @@ async function request(path, options) {
     message =
       typeof payload.detail === "string"
         ? payload.detail
-        : payload.detail?.message || payload.message || message;
+        : payload.detail?.message || payload.detail?.code || payload.message || message;
   } catch {
     // Keep the HTTP fallback for non-JSON responses.
   }
@@ -100,7 +101,19 @@ const api = {
     }),
   compare(ids) {
     return request(`/api/opportunities/compare?${new URLSearchParams({ ids: ids.join(",") })}`);
-  }
+  },
+  listProperties: () => request("/api/properties"),
+  getProperty: (id) => request(`/api/properties/${id}`),
+  createProperty: (opportunityId, payload) =>
+    request(`/api/opportunities/${opportunityId}/property`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  generateDomains: (propertyId) =>
+    request(`/api/properties/${propertyId}/domain-candidates/generate`, {
+      method: "POST",
+      body: JSON.stringify({ limit: 6, tlds: ["com"] })
+    })
 };
 
 function number(value, fallback = "n/a") {
@@ -471,6 +484,9 @@ export default function DiscoveryDashboard() {
   const [promotionLoading, setPromotionLoading] = useState(false);
   const [rescoreOpen, setRescoreOpen] = useState(false);
   const [rescoreReason, setRescoreReason] = useState("");
+  const [properties, setProperties] = useState([]);
+  const [propertyDetail, setPropertyDetail] = useState(null);
+  const [propertyLoading, setPropertyLoading] = useState(false);
   const locationPickerRef = useRef(null);
   const locationDismissedRef = useRef(false);
   const [form, setForm] = useState({
@@ -482,17 +498,22 @@ export default function DiscoveryDashboard() {
     async_run: true,
     confirm_live_cost: false
   });
+  const selectedProperty = useMemo(
+    () => properties.find((item) => item.opportunity_id === selectedId) || null,
+    [properties, selectedId]
+  );
 
   async function refresh(selectFirst = false) {
     setLoading(true);
     try {
-      const [metaData, serviceData, opportunityData, auditData, scanData] =
+      const [metaData, serviceData, opportunityData, auditData, scanData, propertyData] =
         await Promise.all([
           api.getMeta(),
           api.getServices().catch(() => ({ catalog_version: null, services: [] })),
           api.listOpportunities(),
           api.getAudit(),
-          api.listScans()
+          api.listScans(),
+          api.listProperties().catch(() => ({ properties: [] }))
         ]);
       const normalizedServices = (serviceData.services || []).map(normalizeService).filter(Boolean);
       setMeta(metaData);
@@ -501,6 +522,7 @@ export default function DiscoveryDashboard() {
       setOpportunities(opportunityData.opportunities || []);
       setAudit(auditData);
       setScans(scanData.scans || []);
+      setProperties(propertyData.properties || []);
       if (selectFirst && opportunityData.opportunities?.[0]) {
         setSelectedId(opportunityData.opportunities[0].id);
       }
@@ -560,6 +582,21 @@ export default function DiscoveryDashboard() {
       window.clearTimeout(timer);
     };
   }, [selectedId]);
+
+  useEffect(() => {
+    if (!selectedProperty) return undefined;
+    let cancelled = false;
+    api.getProperty(selectedProperty.id)
+      .then((data) => {
+        if (!cancelled) setPropertyDetail(data);
+      })
+      .catch((error) => {
+        if (!cancelled) setNotice({ type: "error", message: error.message });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProperty]);
 
   useEffect(() => {
     function dismiss(event) {
@@ -717,6 +754,46 @@ export default function DiscoveryDashboard() {
     }
   }
 
+  async function createProperty() {
+    if (!detail?.opportunity) return;
+    setPropertyLoading(true);
+    try {
+      const marketName = detail.opportunity.market.split(",")[0];
+      const result = await api.createProperty(detail.opportunity.id, {
+        neutral_brand: `${marketName} ${detail.opportunity.service} Guide`,
+        analytics_config: { verified: false }
+      });
+      setPropertyDetail(result);
+      setProperties((current) => [
+        ...current.filter((item) => item.id !== result.property.id),
+        result.property
+      ]);
+      setDetailTab("property");
+      setNotice({
+        type: "success",
+        message: "Property initialized. Production remains blocked until every release gate passes."
+      });
+    } catch (error) {
+      setNotice({ type: "error", message: error.message });
+    } finally {
+      setPropertyLoading(false);
+    }
+  }
+
+  async function generatePropertyDomains() {
+    if (!propertyDetail?.property?.id) return;
+    setPropertyLoading(true);
+    try {
+      const result = await api.generateDomains(propertyDetail.property.id);
+      setPropertyDetail(result);
+      setNotice({ type: "success", message: "Generated offline domain candidates." });
+    } catch (error) {
+      setNotice({ type: "error", message: error.message });
+    } finally {
+      setPropertyLoading(false);
+    }
+  }
+
   function toggleCompare(opportunity) {
     if (!opportunity.latest_assessment?.rankable) return;
     setCompareData(null);
@@ -779,6 +856,8 @@ export default function DiscoveryDashboard() {
   const competitors = scanPayload.competitors || [];
   const keywords = scanPayload.metrics || [];
   const demandEvidence = report?.demand || scanPayload.demand_evidence;
+  const visiblePropertyDetail =
+    propertyDetail?.property?.opportunity_id === selectedId ? propertyDetail : null;
   const activeScanCount = scans.filter((scan) => ["queued", "running"].includes(scan.status)).length;
   const bestScore = Math.max(
     0,
@@ -1048,8 +1127,29 @@ export default function DiscoveryDashboard() {
                   <History size={16} />
                   History & cost
                 </button>
+                {(detail.opportunity.status === "approved_for_property" || visiblePropertyDetail) && (
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={detailTab === "property"}
+                    className={detailTab === "property" ? "active" : ""}
+                    onClick={() => setDetailTab("property")}
+                  >
+                    <SquareStack size={16} />
+                    Property
+                  </button>
+                )}
               </div>
-              {detailTab === "evidence" ? (
+              {detailTab === "property" &&
+              (detail.opportunity.status === "approved_for_property" || visiblePropertyDetail) ? (
+                <PropertyWorkspace
+                  opportunity={detail.opportunity}
+                  data={visiblePropertyDetail}
+                  loading={propertyLoading}
+                  onCreate={createProperty}
+                  onGenerateDomains={generatePropertyDomains}
+                />
+              ) : detailTab === "evidence" ? (
                 <EvidenceWorkspace
                   detail={detail}
                   report={report}
@@ -1800,6 +1900,135 @@ function HistoryCostWorkspace({ history, freshness, ledger, apiCalls }) {
         <CostLedger ledger={ledger} apiCalls={apiCalls} />
       </Panel>
     </div>
+  );
+}
+
+function PropertyWorkspace({ opportunity, data, loading, onCreate, onGenerateDomains }) {
+  if (!data) {
+    return (
+      <section className="propertyLaunch">
+        <div>
+          <p className="eyebrow">Provider-independent property</p>
+          <h3>Start the controlled production workflow</h3>
+          <p>
+            This creates a durable property and routing profile from the approved opportunity.
+            Domain purchase and public deployment remain manual and approval-gated.
+          </p>
+        </div>
+        <button
+          className="primaryButton"
+          type="button"
+          disabled={loading || opportunity.status !== "approved_for_property"}
+          onClick={onCreate}
+        >
+          {loading ? <Loader2 className="spin" size={16} /> : <SquareStack size={16} />}
+          Initialize property
+        </button>
+      </section>
+    );
+  }
+  const property = data.property;
+  const candidates = data.domain_candidates || [];
+  const builds = data.site_builds || [];
+  const deployments = data.deployments || [];
+  const activeProvider = (data.provider_assignments || []).find(
+    (assignment) => assignment.status === "active"
+  );
+  const verifiedDomain = (data.domain_registrations || []).find(
+    (registration) => registration.status === "dns_verified"
+  );
+  const approvedConfig = (data.site_configs || []).find(
+    (config) => config.status === "approved"
+  );
+  const approvedCompliance = (data.compliance_reviews || []).find(
+    (review) => review.status === "approved"
+  );
+  return (
+    <div className="propertyWorkspace">
+      <section className="propertyHeader">
+        <div>
+          <p className="eyebrow">Property {property.id}</p>
+          <h3>{property.neutral_brand}</h3>
+          <p>{property.domain || "No verified domain yet"}</p>
+        </div>
+        <StatusBadge tone={property.status === "production" ? "good" : "neutral"}>
+          {componentLabel(property.status)}
+        </StatusBadge>
+      </section>
+      <section className="propertyGates" aria-label="Production gates">
+        <PropertyGate label="Approved opportunity" passed={opportunity.status === "approved_for_property"} />
+        <PropertyGate label="Verified domain" passed={Boolean(verifiedDomain)} />
+        <PropertyGate label="Approved SiteConfig" passed={Boolean(approvedConfig)} />
+        <PropertyGate label="Active provider" passed={Boolean(activeProvider)} />
+        <PropertyGate label="Compliance review" passed={Boolean(approvedCompliance)} />
+        <PropertyGate
+          label="Analytics verified"
+          passed={property.analytics_config?.verified === true}
+        />
+      </section>
+      <div className="detailGrid propertyGrid">
+        <Panel title="Domain workflow" icon={Globe2}>
+          <div className="panelCommand">
+            <span>{candidates.length} offline candidates</span>
+            <button className="secondaryButton" onClick={onGenerateDomains} disabled={loading}>
+              {loading ? <Loader2 className="spin" size={15} /> : <Globe2 size={15} />}
+              Generate
+            </button>
+          </div>
+          <Table
+            columns={["Domain", "Decision", "Availability"]}
+            rows={candidates.map((candidate) => [
+              candidate.domain,
+              componentLabel(candidate.status),
+              componentLabel(candidate.availability_status)
+            ])}
+          />
+        </Panel>
+        <Panel title="Provider configuration" icon={Building2}>
+          {activeProvider ? (
+            <Table
+              columns={["Provider", "Status", "Claims review"]}
+              rows={[[
+                activeProvider.public_business_name,
+                componentLabel(activeProvider.status),
+                activeProvider.claims_reviewed_at ? "Reviewed" : "Blocked"
+              ]]}
+            />
+          ) : (
+            <p className="muted">No exclusive provider is active.</p>
+          )}
+        </Panel>
+        <Panel title="Builds" icon={SquareStack}>
+          <Table
+            columns={["Environment", "Status", "Files"]}
+            rows={builds.map((build) => [
+              componentLabel(build.environment),
+              componentLabel(build.status),
+              build.file_count
+            ])}
+          />
+        </Panel>
+        <Panel title="Deployments" icon={History}>
+          <Table
+            columns={["Environment", "Status", "Scope"]}
+            rows={deployments.map((deployment) => [
+              componentLabel(deployment.environment),
+              componentLabel(deployment.status),
+              deployment.local_only ? "Local only" : "Public"
+            ])}
+          />
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+function PropertyGate({ label, passed }) {
+  return (
+    <span className={passed ? "passed" : "pending"}>
+      {passed ? <CheckCircle2 size={15} /> : <Clock3 size={15} />}
+      {label}
+    </span>
   );
 }
 

@@ -14,7 +14,7 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from rank_rent.settings import Settings, get_settings
 
 BASELINE_REVISION = "e6f6b8c2a915"
-SCHEMA_HEAD_REVISION = "6a1c9e4b7d20"
+SCHEMA_HEAD_REVISION = "d4a7c2e9f1b6"
 
 
 class Base(DeclarativeBase):
@@ -100,6 +100,7 @@ def init_db() -> None:
     from rank_rent.lead_routing import orm as lead_routing_orm  # noqa: F401
     from rank_rent.opportunity_review import orm as opportunity_review_orm  # noqa: F401
     from rank_rent.outcomes import orm as outcomes_orm  # noqa: F401
+    from rank_rent.property_workflow import orm as property_workflow_orm  # noqa: F401
 
     settings = get_settings()
     database_url = settings.database_url
@@ -124,6 +125,7 @@ def reset_db() -> None:
     from rank_rent.lead_routing import orm as lead_routing_orm  # noqa: F401
     from rank_rent.opportunity_review import orm as opportunity_review_orm  # noqa: F401
     from rank_rent.outcomes import orm as outcomes_orm  # noqa: F401
+    from rank_rent.property_workflow import orm as property_workflow_orm  # noqa: F401
 
     Base.metadata.drop_all(bind=engine)
     with engine.begin() as connection:

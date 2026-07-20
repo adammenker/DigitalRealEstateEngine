@@ -68,12 +68,19 @@ workstreams:
     completed_acceptance_criteria: []
   property_workflow:
     id: I
-    status: in_progress
+    status: complete_local
     owner: Hume
-    branch: delegated-worktree
+    branch: codex/workstream-i-property
     blockers:
       - Public deployment remains blocked until Release A is approved.
-    completed_acceptance_criteria: []
+      - Registrar, DNS, and public hosting adapters are intentionally unavailable.
+    completed_acceptance_criteria:
+      - Approved opportunities create versioned provider-independent properties.
+      - Exactly one active provider is enforced through the shared assignment table.
+      - Domain purchase and public deployment fail closed.
+      - Staging is noindex and builds are deterministic.
+      - Compliance and production release gates are enforced.
+      - Rollback restores a prior immutable build.
   lead_operations:
     id: J
     status: in_progress
@@ -105,4 +112,3 @@ release_gates:
   property_staging_ready: false
   public_launch_ready: false
   operational_learning_ready: false
-

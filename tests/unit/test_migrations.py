@@ -40,7 +40,8 @@ def test_migration_graph_has_one_linear_head_for_workstreams_c_and_d() -> None:
 
     referenced = {revision for revision in revisions.values() if revision is not None}
     assert set(revisions) - referenced == {SCHEMA_HEAD_REVISION}
-    assert revisions[SCHEMA_HEAD_REVISION] == "8b3e1f4a6c2d"
+    assert revisions[SCHEMA_HEAD_REVISION] == "6a1c9e4b7d20"
+    assert revisions["6a1c9e4b7d20"] == "8b3e1f4a6c2d"
     assert revisions["8b3e1f4a6c2d"] == "1a7d9c4e6b20"
     assert revisions["1a7d9c4e6b20"] == "a6e2c9f4d7b1"
     assert revisions["a6e2c9f4d7b1"] == "8a7d3f2c1b90"
@@ -93,6 +94,15 @@ def test_alembic_upgrade_head_creates_v1_schema(tmp_path, monkeypatch) -> None:
         "batch_scan_plan_items",
         "audit_events",
         "worker_heartbeats",
+        "properties",
+        "property_versions",
+        "property_domain_candidates",
+        "domain_registrations",
+        "property_assets",
+        "property_site_configs",
+        "site_builds",
+        "compliance_reviews",
+        "property_deployments",
     } <= tables
     opportunity_columns = {
         column["name"] for column in inspector.get_columns("opportunities")
@@ -131,6 +141,25 @@ def test_alembic_upgrade_head_creates_v1_schema(tmp_path, monkeypatch) -> None:
         index["name"] for index in inspector.get_indexes("provider_assignments")
     }
     assert "uq_provider_assignments_active_property" in provider_assignment_indexes
+    provider_assignment_columns = {
+        column["name"] for column in inspector.get_columns("provider_assignments")
+    }
+    assert {
+        "logo_asset_id",
+        "hours",
+        "service_radius",
+        "credentials",
+        "license_numbers",
+        "approved_claims",
+        "attributed_testimonials",
+        "provider_photos",
+        "claims_reviewed_by",
+        "claims_reviewed_at",
+        "claims_review_reason",
+        "activation_approved_by",
+        "activation_reason",
+        "replacement_approved_by",
+    } <= provider_assignment_columns
     assert "provider_daily_usage" in tables
     assert "provider_qualifications" in tables
     assert "billing_reconciliations" in tables

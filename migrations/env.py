@@ -10,6 +10,7 @@ from rank_rent.db.base import Base
 from rank_rent.lead_routing import orm as lead_routing_orm  # noqa: F401
 from rank_rent.opportunity_review import orm as opportunity_review_orm  # noqa: F401
 from rank_rent.outcomes import orm as outcomes_orm  # noqa: F401
+from rank_rent.property_workflow import orm as property_workflow_orm  # noqa: F401
 from rank_rent.settings import get_settings
 
 config = context.config

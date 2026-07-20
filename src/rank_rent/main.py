@@ -69,6 +69,7 @@ from rank_rent.opportunity_review.services import (
     OpportunityReviewService,
 )
 from rank_rent.planning import build_scan_plan
+from rank_rent.property_workflow.api import router as property_workflow_router
 from rank_rent.repositories import get_or_create_opportunity, upsert_market, upsert_service
 from rank_rent.runtime import resolve_data_mode, validate_environment, validate_runtime_mode
 from rank_rent.scoring.score import OpportunityScorer
@@ -128,6 +129,7 @@ app = FastAPI(title="Digital Real Estate Engine", lifespan=lifespan)
 startup_settings = get_settings()
 app.add_middleware(SecurityObservabilityMiddleware, settings=startup_settings)
 app.include_router(opportunity_review_router)
+app.include_router(property_workflow_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=startup_settings.cors_allowed_origins,
