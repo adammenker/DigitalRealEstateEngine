@@ -1,107 +1,128 @@
+x-backend-environment: &backend-environment
+  APP_ENV: local
+  DATA_MODE: ${DATA_MODE:-fixture}
+  DATABASE_URL: postgresql+psycopg://rank_rent:rank_rent_local@database:5432/rank_rent
+  DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE:-10}
+  DATABASE_MAX_OVERFLOW: ${DATABASE_MAX_OVERFLOW:-20}
+  DATABASE_POOL_TIMEOUT_SECONDS: ${DATABASE_POOL_TIMEOUT_SECONDS:-30}
+  DATABASE_POOL_RECYCLE_SECONDS: ${DATABASE_POOL_RECYCLE_SECONDS:-1800}
+  DATABASE_STATEMENT_TIMEOUT_MS: ${DATABASE_STATEMENT_TIMEOUT_MS:-30000}
+  DATABASE_TRANSACTION_TIMEOUT_MS: ${DATABASE_TRANSACTION_TIMEOUT_MS:-60000}
+  BLOB_STORE_BACKEND: filesystem
+  BLOB_STORE_PATH: /data/raw-responses
+  AUTH_MODE: local
+  LOCAL_AUTH_ENABLED: "true"
+  ALLOW_LIVE_API_CALLS: ${ALLOW_LIVE_API_CALLS:-false}
+  ALLOW_PRODUCTION_DATAFORSEO: ${ALLOW_PRODUCTION_DATAFORSEO:-false}
+  PAID_CALL_KILL_SWITCH: ${PAID_CALL_KILL_SWITCH:-false}
+  ALLOW_FULL_SCANS: ${ALLOW_FULL_SCANS:-false}
+  LIVE_SCAN_DEPTH: ${LIVE_SCAN_DEPTH:-testing}
+  MAX_SCAN_COST_USD: ${MAX_SCAN_COST_USD:-10.00}
+  PRODUCTION_DAILY_REQUEST_LIMIT: ${PRODUCTION_DAILY_REQUEST_LIMIT:-100}
+  PRODUCTION_DAILY_SPEND_USD: ${PRODUCTION_DAILY_SPEND_USD:-25.00}
+  TESTING_DAILY_SPEND_USD: ${TESTING_DAILY_SPEND_USD:-2.00}
+  SINGLE_CALL_ABNORMAL_COST_USD: ${SINGLE_CALL_ABNORMAL_COST_USD:-1.00}
+  UNEXPECTED_CALL_BREAKER_THRESHOLD: ${UNEXPECTED_CALL_BREAKER_THRESHOLD:-3}
+  PROVIDER_FAILURE_RATE_THRESHOLD: ${PROVIDER_FAILURE_RATE_THRESHOLD:-0.50}
+  SCHEMA_DRIFT_RATE_THRESHOLD: ${SCHEMA_DRIFT_RATE_THRESHOLD:-0.10}
+  CIRCUIT_BREAKER_MINIMUM_REQUESTS: ${CIRCUIT_BREAKER_MINIMUM_REQUESTS:-5}
+  QUALIFICATION_TTL_HOURS: ${QUALIFICATION_TTL_HOURS:-168}
+  BILLING_RECONCILIATION_MAX_AGE_HOURS: ${BILLING_RECONCILIATION_MAX_AGE_HOURS:-48}
+  BILLING_RECONCILIATION_TOLERANCE_USD: ${BILLING_RECONCILIATION_TOLERANCE_USD:-0.01}
+  SCAN_WORKER_CONCURRENCY: ${SCAN_WORKER_CONCURRENCY:-1}
+  SCAN_WORKER_POLL_SECONDS: ${SCAN_WORKER_POLL_SECONDS:-1.0}
+  SCAN_WORKER_HEARTBEAT_SECONDS: ${SCAN_WORKER_HEARTBEAT_SECONDS:-5.0}
+  SCAN_WORKER_STALE_AFTER_SECONDS: ${SCAN_WORKER_STALE_AFTER_SECONDS:-30.0}
+  SCAN_WORKER_LONG_RUNNING_SECONDS: ${SCAN_WORKER_LONG_RUNNING_SECONDS:-3600.0}
+  SCAN_WORKER_MAX_ATTEMPTS: ${SCAN_WORKER_MAX_ATTEMPTS:-4}
+  SCAN_WORKER_RETRY_BASE_SECONDS: ${SCAN_WORKER_RETRY_BASE_SECONDS:-2.0}
+  SCAN_WORKER_RETRY_MAX_SECONDS: ${SCAN_WORKER_RETRY_MAX_SECONDS:-300.0}
+  US_GEOGRAPHY_DATABASE_PATH: /app/data/us_geography.sqlite3
+  DATAFORSEO_ENVIRONMENT: ${DATAFORSEO_ENVIRONMENT:-sandbox}
+  DATAFORSEO_LOGIN: ${DATAFORSEO_LOGIN:-}
+  DATAFORSEO_PASSWORD: ${DATAFORSEO_PASSWORD:-}
+  WHOISXML_API_KEY: ${WHOISXML_API_KEY:-}
+  PEXELS_API_KEY: ${PEXELS_API_KEY:-}
+  HUNTER_API_KEY: ${HUNTER_API_KEY:-}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+  CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
+  CLOUDFLARE_PAGES_PROJECT: ${CLOUDFLARE_PAGES_PROJECT:-}
+  RELEASE_GIT_SHA: ${RELEASE_GIT_SHA:-development}
+  CORS_ALLOWED_ORIGINS: '["http://127.0.0.1:8010","http://localhost:8010"]'
+
+x-backend: &backend
+  image: digital-real-estate-engine-api:${RELEASE_GIT_SHA:-development}
+  restart: unless-stopped
+  environment: *backend-environment
+  volumes:
+    - rank_rent_data:/data
+    - ./generated_sites:/app/generated_sites
+
 services:
+  database:
+    image: postgres:16.4-alpine@sha256:5660c2cbfea50c7a9127d17dc4e48543eedd3d7a41a595a2dfa572471e37e64c
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rank_rent
+      POSTGRES_USER: rank_rent
+      POSTGRES_PASSWORD: rank_rent_local
+    volumes:
+      - rank_rent_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rank_rent -d rank_rent"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    <<: *backend
+    restart: "no"
+    depends_on:
+      database:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
+
   rank-rent:
+    <<: *backend
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: digital-realestate-engine
-    restart: unless-stopped
+      args:
+        RELEASE_GIT_SHA: ${RELEASE_GIT_SHA:-development}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     ports:
       - "${RANK_RENT_BACKEND_PORT:-8011}:8000"
     environment:
-      APP_ENV: development
-      DATA_MODE: ${DATA_MODE:-fixture}
-      DATABASE_URL: sqlite:////data/rank_rent.db
-      BLOB_STORE_BACKEND: filesystem
-      BLOB_STORE_PATH: /data/raw-responses
-      ALLOW_LIVE_API_CALLS: ${ALLOW_LIVE_API_CALLS:-false}
-      ALLOW_PRODUCTION_DATAFORSEO: ${ALLOW_PRODUCTION_DATAFORSEO:-false}
-      PAID_CALL_KILL_SWITCH: ${PAID_CALL_KILL_SWITCH:-false}
-      ALLOW_FULL_SCANS: ${ALLOW_FULL_SCANS:-false}
-      LIVE_SCAN_DEPTH: ${LIVE_SCAN_DEPTH:-testing}
-      MAX_SCAN_COST_USD: ${MAX_SCAN_COST_USD:-10.00}
-      PRODUCTION_DAILY_REQUEST_LIMIT: ${PRODUCTION_DAILY_REQUEST_LIMIT:-100}
-      PRODUCTION_DAILY_SPEND_USD: ${PRODUCTION_DAILY_SPEND_USD:-25.00}
-      TESTING_DAILY_SPEND_USD: ${TESTING_DAILY_SPEND_USD:-2.00}
-      SINGLE_CALL_ABNORMAL_COST_USD: ${SINGLE_CALL_ABNORMAL_COST_USD:-1.00}
-      UNEXPECTED_CALL_BREAKER_THRESHOLD: ${UNEXPECTED_CALL_BREAKER_THRESHOLD:-3}
-      PROVIDER_FAILURE_RATE_THRESHOLD: ${PROVIDER_FAILURE_RATE_THRESHOLD:-0.50}
-      SCHEMA_DRIFT_RATE_THRESHOLD: ${SCHEMA_DRIFT_RATE_THRESHOLD:-0.10}
-      CIRCUIT_BREAKER_MINIMUM_REQUESTS: ${CIRCUIT_BREAKER_MINIMUM_REQUESTS:-5}
-      QUALIFICATION_TTL_HOURS: ${QUALIFICATION_TTL_HOURS:-168}
-      BILLING_RECONCILIATION_MAX_AGE_HOURS: ${BILLING_RECONCILIATION_MAX_AGE_HOURS:-48}
-      BILLING_RECONCILIATION_TOLERANCE_USD: ${BILLING_RECONCILIATION_TOLERANCE_USD:-0.01}
-      US_GEOGRAPHY_DATABASE_PATH: /app/data/us_geography.sqlite3
-      DATAFORSEO_ENVIRONMENT: ${DATAFORSEO_ENVIRONMENT:-sandbox}
-      DATAFORSEO_LOGIN: ${DATAFORSEO_LOGIN:-}
-      DATAFORSEO_PASSWORD: ${DATAFORSEO_PASSWORD:-}
-      WHOISXML_API_KEY: ${WHOISXML_API_KEY:-}
-      PEXELS_API_KEY: ${PEXELS_API_KEY:-}
-      HUNTER_API_KEY: ${HUNTER_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
-      CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
-      CLOUDFLARE_PAGES_PROJECT: ${CLOUDFLARE_PAGES_PROJECT:-}
-    volumes:
-      - rank_rent_data:/data
-      - ./generated_sites:/app/generated_sites
+      <<: *backend-environment
+      SCAN_WORKER_ENABLED: "false"
+      WORKER_REQUIRED: "true"
 
   worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: digital-realestate-engine-worker
-    restart: unless-stopped
-    command: ["rank-rent", "worker"]
+    <<: *backend
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     environment:
-      APP_ENV: development
-      DATA_MODE: ${DATA_MODE:-fixture}
-      DATABASE_URL: sqlite:////data/rank_rent.db
-      BLOB_STORE_BACKEND: filesystem
-      BLOB_STORE_PATH: /data/raw-responses
-      ALLOW_LIVE_API_CALLS: ${ALLOW_LIVE_API_CALLS:-false}
-      ALLOW_PRODUCTION_DATAFORSEO: ${ALLOW_PRODUCTION_DATAFORSEO:-false}
-      PAID_CALL_KILL_SWITCH: ${PAID_CALL_KILL_SWITCH:-false}
-      ALLOW_FULL_SCANS: ${ALLOW_FULL_SCANS:-false}
-      LIVE_SCAN_DEPTH: ${LIVE_SCAN_DEPTH:-testing}
-      MAX_SCAN_COST_USD: ${MAX_SCAN_COST_USD:-10.00}
-      PRODUCTION_DAILY_REQUEST_LIMIT: ${PRODUCTION_DAILY_REQUEST_LIMIT:-100}
-      PRODUCTION_DAILY_SPEND_USD: ${PRODUCTION_DAILY_SPEND_USD:-25.00}
-      TESTING_DAILY_SPEND_USD: ${TESTING_DAILY_SPEND_USD:-2.00}
-      SINGLE_CALL_ABNORMAL_COST_USD: ${SINGLE_CALL_ABNORMAL_COST_USD:-1.00}
-      UNEXPECTED_CALL_BREAKER_THRESHOLD: ${UNEXPECTED_CALL_BREAKER_THRESHOLD:-3}
-      PROVIDER_FAILURE_RATE_THRESHOLD: ${PROVIDER_FAILURE_RATE_THRESHOLD:-0.50}
-      SCHEMA_DRIFT_RATE_THRESHOLD: ${SCHEMA_DRIFT_RATE_THRESHOLD:-0.10}
-      CIRCUIT_BREAKER_MINIMUM_REQUESTS: ${CIRCUIT_BREAKER_MINIMUM_REQUESTS:-5}
-      QUALIFICATION_TTL_HOURS: ${QUALIFICATION_TTL_HOURS:-168}
-      BILLING_RECONCILIATION_MAX_AGE_HOURS: ${BILLING_RECONCILIATION_MAX_AGE_HOURS:-48}
-      BILLING_RECONCILIATION_TOLERANCE_USD: ${BILLING_RECONCILIATION_TOLERANCE_USD:-0.01}
-      SCAN_WORKER_CONCURRENCY: ${SCAN_WORKER_CONCURRENCY:-1}
-      SCAN_WORKER_POLL_SECONDS: ${SCAN_WORKER_POLL_SECONDS:-1.0}
-      SCAN_WORKER_HEARTBEAT_SECONDS: ${SCAN_WORKER_HEARTBEAT_SECONDS:-5.0}
-      SCAN_WORKER_STALE_AFTER_SECONDS: ${SCAN_WORKER_STALE_AFTER_SECONDS:-30.0}
-      SCAN_WORKER_LONG_RUNNING_SECONDS: ${SCAN_WORKER_LONG_RUNNING_SECONDS:-3600.0}
-      SCAN_WORKER_MAX_ATTEMPTS: ${SCAN_WORKER_MAX_ATTEMPTS:-4}
-      SCAN_WORKER_RETRY_BASE_SECONDS: ${SCAN_WORKER_RETRY_BASE_SECONDS:-2.0}
-      SCAN_WORKER_RETRY_MAX_SECONDS: ${SCAN_WORKER_RETRY_MAX_SECONDS:-300.0}
-      US_GEOGRAPHY_DATABASE_PATH: /app/data/us_geography.sqlite3
-      DATAFORSEO_ENVIRONMENT: ${DATAFORSEO_ENVIRONMENT:-sandbox}
-      DATAFORSEO_LOGIN: ${DATAFORSEO_LOGIN:-}
-      DATAFORSEO_PASSWORD: ${DATAFORSEO_PASSWORD:-}
-    volumes:
-      - rank_rent_data:/data
-      - ./generated_sites:/app/generated_sites
+      <<: *backend-environment
+      SCAN_WORKER_ENABLED: "false"
+    command: ["rank-rent", "worker"]
     healthcheck:
-      test: ["CMD-SHELL", "kill -0 1"]
+      test: ["CMD", "rank-rent", "healthcheck", "--component", "worker"]
       interval: 30s
       timeout: 5s
-      start_period: 10s
+      start_period: 15s
       retries: 3
 
   frontend:
+    image: digital-real-estate-engine-frontend:${RELEASE_GIT_SHA:-development}
     build:
       context: .
       dockerfile: Dockerfile.frontend
-    container_name: digital-realestate-engine-ui
+      args:
+        RELEASE_GIT_SHA: ${RELEASE_GIT_SHA:-development}
     restart: unless-stopped
     depends_on:
       rank-rent:
@@ -111,18 +132,7 @@ services:
     environment:
       BACKEND_INTERNAL_URL: http://rank-rent:8000
       NEXT_TELEMETRY_DISABLED: "1"
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "node",
-          "-e",
-          "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-        ]
-      interval: 30s
-      timeout: 5s
-      start_period: 20s
-      retries: 3
 
 volumes:
+  rank_rent_postgres:
   rank_rent_data:

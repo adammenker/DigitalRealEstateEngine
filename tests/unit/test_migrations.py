@@ -8,7 +8,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DatabaseError, DBAPIError
 from sqlalchemy.orm import Session
 
 from rank_rent.db.base import SCHEMA_HEAD_REVISION, make_engine
@@ -40,7 +40,8 @@ def test_migration_graph_has_one_linear_head_for_workstreams_c_and_d() -> None:
 
     referenced = {revision for revision in revisions.values() if revision is not None}
     assert set(revisions) - referenced == {SCHEMA_HEAD_REVISION}
-    assert revisions[SCHEMA_HEAD_REVISION] == "1a7d9c4e6b20"
+    assert revisions[SCHEMA_HEAD_REVISION] == "8b3e1f4a6c2d"
+    assert revisions["8b3e1f4a6c2d"] == "1a7d9c4e6b20"
     assert revisions["1a7d9c4e6b20"] == "a6e2c9f4d7b1"
     assert revisions["a6e2c9f4d7b1"] == "8a7d3f2c1b90"
     assert revisions["8a7d3f2c1b90"] == "6f4c2d8a9b17"
@@ -59,7 +60,8 @@ def test_alembic_upgrade_head_creates_v1_schema(tmp_path, monkeypatch) -> None:
 
     command.upgrade(config, "head")
 
-    inspector = inspect(create_engine(f"sqlite:///{db_path}"))
+    engine = create_engine(f"sqlite:///{db_path}")
+    inspector = inspect(engine)
     tables = set(inspector.get_table_names())
     assert "alembic_version" in tables
     assert "raw_api_responses" in tables
@@ -89,11 +91,32 @@ def test_alembic_upgrade_head_creates_v1_schema(tmp_path, monkeypatch) -> None:
         "discovery_templates",
         "batch_scan_plans",
         "batch_scan_plan_items",
+        "audit_events",
+        "worker_heartbeats",
     } <= tables
     opportunity_columns = {
         column["name"] for column in inspector.get_columns("opportunities")
     }
     assert {"owner_user_id", "review_version"} <= opportunity_columns
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO audit_events (
+                    event_type, actor_user_id, actor_role, target_type, target_id,
+                    request_id, metadata, occurred_at, previous_hash, event_hash
+                ) VALUES (
+                    'test', 'actor', 'admin', 'scan', '1',
+                    'request', '{}', CURRENT_TIMESTAMP, 'GENESIS', 'hash'
+                )
+                """
+            )
+        )
+    with pytest.raises(DatabaseError, match="append-only"):
+        with engine.begin() as connection:
+            connection.execute(
+                text("UPDATE audit_events SET event_type = 'tampered' WHERE event_hash = 'hash'")
+            )
     routing_profile_columns = {
         column["name"] for column in inspector.get_columns("property_routing_profiles")
     }

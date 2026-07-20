@@ -17,7 +17,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from rank_rent.db.base import WorkerSessionLocal
-from rank_rent.db.orm import ScanRunORM
+from rank_rent.db.orm import ScanRunORM, WorkerHeartbeatORM
 from rank_rent.domain.models import Market, ServiceFamily
 from rank_rent.integrations.dataforseo.live import (
     DataForSEOAuthenticationError,
@@ -26,6 +26,14 @@ from rank_rent.integrations.dataforseo.live import (
     DataForSEORateLimitError,
     DataForSEOSchemaError,
 )
+from rank_rent.observability.context import (
+    opportunity_id_var,
+    request_id_var,
+    scan_run_id_var,
+    trace_id_var,
+)
+from rank_rent.observability.logging import log_event
+from rank_rent.observability.metrics import WORKER_RETRIES
 from rank_rent.opportunity_review.models import OpportunityState
 from rank_rent.opportunity_review.services import OpportunityReviewService
 from rank_rent.runtime import ConfigurationError
@@ -265,6 +273,19 @@ async def run_scan_by_id(
             return
         service = ServiceFamily(**service_payload)
         market = Market(**market_payload)
+        telemetry = request.get("telemetry")
+        if not isinstance(telemetry, dict):
+            telemetry = {}
+        request_token = request_id_var.set(
+            str(telemetry.get("request_id") or request_id_var.new())
+        )
+        trace_token = trace_id_var.set(
+            str(telemetry.get("trace_id") or trace_id_var.new())
+        )
+        scan_token = scan_run_id_var.set(lease.scan_id)
+        opportunity_token = opportunity_id_var.set(scan.opportunity_id)
+        if scan.retry_count:
+            WORKER_RETRIES.inc()
 
     heartbeat_stop = asyncio.Event()
     lease_lost = asyncio.Event()
@@ -311,11 +332,22 @@ async def run_scan_by_id(
                 await lease_lost_task
             await pipeline_task
     except ScanCancelled:
-        logger.info("Durable worker scan %s was cancelled.", lease.scan_id)
+        log_event("worker.scan.cancelled", worker_id=lease.worker_id)
     except ScanLeaseLost as exc:
-        logger.warning("%s", exc)
+        log_event(
+            "worker.scan.lease_lost",
+            level=logging.WARNING,
+            worker_id=lease.worker_id,
+            error_type=type(exc).__name__,
+        )
     except Exception as exc:
         error = exc
+        log_event(
+            "worker.scan.failed",
+            level=logging.ERROR,
+            worker_id=lease.worker_id,
+            error_type=type(exc).__name__,
+        )
         logger.exception("Durable worker scan %s failed unexpectedly.", lease.scan_id)
     finally:
         heartbeat_stop.set()
@@ -343,6 +375,10 @@ async def run_scan_by_id(
                 if scan.status in TERMINAL_SCAN_STATUSES or scan.status == "queued":
                     _clear_lease(scan)
                 session.commit()
+        opportunity_id_var.reset(opportunity_token)
+        scan_run_id_var.reset(scan_token)
+        trace_id_var.reset(trace_token)
+        request_id_var.reset(request_token)
 
 
 async def scan_worker_loop(
@@ -358,9 +394,11 @@ async def scan_worker_loop(
     factory = session_factory or WorkerSessionLocal
     active_settings = settings or get_settings()
     active_worker_id = worker_id or build_worker_id()
-    logger.info("Scan worker %s started.", active_worker_id)
+    _write_worker_heartbeat(factory, active_worker_id, "running")
+    log_event("worker.started", worker_id=active_worker_id)
     try:
         while not stop_event.is_set():
+            _write_worker_heartbeat(factory, active_worker_id, "running")
             with factory() as session:
                 recovered = recover_stale_scans(
                     session,
@@ -388,7 +426,32 @@ async def scan_worker_loop(
             with suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(stop_event.wait(), timeout=poll_seconds)
     finally:
-        logger.info("Scan worker %s stopped.", active_worker_id)
+        _write_worker_heartbeat(factory, active_worker_id, "stopped")
+        log_event("worker.stopped", worker_id=active_worker_id)
+
+
+def _write_worker_heartbeat(
+    factory: SessionFactory,
+    worker_id: str,
+    status: str,
+) -> None:
+    now = datetime.now(UTC)
+    with factory() as session:
+        row = session.get(WorkerHeartbeatORM, worker_id)
+        if row is None:
+            row = WorkerHeartbeatORM(
+                worker_id=worker_id,
+                status=status,
+                started_at=now,
+                last_seen_at=now,
+                release_version=get_settings().release_git_sha,
+                metadata_payload={"pid": os.getpid(), "hostname": socket.gethostname()},
+            )
+            session.add(row)
+        else:
+            row.status = status
+            row.last_seen_at = now
+        session.commit()
 
 
 async def run_worker_runtime(

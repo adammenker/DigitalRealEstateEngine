@@ -1,0 +1,11 @@
+{
+  "title": "Digital Real Estate Engine",
+  "schemaVersion": 39,
+  "panels": [
+    {"type": "timeseries", "title": "API availability", "targets": [{"expr": "1 - (sum(rate(rank_rent_api_errors_total[5m])) / clamp_min(sum(rate(rank_rent_api_requests_total[5m])), 1))"}]},
+    {"type": "timeseries", "title": "Queue and worker health", "targets": [{"expr": "rank_rent_scan_queue_depth"}, {"expr": "rank_rent_worker_heartbeat_age_seconds"}]},
+    {"type": "timeseries", "title": "Provider cost", "targets": [{"expr": "sum(increase(rank_rent_provider_cost_usd_total[1h])) by (provider, endpoint)"}]},
+    {"type": "timeseries", "title": "Discovery outcomes", "targets": [{"expr": "sum(increase(rank_rent_discovery_scans_total[1h])) by (profile, status)"}]},
+    {"type": "timeseries", "title": "Lead routing failures", "targets": [{"expr": "sum(increase(rank_rent_routing_failures_total[1h])) by (channel)"}]}
+  ]
+}

@@ -44,12 +44,18 @@ const COMPONENT_MAXIMUMS = {
 };
 
 async function request(path, options) {
+  const requestId = crypto.randomUUID().replaceAll("-", "");
+  const traceId = crypto.randomUUID().replaceAll("-", "");
+  const spanId = crypto.randomUUID().replaceAll("-", "").slice(0, 16);
   const response = await fetch(`/api/backend${path}`, {
     cache: "no-store",
     ...options,
-    headers: options?.body
-      ? { "Content-Type": "application/json", ...options?.headers }
-      : options?.headers
+    headers: {
+      "X-Request-ID": requestId,
+      traceparent: `00-${traceId}-${spanId}-01`,
+      ...(options?.body ? { "Content-Type": "application/json" } : {}),
+      ...options?.headers
+    }
   });
   if (response.ok) return response.json();
   let message = `Request failed (${response.status})`;

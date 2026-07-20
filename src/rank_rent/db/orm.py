@@ -35,6 +35,41 @@ class TimestampMixin:
     )
 
 
+class AuditEventORM(Base):
+    __tablename__ = "audit_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(120), index=True)
+    actor_user_id: Mapped[str] = mapped_column(String(200), index=True)
+    actor_role: Mapped[str] = mapped_column(String(40))
+    target_type: Mapped[str] = mapped_column(String(120), index=True)
+    target_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    request_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    metadata_payload: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=now_utc,
+        index=True,
+    )
+    previous_hash: Mapped[str] = mapped_column(String(64))
+    event_hash: Mapped[str] = mapped_column(String(64), unique=True)
+
+
+class WorkerHeartbeatORM(Base):
+    __tablename__ = "worker_heartbeats"
+
+    worker_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    status: Mapped[str] = mapped_column(String(40), default="running")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=now_utc,
+        index=True,
+    )
+    release_version: Mapped[str] = mapped_column(String(80), default="development")
+    metadata_payload: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+
+
 class ServiceFamilyORM(TimestampMixin, Base):
     __tablename__ = "service_families"
 

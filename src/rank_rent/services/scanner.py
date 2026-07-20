@@ -19,6 +19,13 @@ from rank_rent.integrations.factory import (
     build_domain_availability_provider,
     build_market_research_provider,
 )
+from rank_rent.observability.metrics import (
+    COST_RECONCILIATION_FAILURES,
+    DISCOVERY_CONFIDENCE,
+    DISCOVERY_SCANS,
+    EVIDENCE_GATE_RESULTS,
+    SCORE_VERSIONS,
+)
 from rank_rent.opportunity_review.models import OpportunityState
 from rank_rent.opportunity_review.services import (
     OpportunityReviewService,
@@ -315,6 +322,8 @@ class ScanPipeline:
             scan.progress_stage = "completed"
             scan.completed_at = datetime.now(UTC)
             cost_ledger = build_api_cost_ledger(self.session, scan.id)
+            if not bool(cost_ledger["ledger_complete"]):
+                COST_RECONCILIATION_FAILURES.inc()
             scan.actual_cost_usd = float(cost_ledger["actual_cost_usd"])
             scan.scoring_version = score.scoring_version
             scan_metadata = {
@@ -418,6 +427,10 @@ class ScanPipeline:
                 )
             self._ensure_lease(lock=True)
             self.session.commit()
+            DISCOVERY_SCANS.labels(profile=scan.scan_profile, status="completed").inc()
+            EVIDENCE_GATE_RESULTS.labels(status=evidence_quality.status).inc()
+            DISCOVERY_CONFIDENCE.labels(confidence=score.confidence.value).inc()
+            SCORE_VERSIONS.labels(version=score.scoring_version).inc()
             return {
                 "opportunity_id": opportunity.id,
                 "scan_id": scan.id,
@@ -452,6 +465,7 @@ class ScanPipeline:
                 reason="Scan was cancelled before assessment completion.",
             )
             self.session.commit()
+            DISCOVERY_SCANS.labels(profile=scan.scan_profile, status="cancelled").inc()
             raise
         except Exception as exc:
             failed_stage = scan.progress_stage
@@ -474,6 +488,7 @@ class ScanPipeline:
                 "error": str(exc),
             }
             self.session.commit()
+            DISCOVERY_SCANS.labels(profile=scan.scan_profile, status="failed").inc()
             raise
 
     def _prepare_scan_run(

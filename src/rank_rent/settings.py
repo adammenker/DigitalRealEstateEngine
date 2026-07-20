@@ -1,17 +1,24 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="ignore",
+        case_sensitive=False,
+    )
 
     app_env: str = "development"
+    service_name: str = "rank-rent-api"
+    log_level: str = "INFO"
     data_mode: str = "fixture"
     database_url: str = "sqlite:///./rank_rent.db"
     database_pool_size: int = Field(default=10, ge=1)
@@ -65,11 +72,71 @@ class Settings(BaseSettings):
     qualification_ttl_hours: int = Field(default=168, ge=1)
     billing_reconciliation_max_age_hours: int = Field(default=48, ge=1)
     billing_reconciliation_tolerance_usd: float = Field(default=0.01, ge=0)
+    worker_required: bool = False
+    auth_mode: str = "local"
+    local_auth_enabled: bool = True
+    secrets_injected_by_platform: bool = False
+    local_auth_default_user: str = "local-admin"
+    local_auth_default_role: str = "admin"
+    oidc_issuer: str = ""
+    oidc_audience: str = ""
+    oidc_jwks_url: str = ""
+    oidc_roles_claim: str = "roles"
+    oidc_allowed_algorithms: list[str] = Field(default_factory=lambda: ["RS256"])
+    oidc_allowed_jwks_hosts: list[str] = Field(default_factory=list)
+    oidc_jwks_cache_seconds: int = Field(default=300, ge=30, le=86400)
+    outbound_http_timeout_seconds: float = Field(default=5.0, ge=0.5, le=30)
+    cors_allowed_origins: list[str] = Field(
+        default_factory=lambda: ["http://127.0.0.1:8010", "http://localhost:8010"]
+    )
+    max_request_body_bytes: int = Field(default=1_048_576, ge=1024, le=10_485_760)
+    rate_limit_requests: int = Field(default=120, ge=1, le=100_000)
+    rate_limit_window_seconds: int = Field(default=60, ge=1, le=3600)
+    rate_limit_backend: str = "memory"
+    redis_url: str = ""
+    content_security_policy: str = (
+        "default-src 'self'; img-src 'self' data: https:; "
+        "style-src 'self' 'unsafe-inline'; script-src 'self'; "
+        "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    )
+    release_git_sha: str = "development"
+    release_image_digest: str = "unavailable"
+    release_frontend_image_digest: str = "unavailable"
+    release_notes: str = ""
+    geography_dataset_version: str = "bundled"
     project_root: Path = Path.cwd()
+
+    @field_validator("app_env")
+    @classmethod
+    def validate_app_env(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"development", "local", "test", "staging", "production"}:
+            raise ValueError("APP_ENV must be local, test, staging, or production.")
+        return normalized
+
+    @field_validator("auth_mode")
+    @classmethod
+    def validate_auth_mode(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"local", "oidc"}:
+            raise ValueError("AUTH_MODE must be local or oidc.")
+        return normalized
+
+    @field_validator("rate_limit_backend")
+    @classmethod
+    def validate_rate_limit_backend(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"memory", "redis"}:
+            raise ValueError("RATE_LIMIT_BACKEND must be memory or redis.")
+        return normalized
+
+    @property
+    def worker_stale_after(self) -> timedelta:
+        return timedelta(seconds=self.scan_worker_stale_after_seconds)
 
     @model_validator(mode="after")
     def validate_production_storage(self) -> Settings:
-        if self.app_env.strip().lower() == "production" and not self.database_url.startswith(
+        if self.app_env == "production" and not self.database_url.startswith(
             ("postgresql://", "postgresql+")
         ):
             raise ValueError("APP_ENV=production requires a PostgreSQL DATABASE_URL.")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
@@ -7,10 +8,12 @@ from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -18,6 +21,7 @@ from sqlalchemy.orm import Session
 from rank_rent.db.base import database_readiness, get_session, init_db
 from rank_rent.db.orm import (
     ApiCallORM,
+    AuditEventORM,
     CompetitorMetricORM,
     FullOpportunityScoreORM,
     JsonArtifactORM,
@@ -44,6 +48,11 @@ from rank_rent.domain.models import (
     ServiceFamily,
 )
 from rank_rent.integrations.dataforseo.live import DataForSEOError
+from rank_rent.observability.context import request_id_var, trace_id_var
+from rank_rent.observability.health import dependency_health
+from rank_rent.observability.logging import configure_logging
+from rank_rent.observability.metrics import RESCORES, SCORE_VERSIONS
+from rank_rent.observability.release import release_metadata
 from rank_rent.opportunity_review.api import (
     review_actor,
 )
@@ -61,8 +70,11 @@ from rank_rent.opportunity_review.services import (
 )
 from rank_rent.planning import build_scan_plan
 from rank_rent.repositories import get_or_create_opportunity, upsert_market, upsert_service
-from rank_rent.runtime import resolve_data_mode, validate_runtime_mode
+from rank_rent.runtime import resolve_data_mode, validate_environment, validate_runtime_mode
 from rank_rent.scoring.score import OpportunityScorer
+from rank_rent.security.audit import append_audit_event
+from rank_rent.security.auth import Permission, principal_from_request, require_permission
+from rank_rent.security.middleware import SecurityObservabilityMiddleware
 from rank_rent.services.data_audit import audit_data
 from rank_rent.services.discovery_report import (
     build_api_cost_ledger,
@@ -100,18 +112,34 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    settings = get_settings()
+    configure_logging(
+        environment=settings.app_env,
+        service=settings.service_name,
+        version=settings.release_git_sha,
+        level=settings.log_level,
+    )
+    validate_environment(settings)
     init_db()
     yield
 
 
 app = FastAPI(title="Digital Real Estate Engine", lifespan=lifespan)
+startup_settings = get_settings()
+app.add_middleware(SecurityObservabilityMiddleware, settings=startup_settings)
 app.include_router(opportunity_review_router)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:8010", "http://localhost:8010"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=startup_settings.cors_allowed_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-Request-ID",
+        "X-Local-Role",
+        "X-Local-User",
+    ],
 )
 templates = Jinja2Templates(directory="src/rank_rent/web/templates")
 app.mount("/static", StaticFiles(directory="src/rank_rent/web/static"), name="static")
@@ -177,6 +205,33 @@ def _service_catalog() -> ServiceCatalog:
         )
     except ServiceCatalogError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def _audit_request(
+    session: Session,
+    request: Request,
+    *,
+    event_type: str,
+    target_type: str,
+    target_id: str | int | None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    append_audit_event(
+        session,
+        event_type=event_type,
+        actor=principal_from_request(request),
+        target_type=target_type,
+        target_id=str(target_id) if target_id is not None else None,
+        request_id=getattr(request.state, "request_id", None),
+        metadata=cast(dict[str, Any], jsonable_encoder(metadata or {})),
+    )
+
+
+def _request_telemetry(request: Request) -> dict[str, str | None]:
+    return {
+        "request_id": getattr(request.state, "request_id", request_id_var.get()),
+        "trace_id": trace_id_var.get(),
+    }
 
 
 def _resolve_service(
@@ -628,6 +683,116 @@ def readyz() -> dict[str, str | bool | None]:
     return status
 
 
+@app.get("/live")
+def liveness() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/ready")
+def readiness(session: Session = Depends(get_session)) -> Response:
+    payload = dependency_health(session, get_settings())
+    return Response(
+        content=json.dumps(payload),
+        status_code=200 if payload["status"] == "ok" else 503,
+        media_type="application/json",
+    )
+
+
+@app.get("/health/dependencies")
+def health_dependencies(session: Session = Depends(get_session)) -> Response:
+    payload = dependency_health(session, get_settings())
+    return Response(
+        content=json.dumps(payload),
+        status_code=200 if payload["status"] == "ok" else 503,
+        media_type="application/json",
+    )
+
+
+@app.get("/metrics")
+def metrics(request: Request) -> Response:
+    require_permission(request, Permission.view_opportunities)
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+@app.get("/api/auth/me")
+def api_auth_me(
+    request: Request,
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    principal = principal_from_request(request)
+    append_audit_event(
+        session,
+        event_type="auth.login",
+        actor=principal,
+        target_type="session",
+        target_id=principal.token_id,
+        request_id=getattr(request.state, "request_id", None),
+        metadata={"auth_method": principal.auth_method},
+    )
+    session.commit()
+    return {
+        "user_id": principal.user_id,
+        "email": principal.email,
+        "role": principal.role.value,
+        "auth_method": principal.auth_method,
+        "permissions": sorted(permission.value for permission in Permission if principal.permits(permission)),
+    }
+
+
+@app.post("/api/auth/logout")
+def api_auth_logout(
+    request: Request,
+    session: Session = Depends(get_session),
+) -> dict[str, bool]:
+    principal = principal_from_request(request)
+    append_audit_event(
+        session,
+        event_type="auth.logout",
+        actor=principal,
+        target_type="session",
+        target_id=principal.token_id,
+        request_id=getattr(request.state, "request_id", None),
+        metadata={"stateless": True},
+    )
+    session.commit()
+    return {"logged_out": True}
+
+
+@app.get("/api/release")
+def api_release(session: Session = Depends(get_session)) -> dict[str, Any]:
+    return release_metadata(session, get_settings())
+
+
+@app.get("/api/audit-events")
+def api_audit_events(
+    request: Request,
+    limit: int = 100,
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    require_permission(request, Permission.change_production_limits)
+    rows = session.scalars(
+        select(AuditEventORM).order_by(AuditEventORM.id.desc()).limit(max(1, min(limit, 500)))
+    ).all()
+    return {
+        "events": [
+            {
+                "id": row.id,
+                "event_type": row.event_type,
+                "actor_user_id": row.actor_user_id,
+                "actor_role": row.actor_role,
+                "target_type": row.target_type,
+                "target_id": row.target_id,
+                "request_id": row.request_id,
+                "metadata": row.metadata_payload,
+                "occurred_at": row.occurred_at.isoformat(),
+                "previous_hash": row.previous_hash,
+                "event_hash": row.event_hash,
+            }
+            for row in rows
+        ]
+    }
+
+
 @app.get("/api/meta")
 def api_meta() -> dict[str, Any]:
     settings = get_settings()
@@ -710,6 +875,7 @@ def api_services(q: str = "", limit: int = 50) -> dict[str, Any]:
 
 @app.post("/api/market-prefilter")
 def api_market_prefilter(
+    request: Request,
     payload: MarketPrefilterRequest,
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
@@ -765,6 +931,14 @@ def api_market_prefilter(
             )
             for assessment in assessments
         ]
+    )
+    _audit_request(
+        session,
+        request,
+        event_type="market_prefilter.run",
+        target_type="market_prefilter_run",
+        target_id=run.id,
+        metadata={"service": service.id, "candidate_count": candidate_count},
     )
     session.commit()
     return {
@@ -891,6 +1065,7 @@ def api_opportunity_detail(
 
 @app.post("/api/opportunities/{opportunity_id}/rescore")
 def api_opportunity_rescore(
+    request: Request,
     opportunity_id: int,
     payload: RescoreRequest | None = None,
     session: Session = Depends(get_session),
@@ -907,9 +1082,11 @@ def api_opportunity_rescore(
     )
     if artifact is None or latest_scan is None:
         raise HTTPException(status_code=400, detail="No stored scan evidence is available to rescore.")
-    request = latest_scan.request_parameters or {}
-    service_payload = request.get("service_payload")
-    market_payload = request.get("final_market_payload") or request.get("market_payload")
+    scan_request = latest_scan.request_parameters or {}
+    service_payload = scan_request.get("service_payload")
+    market_payload = scan_request.get("final_market_payload") or scan_request.get(
+        "market_payload"
+    )
     if not isinstance(service_payload, dict) or not isinstance(market_payload, dict):
         raise HTTPException(status_code=400, detail="Latest scan is missing structured service/market data.")
     service = ServiceFamily(**service_payload)
@@ -1053,7 +1230,21 @@ def api_opportunity_rescore(
             },
         )
     )
+    _audit_request(
+        session,
+        request,
+        event_type="opportunity.rescore",
+        target_type="opportunity",
+        target_id=opportunity_id,
+        metadata={
+            "scan_run_id": latest_scan.id,
+            "scoring_version": score.scoring_version,
+            "reason": reason,
+        },
+    )
     session.commit()
+    RESCORES.inc()
+    SCORE_VERSIONS.labels(version=score.scoring_version).inc()
     return {
         "rescored": True,
         "assessment_type": assessment_type,
@@ -1068,6 +1259,7 @@ def api_opportunity_rescore(
 
 @app.post("/api/opportunities/{opportunity_id}/promote")
 def api_opportunity_promote(
+    http_request: Request,
     opportunity_id: int,
     payload: PromoteScanRequest,
     actor: ReviewActor = Depends(review_actor),
@@ -1229,7 +1421,21 @@ def api_opportunity_promote(
             else None
         ),
         source="promotion_async",
+        telemetry=_request_telemetry(http_request),
     )
+    _audit_request(
+        session,
+        http_request,
+        event_type="scan.promote",
+        target_type="scan_run",
+        target_id=queued.id,
+        metadata={
+            "source_scan_run_id": source_scan.id,
+            "cost_confirmed": payload.confirm_live_cost,
+            "estimated_cost_usd": plan.estimated_uncached_cost_usd,
+        },
+    )
+    session.commit()
     return {
         **response,
         "dry_run": False,
@@ -1396,7 +1602,11 @@ def api_scan_status(scan_id: int, session: Session = Depends(get_session)) -> di
 
 
 @app.post("/api/scans/{scan_id}/cancel")
-def api_cancel_scan(scan_id: int, session: Session = Depends(get_session)) -> dict[str, Any]:
+def api_cancel_scan(
+    request: Request,
+    scan_id: int,
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
     scan = session.get(ScanRunORM, scan_id)
     if scan is None:
         raise HTTPException(status_code=404, detail="Scan not found")
@@ -1422,6 +1632,14 @@ def api_cancel_scan(scan_id: int, session: Session = Depends(get_session)) -> di
                 decision="queued_scan_cancelled",
                 reason=f"Queued scan {scan.id} was cancelled before execution.",
             )
+    _audit_request(
+        session,
+        request,
+        event_type="scan.cancel",
+        target_type="scan_run",
+        target_id=scan.id,
+        metadata={"status_before_completion": scan.status},
+    )
     session.commit()
     return {
         "cancelled": True,
@@ -1432,6 +1650,7 @@ def api_cancel_scan(scan_id: int, session: Session = Depends(get_session)) -> di
 
 @app.post("/api/scans/{scan_id}/retry")
 def api_retry_scan(
+    http_request: Request,
     scan_id: int,
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
@@ -1479,7 +1698,17 @@ def api_retry_scan(
         plan.model_dump(mode="json"),
         source_scan_run_id=scan.id,
         retry_count=(scan.retry_count or 0) + 1,
+        telemetry=_request_telemetry(http_request),
     )
+    _audit_request(
+        session,
+        http_request,
+        event_type="scan.retry",
+        target_type="scan_run",
+        target_id=retry.id,
+        metadata={"source_scan_run_id": scan.id},
+    )
+    session.commit()
     return {
         "queued": True,
         "message": f"Queued retry scan {retry.id} from scan {scan.id}.",
@@ -1491,6 +1720,7 @@ def api_retry_scan(
 
 @app.post("/api/scans")
 async def api_scan(
+    request: Request,
     payload: ScanRequest,
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
@@ -1499,6 +1729,12 @@ async def api_scan(
     requested_mode = resolve_data_mode(payload.data_mode or data_mode)
     validate_runtime_mode(settings, requested_mode)
     requested_profile = payload.scan_profile or settings.live_scan_depth
+    require_permission(
+        request,
+        Permission.run_full_scan
+        if requested_profile == "full"
+        else Permission.run_testing_scan,
+    )
     service_resolution = _resolve_service(
         service_id=payload.service_id,
         service_text=payload.service_text,
@@ -1610,7 +1846,34 @@ async def api_scan(
                 if prefilter_assessment
                 else None
             ),
+            telemetry=_request_telemetry(request),
         )
+        _audit_request(
+            session,
+            request,
+            event_type="scan.create",
+            target_type="scan_run",
+            target_id=scan.id,
+            metadata={
+                "scan_profile": requested_profile,
+                "data_mode": requested_mode.value,
+                "async": True,
+            },
+        )
+        if payload.confirm_live_cost:
+            append_audit_event(
+                session,
+                event_type="scan.cost_confirmed",
+                actor=principal_from_request(request),
+                target_type="scan_run",
+                target_id=str(scan.id),
+                request_id=getattr(request.state, "request_id", None),
+                metadata={
+                    "estimated_cost_usd": plan.estimated_uncached_cost_usd,
+                    "scan_profile": requested_profile,
+                },
+            )
+        session.commit()
         return {
             "dry_run": False,
             "queued": True,
@@ -1637,6 +1900,32 @@ async def api_scan(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _audit_request(
+        session,
+        request,
+        event_type="scan.create",
+        target_type="scan_run",
+        target_id=result["scan_id"],
+        metadata={
+            "scan_profile": requested_profile,
+            "data_mode": requested_mode.value,
+            "async": False,
+        },
+    )
+    if payload.confirm_live_cost:
+        append_audit_event(
+            session,
+            event_type="scan.cost_confirmed",
+            actor=principal_from_request(request),
+            target_type="scan_run",
+            target_id=str(result["scan_id"]),
+            request_id=getattr(request.state, "request_id", None),
+            metadata={
+                "estimated_cost_usd": plan.estimated_uncached_cost_usd,
+                "scan_profile": requested_profile,
+            },
+        )
+    session.commit()
     return {
         "dry_run": False,
         "data_mode": result["data_mode"],
@@ -1665,6 +1954,7 @@ def _queue_scan(
     retry_count: int = 0,
     public_data_prefilter: dict[str, Any] | None = None,
     source: str = "manual_async",
+    telemetry: dict[str, str | None] | None = None,
 ) -> ScanRunORM:
     service_row = upsert_service(session, service)
     market_row = upsert_market(session, market)
@@ -1704,6 +1994,7 @@ def _queue_scan(
             "market_payload": market.model_dump(mode="json"),
             "final_market_payload": market.model_dump(mode="json"),
             "public_data_prefilter": public_data_prefilter,
+            "telemetry": telemetry or {},
         },
     )
     session.add(scan)
@@ -1787,6 +2078,15 @@ async def scan(
             "scan_result.html",
             {"dry_run": False, "message": f"Scan failed: {exc}"},
         )
+    _audit_request(
+        session,
+        request,
+        event_type="scan.create",
+        target_type="scan_run",
+        target_id=result["scan_id"],
+        metadata={"data_mode": data_mode.value, "legacy_form": True},
+    )
+    session.commit()
     created_message = (
         f"Created opportunity {result['opportunity_id']} with a preliminary assessment."
         if result["assessment_type"] == "preliminary"

@@ -14,6 +14,7 @@ from rank_rent.integrations.dataforseo.live import (
     normalize_dataforseo_environment,
     serp_location_payload,
 )
+from rank_rent.observability.metrics import SCAN_COST_LIMIT_BLOCKS
 from rank_rent.runtime import DataMode
 from rank_rent.services.cache import cache_key, normalize_request, valid_cached_response
 from rank_rent.services.keywords import service_seed_keywords
@@ -206,6 +207,8 @@ def build_scan_plan(
         [call for call in planned if not call.cache_hit and call.estimated_cost_usd > 0]
     )
     over_budget = uncached > maximum
+    if over_budget:
+        SCAN_COST_LIMIT_BLOCKS.inc()
     over_request_limit = len(planned) > settings.max_scan_requests
     return ScanPlan(
         scan_profile=profile,

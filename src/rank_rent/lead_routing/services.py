@@ -46,6 +46,7 @@ from rank_rent.lead_routing.privacy import (
     stable_private_hash,
     subject_fingerprint,
 )
+from rank_rent.observability.metrics import LEAD_SUBMISSIONS, ROUTING_FAILURES
 from rank_rent.opportunity_review.services import (
     OpportunityReviewError,
     require_property_approval,
@@ -505,6 +506,7 @@ class LeadRoutingService:
             return self._idempotency_winner(form, error)
 
         if assessment.disposition == "block":
+            LEAD_SUBMISSIONS.labels(channel=LeadChannel.form.value, status="spam").inc()
             logger.info(
                 "Lead %s for property %s blocked by spam policy.",
                 lead_id,
@@ -521,10 +523,18 @@ class LeadRoutingService:
                     else "no_configured_delivery_channel"
                 ),
             )
+            LEAD_SUBMISSIONS.labels(
+                channel=LeadChannel.form.value,
+                status=LeadStatus.delivery_failed.value,
+            ).inc()
             return LeadSubmissionResult(
                 lead_id=lead_id,
                 status=LeadStatus.delivery_failed,
             )
+        LEAD_SUBMISSIONS.labels(
+            channel=LeadChannel.form.value,
+            status=LeadStatus.routing.value,
+        ).inc()
         return LeadSubmissionResult(
             lead_id=lead_id,
             status=LeadStatus.routing,
@@ -616,6 +626,7 @@ class LeadRoutingService:
         lead_id: str,
         reason_code: str,
     ) -> None:
+        ROUTING_FAILURES.labels(channel="lead").inc()
         try:
             await self.alert_adapter.routing_failure(
                 property_id=property_id,

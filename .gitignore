@@ -18,3 +18,5 @@ frontend/.next/
 frontend/out/
 build/
 uv.lock
+release/
+.terraform/

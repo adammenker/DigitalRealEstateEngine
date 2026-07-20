@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_call:
   push:
     branches: [main]
   pull_request:
@@ -29,6 +30,12 @@ jobs:
       - run: rank-rent calibrate validate-config
       - run: rank-rent calibrate run --no-save
       - run: pytest -q
+      - run: pytest -q tests/e2e/test_fixture_pipeline.py tests/e2e/test_realistic_replay_discovery.py
+      - name: Site-generator artifact contract
+        run: pytest -q tests/unit/test_site_generator.py
+      - name: Production API/security contracts
+        run: pytest -q tests/unit/test_production_readiness.py
+      - run: python -m bandit -q -lll -r src -x tests
 
   frontend:
     runs-on: ubuntu-latest
@@ -53,4 +60,100 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: docker compose config --quiet
       - run: docker compose build
+      - name: Generate API SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: digital-real-estate-engine-api:development
+          artifact-name: api-sbom.spdx.json
+      - name: Scan API image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: digital-real-estate-engine-api:development
+          severity: CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+      - name: Scan frontend image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: digital-real-estate-engine-frontend:development
+          severity: CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16.4-alpine
+        env:
+          POSTGRES_DB: rank_rent_test
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U test -d rank_rent_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      APP_ENV: test
+      DATA_MODE: fixture
+      ALLOW_LIVE_API_CALLS: "false"
+      DATABASE_URL: postgresql+psycopg://test:test@127.0.0.1:5432/rank_rent_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: alembic upgrade head
+      - run: pytest -q tests/unit/test_migrations.py tests/e2e
+
+  dependency-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: python -m pip_audit
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.4"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - working-directory: frontend
+        run: npm ci --ignore-scripts
+      - working-directory: frontend
+        run: npm audit --audit-level=critical
+      - run: python scripts/check_licenses.py
+      - name: Filesystem vulnerability scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          severity: CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+      - working-directory: infra/terraform
+        run: terraform fmt -check -recursive
+      - working-directory: infra/terraform
+        run: terraform init -backend=false
+      - working-directory: infra/terraform
+        run: terraform validate

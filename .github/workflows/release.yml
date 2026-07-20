@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment target
+        required: true
+        type: choice
+        options: [staging, production]
+      release_notes:
+        description: Release notes
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    outputs:
+      api_digest: ${{ steps.api.outputs.digest }}
+      frontend_digest: ${{ steps.frontend.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: api
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository }}/api:${{ github.sha }}
+          build-args: RELEASE_GIT_SHA=${{ github.sha }}
+      - id: frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.frontend
+          push: true
+          tags: ghcr.io/${{ github.repository }}/frontend:${{ github.sha }}
+          build-args: RELEASE_GIT_SHA=${{ github.sha }}
+
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    concurrency: rank-rent-${{ inputs.environment }}
+    env:
+      BACKUP_VERIFICATION_COMMAND: ${{ vars.BACKUP_VERIFICATION_COMMAND }}
+      MIGRATION_TASK_COMMAND: ${{ vars.MIGRATION_TASK_COMMAND }}
+      BACKEND_DEPLOY_COMMAND: ${{ vars.BACKEND_DEPLOY_COMMAND }}
+      FRONTEND_DEPLOY_COMMAND: ${{ vars.FRONTEND_DEPLOY_COMMAND }}
+      SMOKE_TEST_URL: ${{ vars.SMOKE_TEST_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install --requirement requirements.lock
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Record immutable release metadata
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          GIT_SHA: ${{ github.sha }}
+          API_DIGEST: ${{ needs.publish.outputs.api_digest }}
+          FRONTEND_DIGEST: ${{ needs.publish.outputs.frontend_digest }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: scripts/create-release-manifest.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ github.sha }}
+          path: release/${{ github.sha }}.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Backup verification
+        run: scripts/deploy.sh backup-check "${{ inputs.environment }}"
+      - name: Migration job
+        run: scripts/deploy.sh migrate "${{ inputs.environment }}"
+      - name: Deploy API and worker
+        run: scripts/deploy.sh backend "${{ inputs.environment }}"
+      - name: Deploy frontend
+        run: scripts/deploy.sh frontend "${{ inputs.environment }}"
+      - name: Smoke and enable traffic
+        run: scripts/deploy.sh smoke "${{ inputs.environment }}"

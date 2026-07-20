@@ -1,9 +1,9 @@
-FROM node:20-slim AS deps
+FROM node:20.19.4-bookworm-slim@sha256:6db5e436948af8f0244488a1f658c2c8e55a3ae51ca2e1686ed042be8f25f70a AS deps
 WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+RUN npm ci --ignore-scripts
 
-FROM node:20-slim AS builder
+FROM node:20.19.4-bookworm-slim@sha256:6db5e436948af8f0244488a1f658c2c8e55a3ae51ca2e1686ed042be8f25f70a AS builder
 WORKDIR /app
 ENV BACKEND_INTERNAL_URL=http://rank-rent:8000 \
     NEXT_TELEMETRY_DISABLED=1
@@ -11,10 +11,23 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY frontend ./
 RUN npm run build
 
-FROM node:20-slim
+FROM node:20.19.4-bookworm-slim@sha256:6db5e436948af8f0244488a1f658c2c8e55a3ae51ca2e1686ed042be8f25f70a AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
-    NEXT_TELEMETRY_DISABLED=1
-COPY --from=builder /app ./
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000
+ARG RELEASE_GIT_SHA=development
+ENV RELEASE_GIT_SHA=$RELEASE_GIT_SHA
+LABEL org.opencontainers.image.source="https://github.com/adammenker/DigitalRealEstateEngine" \
+    org.opencontainers.image.revision=$RELEASE_GIT_SHA
+RUN apt-get update \
+    && apt-get upgrade --yes \
+    && rm -rf /var/lib/apt/lists/*
+RUN groupadd --gid 10001 app \
+    && useradd --uid 10001 --gid app --no-create-home --shell /usr/sbin/nologin app
+COPY --from=builder --chown=app:app /app ./
+USER 10001:10001
 EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["npm", "run", "start"]

@@ -6,6 +6,7 @@ import json
 import signal
 import subprocess
 import sys
+import urllib.request
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,7 +17,12 @@ import uvicorn
 from sqlalchemy import select
 
 from rank_rent.db.base import SessionLocal, init_db, reset_db
-from rank_rent.db.orm import JsonArtifactORM, OpportunityORM, ScanRunORM
+from rank_rent.db.orm import (
+    JsonArtifactORM,
+    OpportunityORM,
+    ScanRunORM,
+    WorkerHeartbeatORM,
+)
 from rank_rent.domain.models import Market, ServiceFamily
 from rank_rent.integrations.dataforseo.live import DataForSEOError, DataForSEOLiveProvider
 from rank_rent.integrations.dataforseo.replay import DataForSEOReplayProvider
@@ -622,8 +628,18 @@ def worker(
     concurrency: Annotated[int | None, typer.Option("--concurrency", min=1, max=32)] = None,
 ) -> None:
     """Run the durable scan worker as a process separate from the API server."""
-    init_db()
+    from rank_rent.observability.logging import configure_logging
+    from rank_rent.runtime import validate_environment
+
     settings = get_settings()
+    validate_environment(settings)
+    configure_logging(
+        environment=settings.app_env,
+        service="rank-rent-worker",
+        version=settings.release_git_sha,
+        level=settings.log_level,
+    )
+    init_db()
 
     async def serve() -> None:
         stop_event = asyncio.Event()
@@ -739,6 +755,36 @@ def site_deploy_staging(opportunity_id: int, confirm: bool = False) -> None:
 def web(host: str = "127.0.0.1", port: int = 8000) -> None:
     init_db()
     uvicorn.run("rank_rent.main:app", host=host, port=port, reload=False)
+
+
+@app.command()
+def healthcheck(
+    component: Annotated[str, typer.Option("--component")] = "api",
+) -> None:
+    """Container health check without contacting paid providers."""
+    settings = get_settings()
+    if component == "api":
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:8000/ready", timeout=3) as response:
+                if response.status != 200:
+                    raise typer.Exit(1)
+        except OSError as exc:
+            raise typer.Exit(1) from exc
+        return
+    if component != "worker":
+        raise typer.BadParameter("--component must be api or worker")
+    with SessionLocal() as session:
+        heartbeat = session.scalar(
+            select(WorkerHeartbeatORM.last_seen_at)
+            .where(WorkerHeartbeatORM.status == "running")
+            .order_by(WorkerHeartbeatORM.last_seen_at.desc())
+            .limit(1)
+        )
+    if heartbeat is None:
+        raise typer.Exit(1)
+    aware = heartbeat.replace(tzinfo=UTC) if heartbeat.tzinfo is None else heartbeat
+    if (datetime.now(UTC) - aware).total_seconds() > settings.scan_worker_stale_after_seconds:
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":

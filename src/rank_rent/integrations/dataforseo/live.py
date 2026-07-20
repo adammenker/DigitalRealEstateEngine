@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 import uuid
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -26,7 +27,16 @@ from rank_rent.domain.models import (
     ServiceFamily,
     slugify,
 )
+from rank_rent.observability.logging import log_event
+from rank_rent.observability.metrics import (
+    PROVIDER_CACHE_HITS,
+    PROVIDER_CALLS,
+    PROVIDER_COST,
+    PROVIDER_LATENCY,
+    PROVIDER_RATE_LIMITS,
+)
 from rank_rent.runtime import DataMode, validate_runtime_mode
+from rank_rent.security.secrets import resolve_secret_reference
 from rank_rent.services.cache import RawResponseCache, cache_key, normalize_request
 from rank_rent.services.cost_controls import (
     CircuitOpenError,
@@ -224,6 +234,10 @@ class DataForSEOLiveProvider:
         self.allow_unplanned_requests = allow_unplanned_requests
         self.current_scan_run_id: int | None = None
         self.execution_lease: ScanExecutionLease | None = None
+        self._password = resolve_secret_reference(
+            self.settings.dataforseo_password,
+            required=True,
+        )
 
     async def check_account(self) -> dict[str, Any]:
         payload = await self._get("/v3/appendix/user_data")
@@ -556,6 +570,7 @@ class DataForSEOLiveProvider:
         return await self._request("POST", path, params)
 
     async def _request(self, method: str, path: str, params: dict[str, Any]) -> dict[str, Any]:
+        started = time.perf_counter()
         normalized = normalize_request(params)
         if self.cache is not None and not self.force_refresh:
             cached = self.cache.lookup(path, normalized)
@@ -563,6 +578,15 @@ class DataForSEOLiveProvider:
                 assert cached.row is not None
                 assert cached.payload is not None
                 self._record_cache_hit(path, normalized, cached.row)
+                PROVIDER_CACHE_HITS.labels(
+                    provider=self.provider_name,
+                    endpoint=path,
+                ).inc()
+                PROVIDER_CALLS.labels(
+                    provider=self.provider_name,
+                    endpoint=path,
+                    status="cache_hit",
+                ).inc()
                 return cached.payload
 
         api_call = self._start_api_call(path, normalized)
@@ -620,6 +644,26 @@ class DataForSEOLiveProvider:
                     abnormal_cost=actual_cost > self.settings.single_call_abnormal_cost_usd,
                 )
                 usage_finalized = True
+            cost = 0.0 if self.api_environment == "sandbox" else self._payload_cost(payload)
+            PROVIDER_CALLS.labels(
+                provider=self.provider_name,
+                endpoint=path,
+                status="completed",
+            ).inc()
+            PROVIDER_COST.labels(provider=self.provider_name, endpoint=path).inc(cost)
+            PROVIDER_LATENCY.labels(
+                provider=self.provider_name,
+                endpoint=path,
+            ).observe(time.perf_counter() - started)
+            log_event(
+                "provider.call.completed",
+                provider=self.provider_name,
+                endpoint=path,
+                scan_run_id=self.current_scan_run_id,
+                planned_request_id=api_call.planned_request_id if api_call else None,
+                duration_ms=round((time.perf_counter() - started) * 1000, 3),
+                cost_usd=cost,
+            )
             return payload
         except asyncio.CancelledError:
             self._finish_unknown_attempt(api_call, reservation)
@@ -655,6 +699,29 @@ class DataForSEOLiveProvider:
                     schema_drift=isinstance(exc, DataForSEOSchemaError),
                     provider_outcome_unknown=ambiguous,
                 )
+            if "HTTP 429" in str(exc):
+                PROVIDER_RATE_LIMITS.labels(
+                    provider=self.provider_name,
+                    endpoint=path,
+                ).inc()
+            PROVIDER_CALLS.labels(
+                provider=self.provider_name,
+                endpoint=path,
+                status="failed",
+            ).inc()
+            PROVIDER_LATENCY.labels(
+                provider=self.provider_name,
+                endpoint=path,
+            ).observe(time.perf_counter() - started)
+            log_event(
+                "provider.call.failed",
+                provider=self.provider_name,
+                endpoint=path,
+                scan_run_id=self.current_scan_run_id,
+                planned_request_id=api_call.planned_request_id if api_call else None,
+                duration_ms=round((time.perf_counter() - started) * 1000, 3),
+                error_type=type(exc).__name__,
+            )
             raise
 
     def _assert_execution_lease(self) -> None:
@@ -1032,7 +1099,7 @@ class DataForSEOLiveProvider:
     def _client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
             base_url=self.base_url,
-            auth=(self.settings.dataforseo_login, self.settings.dataforseo_password),
+            auth=(self.settings.dataforseo_login, self._password),
             timeout=self.timeout_seconds,
         )
 

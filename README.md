@@ -26,6 +26,13 @@ The discovery engineering workflow is implemented end to end:
   sessions, while retaining SQLite for local and replay use.
 - Immutable raw-response blob storage through a filesystem adapter or optional S3-compatible
   adapter, with checksummed database metadata and source-scan lineage.
+- Production-fail-closed OIDC, local test identities, centralized RBAC, and
+  append-only actor/target audit records.
+- Correlated JSON logs, trace context, Prometheus metrics, dependency health,
+  worker heartbeats, SLOs, alerts, and incident runbooks.
+- Separate API/worker processes, PostgreSQL-backed local composition, non-root
+  images, release manifests, approval-gated delivery, rollback, and Terraform
+  reference infrastructure.
 
 Scoring currently uses configuration version `v2.12`. The architecture is ready for controlled
 discovery testing, but the scores and quality thresholds still require empirical calibration
@@ -33,6 +40,9 @@ against production-quality evidence and real business outcomes before production
 
 See [Current State](docs/current_state.md), [Discovery Exit Criteria](docs/discovery_exit_criteria.md),
 and the [Production Backlog](docs/production_backlog.md) for more detail.
+Operational contracts are documented in [Security](docs/security.md),
+[Observability](docs/observability.md), and
+[Deployment](docs/deployment.md).
 
 ## Run The Application
 
@@ -48,9 +58,9 @@ Open:
 - Backend API and debugging: [http://localhost:8011](http://localhost:8011)
 - Interactive API documentation: [http://localhost:8011/docs](http://localhost:8011/docs)
 
-Both services use `restart: unless-stopped`, so they remain running and restart with Docker
-Desktop. SQLite data and filesystem raw-response blobs are stored in the `rank_rent_data`
-Docker volume.
+The API, worker, frontend, and PostgreSQL services use durable local containers.
+PostgreSQL data is stored in the `rank_rent_postgres` Docker volume, and a
+one-shot migration service finishes before API and worker startup.
 
 Useful commands:
 
