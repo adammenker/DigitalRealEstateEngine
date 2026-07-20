@@ -548,11 +548,13 @@ class DataForSEOLiveProvider:
 
     async def _request(self, method: str, path: str, params: dict[str, Any]) -> dict[str, Any]:
         normalized = normalize_request(params)
-        cached_payload = self._cache_get(path, normalized)
-        row = self._cache_row(path, normalized)
-        if cached_payload is not None and row is not None and not self.force_refresh:
-            self._record_cache_hit(path, normalized, row)
-            return cached_payload
+        if self.cache is not None and not self.force_refresh:
+            cached = self.cache.lookup(path, normalized)
+            if cached.is_valid:
+                assert cached.row is not None
+                assert cached.payload is not None
+                self._record_cache_hit(path, normalized, cached.row)
+                return cached.payload
 
         api_call = self._start_api_call(path, normalized)
         reservation: UsageReservation | None = None
@@ -616,11 +618,6 @@ class DataForSEOLiveProvider:
                     schema_drift=isinstance(exc, DataForSEOSchemaError),
                 )
             raise
-
-    def _cache_get(self, path: str, params: dict[str, Any]) -> dict[str, Any] | None:
-        if self.cache is None or self.force_refresh:
-            return None
-        return self.cache.get(path, normalize_request(params))
 
     def _cache_row(self, path: str, params: dict[str, Any]) -> RawApiResponseORM | None:
         if self.cache is None:

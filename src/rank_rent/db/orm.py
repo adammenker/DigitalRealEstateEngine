@@ -207,7 +207,6 @@ class ScanPlanCallORM(TimestampMixin, Base):
 class RawApiResponseORM(TimestampMixin, Base):
     __tablename__ = "raw_api_responses"
     __table_args__ = (
-        UniqueConstraint("object_key", name="uq_raw_api_responses_object_key"),
         CheckConstraint(
             "size_bytes IS NULL OR size_bytes >= 0",
             name="ck_raw_api_responses_size_bytes_nonnegative",
@@ -215,7 +214,7 @@ class RawApiResponseORM(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    cache_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    cache_key: Mapped[str] = mapped_column(String(128), index=True)
     provider: Mapped[str] = mapped_column(String(80))
     endpoint: Mapped[str] = mapped_column(String(120))
     parameters: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
@@ -294,6 +293,15 @@ def _reject_raw_response_mutation(
 
 
 event.listen(RawApiResponseORM, "before_update", _reject_raw_response_mutation)
+
+
+class RawResponseCacheEntryORM(TimestampMixin, Base):
+    __tablename__ = "raw_response_cache_entries"
+
+    cache_key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    raw_api_response_id: Mapped[int] = mapped_column(
+        ForeignKey("raw_api_responses.id"), nullable=False, index=True
+    )
 
 
 class ApiCallORM(TimestampMixin, Base):

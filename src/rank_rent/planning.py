@@ -4,10 +4,8 @@ from decimal import Decimal
 from typing import Any
 
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from rank_rent.db.orm import RawApiResponseORM
 from rank_rent.domain.models import Market, ServiceFamily
 from rank_rent.integrations.dataforseo.live import (
     DataForSEOLiveProvider,
@@ -17,10 +15,11 @@ from rank_rent.integrations.dataforseo.live import (
     serp_location_payload,
 )
 from rank_rent.runtime import DataMode
-from rank_rent.services.cache import cache_key, normalize_request
+from rank_rent.services.cache import cache_key, normalize_request, valid_cached_response
 from rank_rent.services.keywords import service_seed_keywords
 from rank_rent.services.us_geography import validate_market_against_index
 from rank_rent.settings import Settings
+from rank_rent.storage.blobs import BlobStore, build_blob_store
 
 
 class PlannedApiCall(BaseModel):
@@ -82,6 +81,7 @@ def build_scan_plan(
     api_environment = normalize_dataforseo_environment(settings)
     free_sandbox = api_environment == "sandbox"
     planned: list[PlannedApiCall] = []
+    blob_store = build_blob_store(settings) if session is not None else None
 
     keyword_seed_limit = 1 if profile == "testing" else 3
     keyword_suggestion_limit = 10 if profile == "testing" else 20
@@ -96,6 +96,7 @@ def build_scan_plan(
         _append_call(
             planned,
             session=session,
+            blob_store=blob_store,
             provider=provider,
             endpoint="/v3/dataforseo_labs/google/keyword_suggestions/live",
             stage="keyword_discovery",
@@ -107,6 +108,7 @@ def build_scan_plan(
     _append_call(
         planned,
         session=session,
+        blob_store=blob_store,
         provider=provider,
         endpoint="/v3/dataforseo_labs/google/historical_search_volume/live",
         stage="keyword_metrics",
@@ -129,6 +131,7 @@ def build_scan_plan(
         _append_call(
             planned,
             session=session,
+            blob_store=blob_store,
             provider=provider,
             endpoint="/v3/serp/google/organic/live/advanced",
             stage="serp",
@@ -152,6 +155,7 @@ def build_scan_plan(
         _append_call(
             planned,
             session=session,
+            blob_store=blob_store,
             provider=provider,
             endpoint="/v3/backlinks/summary/live",
             stage="competitors",
@@ -180,6 +184,7 @@ def build_scan_plan(
     _append_call(
         planned,
         session=session,
+        blob_store=blob_store,
         provider=provider,
         endpoint="/v3/business_data/business_listings/search/live",
         stage="provider_discovery",
@@ -227,6 +232,7 @@ def _append_call(
     planned: list[PlannedApiCall],
     *,
     session: Session | None,
+    blob_store: BlobStore | None,
     provider: str,
     endpoint: str,
     stage: str,
@@ -237,7 +243,7 @@ def _append_call(
 ) -> None:
     normalized = normalize_request(params)
     key = cache_key(provider, endpoint, normalized, "v3")
-    hit = _cache_hit(session, key) if request_known else False
+    hit = _cache_hit(session, key, blob_store) if request_known else False
     request_id = f"req-{len(planned) + 1:03d}"
     planned.append(
         PlannedApiCall(
@@ -255,13 +261,14 @@ def _append_call(
     )
 
 
-def _cache_hit(session: Session | None, key: str) -> bool:
+def _cache_hit(
+    session: Session | None,
+    key: str,
+    blob_store: BlobStore | None,
+) -> bool:
     if session is None:
         return False
-    return (
-        session.scalar(select(RawApiResponseORM.id).where(RawApiResponseORM.cache_key == key))
-        is not None
-    )
+    return valid_cached_response(session, key, blob_store=blob_store)
 
 
 def _keyword_seeds(service: ServiceFamily) -> list[str]:

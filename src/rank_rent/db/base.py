@@ -14,7 +14,7 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from rank_rent.settings import Settings, get_settings
 
 BASELINE_REVISION = "e6f6b8c2a915"
-SCHEMA_HEAD_REVISION = "6f4c2d8a9b17"
+SCHEMA_HEAD_REVISION = "8a7d3f2c1b90"
 
 
 class Base(DeclarativeBase):

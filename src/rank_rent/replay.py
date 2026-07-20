@@ -16,6 +16,7 @@ from rank_rent.services.cache import (
     DEFAULT_RESPONSE_SHAPE_VERSION,
     cache_key,
     checksum_payload,
+    current_raw_response,
     normalize_request,
     raw_response_payload,
 )
@@ -94,7 +95,11 @@ def stored_response_from_orm(
         provider_cost_usd=Decimal(str(row.cost_usd)) if row.cost_usd is not None else None,
         requested_at=row.request_time,
         received_at=row.response_time,
-        source_scan_run_id=source_scan_run_id,
+        source_scan_run_id=(
+            source_scan_run_id
+            if source_scan_run_id is not None
+            else row.source_scan_run_id
+        ),
         checksum=row.checksum or checksum_response(payload),
     )
 
@@ -118,7 +123,14 @@ class DatabaseReplayTransport:
         api_version: str | None = None,
     ) -> StoredApiResponse:
         key = cache_key(provider, endpoint, normalized_request, api_version or self.api_version)
-        row = self.session.scalar(select(RawApiResponseORM).where(RawApiResponseORM.cache_key == key))
+        row = current_raw_response(self.session, key)
+        if row is None:
+            row = self.session.scalar(
+                select(RawApiResponseORM)
+                .where(RawApiResponseORM.cache_key == key)
+                .order_by(RawApiResponseORM.id.desc())
+                .limit(1)
+            )
         if row is None:
             raise ReplayMissError(
                 f"No stored response for {provider} {endpoint}. Replay mode makes no network calls."

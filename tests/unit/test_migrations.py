@@ -27,7 +27,8 @@ def test_migration_graph_has_one_linear_head_for_workstreams_c_and_d() -> None:
 
     referenced = {revision for revision in revisions.values() if revision is not None}
     assert set(revisions) - referenced == {SCHEMA_HEAD_REVISION}
-    assert revisions[SCHEMA_HEAD_REVISION] == "c9a4e7d2b6f1"
+    assert revisions[SCHEMA_HEAD_REVISION] == "6f4c2d8a9b17"
+    assert revisions["6f4c2d8a9b17"] == "c9a4e7d2b6f1"
     assert revisions["c9a4e7d2b6f1"] == "f8c1d4e7a2b9"
     assert revisions["f8c1d4e7a2b9"] == "b7d2f4a9c6e1"
 
@@ -46,6 +47,7 @@ def test_alembic_upgrade_head_creates_v1_schema(tmp_path, monkeypatch) -> None:
     tables = set(inspector.get_table_names())
     assert "alembic_version" in tables
     assert "raw_api_responses" in tables
+    assert "raw_response_cache_entries" in tables
     assert "preliminary_assessments" in tables
     assert "full_opportunity_scores" in tables
     assert "market_prefilter_runs" in tables
@@ -114,6 +116,15 @@ def test_alembic_upgrade_head_creates_v1_schema(tmp_path, monkeypatch) -> None:
         "encryption_status",
         "blob_created_at",
     } <= response_columns
+    response_indexes = {
+        index["name"]: index for index in inspector.get_indexes("raw_api_responses")
+    }
+    assert not response_indexes["ix_raw_api_responses_cache_key"]["unique"]
+    response_unique_constraints = {
+        tuple(constraint["column_names"])
+        for constraint in inspector.get_unique_constraints("raw_api_responses")
+    }
+    assert ("object_key",) not in response_unique_constraints
     with create_engine(f"sqlite:///{db_path}").connect() as connection:
         revision = connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one()
     assert revision == SCHEMA_HEAD_REVISION
@@ -236,7 +247,18 @@ def test_workstream_c_upgrade_preserves_populated_legacy_raw_response(
             ),
             {"cache_key": "legacy-cache-key"},
         ).one()
+        pointer = connection.execute(
+            text(
+                """
+                SELECT raw_api_response_id
+                FROM raw_response_cache_entries
+                WHERE cache_key = :cache_key
+                """
+            ),
+            {"cache_key": "legacy-cache-key"},
+        ).scalar_one()
     assert row.response_json == '{"tasks": []}'
     assert row.object_key is None
     assert row.retention_classification == "raw_provider_response"
     assert row.encryption_status == "not_encrypted"
+    assert pointer > 0

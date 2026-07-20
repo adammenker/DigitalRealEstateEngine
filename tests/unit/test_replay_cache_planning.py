@@ -688,18 +688,15 @@ def test_scan_plan_marks_exact_cached_calls() -> None:
         keyword_call = next(
             call for call in first_plan.planned_calls if call.stage == "keyword_discovery"
         )
-        session.add(
-            RawApiResponseORM(
-                cache_key=keyword_call.cache_key,
-                provider=keyword_call.provider,
-                endpoint=keyword_call.endpoint,
-                parameters=keyword_call.request_parameters,
-                api_version="v3",
-                response_json={"tasks": [{"status_code": 20000, "result": []}]},
-                request_time=datetime.now(UTC),
-                response_time=datetime.now(UTC),
-                cost_usd=0.012,
-            )
+        RawResponseCache(
+            session,
+            keyword_call.provider,
+            "v3",
+        ).set(
+            keyword_call.endpoint,
+            keyword_call.request_parameters,
+            {"tasks": [{"status_code": 20000, "result": []}]},
+            cost_usd=0.012,
         )
         session.commit()
 
