@@ -1,13 +1,26 @@
 from __future__ import annotations
 
 import ast
+from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import Session
 
-from rank_rent.db.base import SCHEMA_HEAD_REVISION
+from rank_rent.db.base import SCHEMA_HEAD_REVISION, make_engine
+from rank_rent.db.orm import (
+    FullOpportunityScoreORM,
+    JsonArtifactORM,
+    MarketORM,
+    OpportunityORM,
+    ScanRunORM,
+    ServiceFamilyORM,
+)
+from rank_rent.outcomes.orm import PropertyDecisionORM
 from rank_rent.settings import get_settings
 
 
@@ -27,7 +40,8 @@ def test_migration_graph_has_one_linear_head_for_workstreams_c_and_d() -> None:
 
     referenced = {revision for revision in revisions.values() if revision is not None}
     assert set(revisions) - referenced == {SCHEMA_HEAD_REVISION}
-    assert revisions[SCHEMA_HEAD_REVISION] == "6f4c2d8a9b17"
+    assert revisions[SCHEMA_HEAD_REVISION] == "8a7d3f2c1b90"
+    assert revisions["8a7d3f2c1b90"] == "6f4c2d8a9b17"
     assert revisions["6f4c2d8a9b17"] == "c9a4e7d2b6f1"
     assert revisions["c9a4e7d2b6f1"] == "f8c1d4e7a2b9"
     assert revisions["f8c1d4e7a2b9"] == "b7d2f4a9c6e1"
@@ -183,6 +197,117 @@ def test_alembic_upgrade_head_creates_v1_schema(tmp_path, monkeypatch) -> None:
         "serp_position",
         "serp_observations",
     } <= competitor_columns
+    delivery_columns = {
+        column["name"] for column in inspector.get_columns("provider_deliveries")
+    }
+    assert {
+        "max_attempts",
+        "next_attempt_at",
+        "worker_id",
+        "lease_token",
+        "claimed_at",
+        "heartbeat_at",
+        "lease_expires_at",
+        "last_error_code",
+        "last_error_summary",
+        "completed_at",
+    } <= delivery_columns
+    artifact_columns = {column["name"] for column in inspector.get_columns("json_artifacts")}
+    assert "scan_run_id" in artifact_columns
+    decision_columns = {
+        column["name"] for column in inspector.get_columns("property_decisions")
+    }
+    assert "scan_run_id" in decision_columns
+    with create_engine(f"sqlite:///{db_path}").connect() as connection:
+        trigger_names = set(
+            connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'trigger' AND tbl_name = 'property_decisions'"
+            ).scalars()
+        )
+    assert trigger_names == {
+        "property_decisions_immutable_update",
+        "property_decisions_immutable_delete",
+    }
+
+
+def test_migrated_database_rejects_direct_property_decision_mutation(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "immutable-decisions.db"
+    database_url = f"sqlite:///{db_path}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    get_settings.cache_clear()
+    config = Config(str(Path.cwd() / "alembic.ini"))
+    config.set_main_option("script_location", str(Path.cwd() / "migrations"))
+    config.set_main_option("sqlalchemy.url", database_url)
+    command.upgrade(config, "head")
+
+    engine = make_engine(database_url)
+    with Session(engine, expire_on_commit=False) as session:
+        service = ServiceFamilyORM(slug="immutable-service", display_name="Immutable")
+        market = MarketORM(slug="immutable-market", display_name="Immutable Market")
+        session.add_all([service, market])
+        session.flush()
+        opportunity = OpportunityORM(
+            service_family_id=service.id,
+            market_id=market.id,
+            status="approved",
+        )
+        scan = ScanRunORM(source="fixture", status="completed")
+        session.add_all([opportunity, scan])
+        session.flush()
+        score = FullOpportunityScoreORM(
+            scan_run_id=scan.id,
+            opportunity_id=opportunity.id,
+            scoring_version="immutable-v1",
+            total_score=70,
+            confidence="medium",
+            explanation="Fixture.",
+            payload={},
+        )
+        artifact = JsonArtifactORM(
+            opportunity_id=opportunity.id,
+            scan_run_id=scan.id,
+            kind="scan_result",
+            payload={"assessment_type": "full"},
+        )
+        session.add_all([score, artifact])
+        session.flush()
+        decision = PropertyDecisionORM(
+            property_id="immutable-property",
+            opportunity_id=opportunity.id,
+            scan_run_id=scan.id,
+            full_score_id=score.id,
+            evidence_snapshot_id=artifact.id,
+            score_version_at_selection=score.scoring_version,
+            selected_at=datetime.now(UTC),
+            service_family_slug=service.slug,
+            market_size_band="medium",
+            evidence_quality="pass",
+            validated_opportunity_cost_usd=0,
+            selection_context={},
+        )
+        session.add(decision)
+        session.commit()
+        decision_id = decision.id
+
+    with pytest.raises(DBAPIError, match="property_decision_is_immutable"):
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "UPDATE property_decisions "
+                    "SET evidence_quality = 'warn' WHERE id = :decision_id"
+                ),
+                {"decision_id": decision_id},
+            )
+    with pytest.raises(DBAPIError, match="property_decision_is_immutable"):
+        with engine.begin() as connection:
+            connection.execute(
+                text("DELETE FROM property_decisions WHERE id = :decision_id"),
+                {"decision_id": decision_id},
+            )
 
 
 def test_workstream_c_upgrade_preserves_populated_legacy_raw_response(

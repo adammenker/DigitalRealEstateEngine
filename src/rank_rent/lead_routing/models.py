@@ -36,6 +36,17 @@ class LeadStatus(StrEnum):
     deleted = "deleted"
 
 
+class DeliveryStatus(StrEnum):
+    pending = "pending"
+    leased = "leased"
+    delivering = "delivering"
+    retrying = "retrying"
+    delivered = "delivered"
+    failed = "failed"
+    cancelled = "cancelled"
+    outcome_unknown = "outcome_unknown"
+
+
 class TruthBasis(StrEnum):
     observed = "observed"
     provider_reported = "provider_reported"
@@ -224,6 +235,8 @@ class LeadRoutingPolicy(BaseModel):
     rate_limit_count: int = Field(default=5, ge=1, le=1000)
     rate_limit_window_seconds: int = Field(default=300, ge=1, le=86400)
     maximum_delivery_attempts: int = Field(default=3, ge=1, le=10)
+    delivery_retry_base_seconds: float = Field(default=30.0, gt=0, le=86400)
+    delivery_retry_max_seconds: float = Field(default=3600.0, gt=0, le=604800)
     retention_days: int = Field(default=365, ge=1, le=3650)
     recording_enabled: bool = False
     recording_retention_days: int | None = Field(default=None, ge=1, le=3650)

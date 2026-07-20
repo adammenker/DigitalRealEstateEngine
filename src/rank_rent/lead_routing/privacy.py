@@ -9,7 +9,11 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from rank_rent.lead_routing.models import AccessContext, LeadAccessRole
+from rank_rent.lead_routing.models import (
+    AccessContext,
+    DeliveryStatus,
+    LeadAccessRole,
+)
 from rank_rent.lead_routing.orm import (
     AnalyticsEventORM,
     ConsentRecordORM,
@@ -216,6 +220,20 @@ class LeadPrivacyService:
         for delivery in deliveries:
             delivery.destination_reference = "<deleted>"
             delivery.provider_message_id = None
+            if delivery.status in {
+                DeliveryStatus.pending.value,
+                DeliveryStatus.leased.value,
+                DeliveryStatus.delivering.value,
+                DeliveryStatus.retrying.value,
+            }:
+                delivery.status = DeliveryStatus.cancelled.value
+                delivery.next_attempt_at = None
+                delivery.worker_id = None
+                delivery.lease_token = None
+                delivery.claimed_at = None
+                delivery.heartbeat_at = None
+                delivery.lease_expires_at = None
+                delivery.completed_at = timestamp
         outcomes = self.session.scalars(
             select(LeadOutcomeORM).where(LeadOutcomeORM.lead_id == lead.id)
         )

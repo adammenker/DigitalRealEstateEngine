@@ -5,7 +5,7 @@ from typing import Any
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import Engine, create_engine, text
+from sqlalchemy import Engine, create_engine, event, text
 from sqlalchemy import inspect as inspect_database
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
@@ -14,7 +14,7 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from rank_rent.settings import Settings, get_settings
 
 BASELINE_REVISION = "e6f6b8c2a915"
-SCHEMA_HEAD_REVISION = "8a7d3f2c1b90"
+SCHEMA_HEAD_REVISION = "a6e2c9f4d7b1"
 
 
 class Base(DeclarativeBase):
@@ -56,7 +56,19 @@ def database_engine_options(
 def make_engine(database_url: str | None = None, settings: Settings | None = None) -> Engine:
     configured = settings or get_settings()
     url = database_url or configured.database_url
-    return create_engine(url, **database_engine_options(url, configured))
+    created_engine = create_engine(url, **database_engine_options(url, configured))
+    if make_url(url).get_backend_name() == "sqlite":
+        event.listen(created_engine, "connect", _enable_sqlite_foreign_keys)
+    return created_engine
+
+
+def _enable_sqlite_foreign_keys(
+    dbapi_connection: Any,
+    _connection_record: Any,
+) -> None:
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 
 
 engine = make_engine()

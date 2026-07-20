@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from rank_rent.db.base import Base, make_engine
@@ -25,6 +26,7 @@ from rank_rent.outcomes.models import (
     ScoringChangeProposal,
 )
 from rank_rent.outcomes.orm import (
+    PropertyDecisionORM,
     PropertyOutcomeORM,
     ScoringChangeReviewORM,
 )
@@ -70,6 +72,7 @@ def session() -> Session:
         )
         evidence = JsonArtifactORM(
             opportunity_id=opportunity.id,
+            scan_run_id=scan.id,
             kind="scan_result",
             payload={"version": "evidence-v1", "assessment_type": "full"},
         )
@@ -149,6 +152,84 @@ def test_decision_preserves_original_score_and_evidence(session: Session) -> Non
     conflicting = _decision(session).model_copy(update={"evidence_snapshot_id": 999})
     with pytest.raises(OutcomeIntegrityError, match="property_decision_is_immutable"):
         service.record_decision(conflicting)
+
+
+def test_decision_rejects_evidence_from_another_scan(session: Session) -> None:
+    service = PropertyOutcomeService(session)
+    original = _decision(session)
+    original_evidence = session.get(JsonArtifactORM, original.evidence_snapshot_id)
+    assert original_evidence is not None
+    other_scan = ScanRunORM(source="fixture", status="completed")
+    session.add(other_scan)
+    session.flush()
+    other_evidence = JsonArtifactORM(
+        opportunity_id=original.opportunity_id,
+        scan_run_id=other_scan.id,
+        kind="scan_result",
+        payload={"assessment_type": "full"},
+    )
+    session.add(other_evidence)
+    session.flush()
+
+    with pytest.raises(OutcomeIntegrityError, match="score_and_evidence_scan_mismatch"):
+        service.record_decision(
+            original.model_copy(update={"evidence_snapshot_id": other_evidence.id})
+        )
+
+
+def test_database_rejects_property_decision_with_mismatched_scan_lineage(
+    session: Session,
+) -> None:
+    decision = _decision(session)
+    score = session.get(FullOpportunityScoreORM, decision.full_score_id)
+    assert score is not None
+    other_scan = ScanRunORM(source="fixture", status="completed")
+    session.add(other_scan)
+    session.flush()
+    other_evidence = JsonArtifactORM(
+        opportunity_id=decision.opportunity_id,
+        scan_run_id=other_scan.id,
+        kind="scan_result",
+        payload={"assessment_type": "full"},
+    )
+    session.add(other_evidence)
+    session.flush()
+    session.add(
+        PropertyDecisionORM(
+            property_id="property-invalid-lineage",
+            opportunity_id=decision.opportunity_id,
+            scan_run_id=score.scan_run_id,
+            full_score_id=score.id,
+            evidence_snapshot_id=other_evidence.id,
+            score_version_at_selection=score.scoring_version,
+            selected_at=decision.selected_at,
+            service_family_slug=decision.service_family_slug,
+            market_size_band=decision.market_size_band,
+            evidence_quality=decision.evidence_quality,
+            validated_opportunity_cost_usd=0,
+            selection_context={},
+        )
+    )
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()
+
+
+def test_property_decision_cannot_be_updated_or_deleted_through_orm(session: Session) -> None:
+    row = PropertyOutcomeService(session).record_decision(_decision(session))
+    session.commit()
+
+    row.evidence_quality = "warn"
+    with pytest.raises(ValueError, match="property_decision_is_immutable"):
+        session.commit()
+    session.rollback()
+
+    stored = session.get(type(row), row.id)
+    assert stored is not None
+    session.delete(stored)
+    with pytest.raises(ValueError, match="property_decision_is_immutable"):
+        session.commit()
+    session.rollback()
 
 
 @pytest.mark.asyncio

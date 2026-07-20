@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from threading import Barrier
 
 import pytest
 from pydantic import ValidationError
@@ -16,12 +19,15 @@ from rank_rent.lead_routing.adapters import (
     InMemoryRateLimiter,
     LocalSpamAssessor,
 )
+from rank_rent.lead_routing.interfaces import DeliveryAdapter
 from rank_rent.lead_routing.models import (
     AccessContext,
     AnalyticsEventInput,
     AnalyticsEventType,
     AnalyticsSourceType,
     DeliveryChannel,
+    DeliveryRequest,
+    DeliveryResult,
     LeadAccessRole,
     LeadForm,
     LeadRoutingPolicy,
@@ -47,6 +53,11 @@ from rank_rent.lead_routing.services import (
     ProviderOperationsService,
     RateLimitExceeded,
     request_log_context,
+)
+from rank_rent.lead_routing.worker import (
+    claim_next_delivery,
+    recover_stale_deliveries,
+    run_delivery_by_id,
 )
 
 
@@ -127,6 +138,53 @@ def _active_assignment(session: Session) -> tuple[ProviderOperationsService, Pro
     return operations, assignment
 
 
+async def _drain_deliveries(
+    session: Session,
+    *,
+    adapters: dict[DeliveryChannel, DeliveryAdapter],
+    alerts: FixtureOperatorAlertAdapter,
+) -> None:
+    factory = sessionmaker(bind=session.get_bind(), expire_on_commit=False)
+    while True:
+        with factory() as worker_session:
+            lease = claim_next_delivery(
+                worker_session,
+                worker_id="test-lead-worker",
+                lease_seconds=30,
+            )
+        if lease is None:
+            break
+        await run_delivery_by_id(
+            lease,
+            adapters=adapters,
+            alert_adapter=alerts,
+            session_factory=factory,
+            retry_base_seconds=0,
+            retry_max_seconds=0,
+        )
+    session.expire_all()
+
+
+class _AcceptedButResponseLostAdapter:
+    name = "fixture-email"
+    channel = "email"
+
+    def __init__(self) -> None:
+        self.provider_accepted = asyncio.Event()
+        self.never_returns = asyncio.Event()
+        self.call_count = 0
+
+    async def deliver(self, request: DeliveryRequest) -> DeliveryResult:
+        self.call_count += 1
+        self.provider_accepted.set()
+        await self.never_returns.wait()
+        return DeliveryResult(
+            provider_message_id=f"accepted:{request.delivery_key}",
+            accepted=True,
+            status="accepted",
+        )
+
+
 def test_form_validation_requires_contact_consent_and_disclosure() -> None:
     with pytest.raises(ValidationError):
         LeadForm(
@@ -181,10 +239,20 @@ async def test_lead_routing_retries_deduplicates_and_preserves_consent(
 
     result = await router.submit(_form(), _context())
 
-    assert result.status.value == "delivered"
+    assert result.status.value == "routing"
     assert len(result.delivery_ids) == 2
+    assert email.deliveries == {}
+    await _drain_deliveries(
+        session,
+        adapters={
+            DeliveryChannel.email: email,
+            DeliveryChannel.phone: phone,
+        },
+        alerts=alerts,
+    )
     lead = session.get(LeadORM, result.lead_id)
     assert lead is not None
+    assert lead.status == "delivered"
     assert lead.provider_assignment_id == assignment.id
     assert lead.email == "ada@example.com"
     consent = session.scalar(select(ConsentRecordORM).where(ConsentRecordORM.lead_id == lead.id))
@@ -206,8 +274,6 @@ async def test_lead_routing_retries_deduplicates_and_preserves_consent(
     assert all("dispatch@" not in row.destination_reference for row in deliveries)
     assert alerts.alerts == []
 
-    lead.status = "routing"
-    session.commit()
     replay = await router.submit(_form(), _context(request_id="request-2"))
     assert replay.idempotent_replay is True
     assert replay.lead_id == lead.id
@@ -221,6 +287,151 @@ async def test_lead_routing_retries_deduplicates_and_preserves_consent(
     assert duplicate.duplicate is True
     assert duplicate.lead_id == lead.id
     assert session.query(LeadORM).count() == 1
+
+
+@pytest.mark.asyncio
+async def test_worker_crash_after_possible_acceptance_never_resends(
+    session: Session,
+) -> None:
+    _active_assignment(session)
+    adapter = _AcceptedButResponseLostAdapter()
+    alerts = FixtureOperatorAlertAdapter()
+    router = LeadRoutingService(
+        session,
+        policy=_policy(),
+        adapters={DeliveryChannel.email: adapter},
+        spam_assessor=LocalSpamAssessor(),
+        rate_limiter=InMemoryRateLimiter(),
+        alert_adapter=alerts,
+    )
+    submitted = await router.submit(_form(), _context())
+    factory = sessionmaker(bind=session.get_bind(), expire_on_commit=False)
+    with factory() as worker_session:
+        lease = claim_next_delivery(
+            worker_session,
+            worker_id="crashing-worker",
+            lease_seconds=1,
+        )
+    assert lease is not None
+
+    task = asyncio.create_task(
+        run_delivery_by_id(
+            lease,
+            adapters={DeliveryChannel.email: adapter},
+            alert_adapter=alerts,
+            session_factory=factory,
+            heartbeat_seconds=60,
+            lease_seconds=1,
+        )
+    )
+    await adapter.provider_accepted.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    recovered_at = datetime.now(UTC) + timedelta(seconds=2)
+    with factory() as worker_session:
+        assert recover_stale_deliveries(
+            worker_session,
+            stale_after_seconds=1,
+            now=recovered_at,
+        ) == 1
+        delivery = worker_session.get(ProviderDeliveryORM, lease.delivery_id)
+        assert delivery is not None
+        assert delivery.status == "outcome_unknown"
+        assert delivery.last_error_code == "worker_lost_during_provider_call"
+        assert (
+            claim_next_delivery(
+                worker_session,
+                worker_id="replacement-worker",
+                now=recovered_at,
+            )
+            is None
+        )
+    assert adapter.call_count == 1
+    session.expire_all()
+    lead = session.get(LeadORM, submitted.lead_id)
+    assert lead is not None
+    assert lead.status == "delivery_failed"
+
+
+def test_concurrent_idempotency_submissions_return_the_winning_lead(tmp_path) -> None:
+    database_path = tmp_path / "concurrent-leads.db"
+    engine = make_engine(f"sqlite:///{database_path}")
+    Base.metadata.create_all(engine)
+    setup_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    with setup_factory() as setup:
+        service = ServiceFamilyORM(slug="plumbing", display_name="Plumbing")
+        market = MarketORM(slug="st-louis-mo", display_name="St. Louis, MO")
+        setup.add_all([service, market])
+        setup.flush()
+        setup.add(
+            OpportunityORM(
+                id=1,
+                service_family_id=service.id,
+                market_id=market.id,
+                status="approved",
+            )
+        )
+        setup.commit()
+        _active_assignment(setup)
+
+    commit_barrier = Barrier(2)
+
+    class ConcurrentSession(Session):
+        def flush(self, objects=None) -> None:
+            if not self.info.get("lead_flush_waited") and objects and any(
+                isinstance(row, LeadORM) for row in objects
+            ):
+                self.info["lead_flush_waited"] = True
+                commit_barrier.wait(timeout=5)
+            super().flush(objects)
+
+    concurrent_factory = sessionmaker(
+        bind=engine,
+        class_=ConcurrentSession,
+        expire_on_commit=False,
+    )
+
+    def submit(request_id: str) -> tuple[str, bool]:
+        with concurrent_factory() as concurrent_session:
+            result = asyncio.run(
+                LeadRoutingService(
+                    concurrent_session,
+                    policy=_policy(),
+                    adapters={
+                        DeliveryChannel.email: FixtureDeliveryAdapter("email"),
+                    },
+                    spam_assessor=LocalSpamAssessor(),
+                    rate_limiter=InMemoryRateLimiter(),
+                    alert_adapter=FixtureOperatorAlertAdapter(),
+                ).submit(_form(), _context(request_id=request_id))
+            )
+            return result.lead_id, result.idempotent_replay
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(submit, ("concurrent-1", "concurrent-2")))
+
+    assert results[0][0] == results[1][0]
+    assert sorted(result[1] for result in results) == [False, True]
+    with setup_factory() as verification:
+        assert verification.query(LeadORM).count() == 1
+        assert verification.query(ProviderDeliveryORM).count() == 1
+        assert verification.query(ConsentRecordORM).count() == 1
+
+    def claim(worker_id: str):
+        with setup_factory() as worker_session:
+            return claim_next_delivery(worker_session, worker_id=worker_id)
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        leases = list(
+            executor.map(
+                claim,
+                ("delivery-worker-1", "delivery-worker-2", "delivery-worker-3", "delivery-worker-4"),
+            )
+        )
+    claimed = [lease for lease in leases if lease is not None]
+    assert len(claimed) == 1
 
 
 @pytest.mark.asyncio
@@ -304,7 +515,17 @@ async def test_failed_delivery_alerts_without_exposing_pii(session: Session) -> 
         alert_adapter=alerts,
     )
     result = await router.submit(_form(), _context())
-    assert result.status.value == "delivery_failed"
+    assert result.status.value == "routing"
+    await _drain_deliveries(
+        session,
+        adapters={
+            DeliveryChannel.email: router.adapters[DeliveryChannel.email],
+        },
+        alerts=alerts,
+    )
+    lead = session.get(LeadORM, result.lead_id)
+    assert lead is not None
+    assert lead.status == "delivery_failed"
     assert alerts.alerts == [
         {
             "property_id": "property-1",
@@ -421,3 +642,4 @@ async def test_privacy_export_access_deletion_and_retention(session: Session) ->
     assert delivery is not None
     assert delivery.destination_reference == "<deleted>"
     assert delivery.provider_message_id is None
+    assert delivery.status == "cancelled"

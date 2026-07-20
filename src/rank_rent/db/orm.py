@@ -445,10 +445,20 @@ class KeywordDecisionORM(TimestampMixin, Base):
 
 class JsonArtifactORM(TimestampMixin, Base):
     __tablename__ = "json_artifacts"
+    __table_args__ = (
+        UniqueConstraint(
+            "id",
+            "scan_run_id",
+            name="uq_json_artifacts_id_scan_run",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     opportunity_id: Mapped[int | None] = mapped_column(
         ForeignKey("opportunities.id"), nullable=True
+    )
+    scan_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("scan_runs.id"), nullable=True, index=True
     )
     kind: Mapped[str] = mapped_column(String(80), index=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
@@ -596,6 +606,13 @@ class PreliminaryAssessmentORM(TimestampMixin, Base):
 
 class FullOpportunityScoreORM(TimestampMixin, Base):
     __tablename__ = "full_opportunity_scores"
+    __table_args__ = (
+        UniqueConstraint(
+            "id",
+            "scan_run_id",
+            name="uq_full_opportunity_scores_id_scan_run",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id"))

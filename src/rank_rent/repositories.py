@@ -74,9 +74,19 @@ def get_or_create_opportunity(
 
 
 def save_artifact(
-    session: Session, opportunity_id: int | None, kind: str, payload: dict[str, object]
+    session: Session,
+    opportunity_id: int | None,
+    kind: str,
+    payload: dict[str, object],
+    *,
+    scan_run_id: int | None = None,
 ) -> JsonArtifactORM:
-    row = JsonArtifactORM(opportunity_id=opportunity_id, kind=kind, payload=payload)
+    row = JsonArtifactORM(
+        opportunity_id=opportunity_id,
+        scan_run_id=scan_run_id,
+        kind=kind,
+        payload=payload,
+    )
     session.add(row)
     session.flush()
     return row

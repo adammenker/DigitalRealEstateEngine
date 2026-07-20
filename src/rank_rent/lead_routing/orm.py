@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -173,6 +174,22 @@ class RoutingAttemptORM(TimestampMixin, Base):
 
 class ProviderDeliveryORM(TimestampMixin, Base):
     __tablename__ = "provider_deliveries"
+    __table_args__ = (
+        CheckConstraint(
+            "attempt_count >= 0",
+            name="ck_provider_deliveries_attempt_count_nonnegative",
+        ),
+        CheckConstraint(
+            "max_attempts >= 1",
+            name="ck_provider_deliveries_max_attempts_positive",
+        ),
+        Index(
+            "ix_provider_deliveries_queue",
+            "status",
+            "next_attempt_at",
+            "id",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     lead_id: Mapped[str] = mapped_column(ForeignKey("leads.id"), index=True)
@@ -184,7 +201,21 @@ class ProviderDeliveryORM(TimestampMixin, Base):
     provider_message_id: Mapped[str | None] = mapped_column(String(180), nullable=True)
     status: Mapped[str] = mapped_column(String(40))
     attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=3)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    worker_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    lease_token: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_error_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    last_error_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class LeadOutcomeORM(TimestampMixin, Base):

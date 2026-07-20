@@ -15,6 +15,9 @@ Consent text versions, non-PII delivery facts, and aggregate lifecycle events
 remain after anonymization. This preserves evidence that the routing process
 occurred without retaining the lead's contact data.
 
+Anonymization also cancels pending, leased, delivering, and retrying jobs, clears
+their worker leases, and prevents later retries from sending deleted lead data.
+
 ## Outcome records
 
 Property outcomes are aggregate, source-attributed daily records.

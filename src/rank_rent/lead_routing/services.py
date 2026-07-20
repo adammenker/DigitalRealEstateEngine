@@ -6,10 +6,10 @@ from datetime import UTC, datetime, timedelta
 from typing import cast
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from rank_rent.db.orm import OpportunityORM
-from rank_rent.lead_routing.adapters import RetryableDeliveryError
 from rank_rent.lead_routing.interfaces import (
     CallTrackingAdapter,
     DeliveryAdapter,
@@ -21,7 +21,7 @@ from rank_rent.lead_routing.models import (
     AnalyticsEventInput,
     CallRouteRequest,
     DeliveryChannel,
-    DeliveryRequest,
+    DeliveryStatus,
     LeadChannel,
     LeadForm,
     LeadRoutingPolicy,
@@ -39,7 +39,6 @@ from rank_rent.lead_routing.orm import (
     PropertyRoutingProfileORM,
     ProviderAssignmentORM,
     ProviderDeliveryORM,
-    RoutingAttemptORM,
     SpamAssessmentORM,
 )
 from rank_rent.lead_routing.privacy import (
@@ -352,13 +351,6 @@ class LeadRoutingService:
             )
         )
         if replay is not None:
-            if replay.status in {
-                LeadStatus.received.value,
-                LeadStatus.routing.value,
-            }:
-                resumed = await self._route(replay.id)
-                resumed.idempotent_replay = True
-                return resumed
             return LeadSubmissionResult(
                 lead_id=replay.id,
                 status=LeadStatus(replay.status),
@@ -417,18 +409,28 @@ class LeadRoutingService:
             )
 
         assessment = self.spam_assessor.assess(form, context)
+        assignment = self.session.scalar(
+            select(ProviderAssignmentORM).where(
+                ProviderAssignmentORM.property_id == form.property_id,
+                ProviderAssignmentORM.status == ProviderAssignmentStatus.active.value,
+            )
+        )
+        routable_channels = self._routable_channels(assignment)
+        if assessment.disposition == "block":
+            lead_status = LeadStatus.spam
+        elif assignment is None or not routable_channels:
+            lead_status = LeadStatus.delivery_failed
+        else:
+            lead_status = LeadStatus.routing
         lead_id = str(uuid.uuid4())
         retention_expires_at = context.received_at + timedelta(days=self.policy.retention_days)
         lead = LeadORM(
             id=lead_id,
             property_id=form.property_id,
             opportunity_id=profile.opportunity_id,
+            provider_assignment_id=assignment.id if assignment is not None else None,
             channel=LeadChannel.form.value,
-            status=(
-                LeadStatus.spam.value
-                if assessment.disposition == "block"
-                else LeadStatus.received.value
-            ),
+            status=lead_status.value,
             name=form.name,
             email=form.email,
             phone=form.phone,
@@ -441,6 +443,10 @@ class LeadRoutingService:
             retention_expires_at=retention_expires_at,
         )
         self.session.add(lead)
+        try:
+            self.session.flush([lead])
+        except IntegrityError as error:
+            return self._idempotency_winner(form, error)
         self.session.add(
             ConsentRecordORM(
                 lead_id=lead_id,
@@ -470,7 +476,28 @@ class LeadRoutingService:
             event_key=f"form:{form.idempotency_key}",
             occurred_at=context.received_at,
         )
-        self.session.commit()
+        if lead_status == LeadStatus.routing:
+            assert assignment is not None
+            for channel, destination, adapter in routable_channels:
+                self.session.add(
+                    ProviderDeliveryORM(
+                        id=str(uuid.uuid4()),
+                        lead_id=lead_id,
+                        provider_assignment_id=assignment.id,
+                        delivery_key=f"{lead_id}:{assignment.id}:{channel.value}",
+                        channel=channel.value,
+                        destination_reference=masked_destination(destination),
+                        adapter_name=adapter.name,
+                        status=DeliveryStatus.pending.value,
+                        attempt_count=0,
+                        max_attempts=self.policy.maximum_delivery_attempts,
+                        next_attempt_at=context.received_at,
+                    )
+                )
+        try:
+            self.session.commit()
+        except IntegrityError as error:
+            return self._idempotency_winner(form, error)
 
         if assessment.disposition == "block":
             logger.info(
@@ -479,167 +506,63 @@ class LeadRoutingService:
                 form.property_id,
             )
             return LeadSubmissionResult(lead_id=lead_id, status=LeadStatus.spam)
-
-        return await self._route(lead_id)
-
-    async def _route(self, lead_id: str) -> LeadSubmissionResult:
-        lead = self.session.get(LeadORM, lead_id)
-        if lead is None:
-            raise LeadRoutingError("lead_not_found")
-        assignment = self.session.scalar(
-            select(ProviderAssignmentORM).where(
-                ProviderAssignmentORM.property_id == lead.property_id,
-                ProviderAssignmentORM.status == ProviderAssignmentStatus.active.value,
-            )
-        )
-        if assignment is None:
-            lead.status = LeadStatus.delivery_failed.value
-            self.session.commit()
+        if lead_status == LeadStatus.delivery_failed:
             await self._alert_failure(
-                property_id=lead.property_id,
-                lead_id=lead.id,
-                reason_code="no_active_provider",
+                property_id=form.property_id,
+                lead_id=lead_id,
+                reason_code=(
+                    "no_active_provider"
+                    if assignment is None
+                    else "no_configured_delivery_channel"
+                ),
             )
             return LeadSubmissionResult(
-                lead_id=lead.id,
+                lead_id=lead_id,
                 status=LeadStatus.delivery_failed,
             )
-
-        lead.provider_assignment_id = assignment.id
-        lead.status = LeadStatus.routing.value
-        channels: list[tuple[DeliveryChannel, str]] = []
-        if assignment.destination_email:
-            channels.append((DeliveryChannel.email, assignment.destination_email))
-        if assignment.destination_phone:
-            channels.append((DeliveryChannel.phone, assignment.destination_phone))
-        self.session.commit()
-
-        delivery_ids: list[str] = []
-        for channel, destination in channels:
-            adapter = self.adapters.get(channel)
-            if adapter is None:
-                continue
-            delivery_id = await self._deliver(lead, assignment, channel, destination, adapter)
-            if delivery_id is not None:
-                delivery_ids.append(delivery_id)
-
-        lead = self.session.get(LeadORM, lead_id)
-        assert lead is not None
-        lead.status = (
-            LeadStatus.delivered.value if delivery_ids else LeadStatus.delivery_failed.value
-        )
-        if delivery_ids:
-            self._lead_event(
-                lead_id=lead.id,
-                event_type="provider_delivery",
-                event_key=f"delivery:{lead.id}",
-                occurred_at=datetime.now(UTC),
-            )
-        self.session.commit()
-        if not delivery_ids:
-            await self._alert_failure(
-                property_id=lead.property_id,
-                lead_id=lead.id,
-                reason_code="all_deliveries_failed",
-            )
         return LeadSubmissionResult(
-            lead_id=lead.id,
-            status=LeadStatus(lead.status),
-            delivery_ids=delivery_ids,
+            lead_id=lead_id,
+            status=LeadStatus.routing,
+            delivery_ids=self._delivery_ids(lead_id),
         )
 
-    async def _deliver(
+    def _routable_channels(
         self,
-        lead: LeadORM,
-        assignment: ProviderAssignmentORM,
-        channel: DeliveryChannel,
-        destination: str,
-        adapter: DeliveryAdapter,
-    ) -> str | None:
-        delivery_key = f"{lead.id}:{assignment.id}:{channel.value}"
-        existing = self.session.scalar(
-            select(ProviderDeliveryORM).where(ProviderDeliveryORM.delivery_key == delivery_key)
+        assignment: ProviderAssignmentORM | None,
+    ) -> list[tuple[DeliveryChannel, str, DeliveryAdapter]]:
+        if assignment is None:
+            return []
+        channels: list[tuple[DeliveryChannel, str, DeliveryAdapter]] = []
+        destinations = (
+            (DeliveryChannel.email, assignment.destination_email),
+            (DeliveryChannel.phone, assignment.destination_phone),
         )
-        if existing is not None and existing.status == "delivered":
-            return existing.id
-        delivery = existing or ProviderDeliveryORM(
-            id=str(uuid.uuid4()),
-            lead_id=lead.id,
-            provider_assignment_id=assignment.id,
-            delivery_key=delivery_key,
-            channel=channel.value,
-            destination_reference=masked_destination(destination),
-            adapter_name=adapter.name,
-            status="pending",
-        )
-        if existing is None:
-            self.session.add(delivery)
-            self.session.commit()
+        for channel, destination in destinations:
+            adapter = self.adapters.get(channel)
+            if destination and adapter is not None:
+                channels.append((channel, destination, adapter))
+        return channels
 
-        request = DeliveryRequest(
-            delivery_key=delivery_key,
-            property_id=lead.property_id,
-            lead_id=lead.id,
-            provider_assignment_id=assignment.id,
-            channel=channel,
-            destination=destination,
-            contact_name=lead.name,
-            contact_email=lead.email,
-            contact_phone=lead.phone,
-            message=lead.message,
-        )
-        first_attempt = delivery.attempt_count + 1
-        for attempt_number in range(
-            first_attempt,
-            self.policy.maximum_delivery_attempts + 1,
-        ):
-            attempt = RoutingAttemptORM(
-                lead_id=lead.id,
-                provider_assignment_id=assignment.id,
-                channel=channel.value,
-                delivery_key=delivery_key,
-                attempt_number=attempt_number,
-                status="running",
-                started_at=datetime.now(UTC),
+    def _idempotency_winner(
+        self,
+        form: LeadForm,
+        error: IntegrityError,
+    ) -> LeadSubmissionResult:
+        self.session.rollback()
+        winner = self.session.scalar(
+            select(LeadORM).where(
+                LeadORM.property_id == form.property_id,
+                LeadORM.idempotency_key == form.idempotency_key,
             )
-            self.session.add(attempt)
-            delivery.attempt_count = attempt_number
-            self.session.commit()
-            try:
-                result = await adapter.deliver(request)
-            except RetryableDeliveryError:
-                attempt.status = "retryable_failure"
-                attempt.error_code = "retryable_adapter_failure"
-                attempt.error_summary = "Delivery adapter reported a transient failure."
-                attempt.completed_at = datetime.now(UTC)
-                delivery.status = "retrying"
-                self.session.commit()
-                continue
-            except Exception:
-                attempt.status = "permanent_failure"
-                attempt.error_code = "adapter_failure"
-                attempt.error_summary = "Delivery adapter failed."
-                attempt.completed_at = datetime.now(UTC)
-                delivery.status = "failed"
-                self.session.commit()
-                logger.error(
-                    "Delivery %s failed for lead %s with a permanent adapter error.",
-                    delivery.id,
-                    lead.id,
-                )
-                return None
-
-            attempt.status = "succeeded" if result.accepted else "rejected"
-            attempt.completed_at = datetime.now(UTC)
-            delivery.provider_message_id = result.provider_message_id
-            delivery.status = "delivered" if result.accepted else "failed"
-            delivery.delivered_at = datetime.now(UTC) if result.accepted else None
-            self.session.commit()
-            return delivery.id if result.accepted else None
-
-        delivery.status = "failed"
-        self.session.commit()
-        return None
+        )
+        if winner is None:
+            raise error
+        return LeadSubmissionResult(
+            lead_id=winner.id,
+            status=LeadStatus(winner.status),
+            idempotent_replay=True,
+            delivery_ids=self._delivery_ids(winner.id),
+        )
 
     def _lead_event(
         self,
@@ -649,14 +572,18 @@ class LeadRoutingService:
         event_key: str,
         occurred_at: datetime,
     ) -> None:
-        existing = self.session.scalar(
-            select(LeadEventORM.id).where(
-                LeadEventORM.lead_id == lead_id,
-                LeadEventORM.event_key == event_key,
-            )
+        lead_is_new = any(
+            isinstance(row, LeadORM) and row.id == lead_id for row in self.session.new
         )
-        if existing is not None:
-            return
+        if not lead_is_new:
+            existing = self.session.scalar(
+                select(LeadEventORM.id).where(
+                    LeadEventORM.lead_id == lead_id,
+                    LeadEventORM.event_key == event_key,
+                )
+            )
+            if existing is not None:
+                return
         self.session.add(
             LeadEventORM(
                 lead_id=lead_id,
@@ -673,10 +600,7 @@ class LeadRoutingService:
     def _delivery_ids(self, lead_id: str) -> list[str]:
         return list(
             self.session.scalars(
-                select(ProviderDeliveryORM.id).where(
-                    ProviderDeliveryORM.lead_id == lead_id,
-                    ProviderDeliveryORM.status == "delivered",
-                )
+                select(ProviderDeliveryORM.id).where(ProviderDeliveryORM.lead_id == lead_id)
             )
         )
 

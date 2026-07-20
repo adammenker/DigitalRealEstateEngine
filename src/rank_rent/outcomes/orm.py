@@ -9,10 +9,12 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    event,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
@@ -23,12 +25,25 @@ from rank_rent.db.orm import TimestampMixin, now_utc
 
 class PropertyDecisionORM(TimestampMixin, Base):
     __tablename__ = "property_decisions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["full_score_id", "scan_run_id"],
+            ["full_opportunity_scores.id", "full_opportunity_scores.scan_run_id"],
+            name="fk_property_decision_score_scan",
+        ),
+        ForeignKeyConstraint(
+            ["evidence_snapshot_id", "scan_run_id"],
+            ["json_artifacts.id", "json_artifacts.scan_run_id"],
+            name="fk_property_decision_evidence_scan",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     property_id: Mapped[str] = mapped_column(String(120), unique=True, index=True)
     opportunity_id: Mapped[int] = mapped_column(ForeignKey("opportunities.id"), index=True)
-    full_score_id: Mapped[int] = mapped_column(ForeignKey("full_opportunity_scores.id"))
-    evidence_snapshot_id: Mapped[int] = mapped_column(ForeignKey("json_artifacts.id"))
+    scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id"), index=True)
+    full_score_id: Mapped[int] = mapped_column(Integer)
+    evidence_snapshot_id: Mapped[int] = mapped_column(Integer)
     score_version_at_selection: Mapped[str] = mapped_column(String(80))
     selected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     service_family_slug: Mapped[str] = mapped_column(String(120), index=True)
@@ -36,6 +51,16 @@ class PropertyDecisionORM(TimestampMixin, Base):
     evidence_quality: Mapped[str] = mapped_column(String(40), index=True)
     validated_opportunity_cost_usd: Mapped[float] = mapped_column(Float, default=0)
     selection_context: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+@event.listens_for(PropertyDecisionORM, "before_update")
+@event.listens_for(PropertyDecisionORM, "before_delete")
+def _prevent_property_decision_mutation(
+    _mapper: object,
+    _connection: object,
+    _target: PropertyDecisionORM,
+) -> None:
+    raise ValueError("property_decision_is_immutable")
 
 
 class PropertyOutcomeORM(TimestampMixin, Base):

@@ -342,8 +342,15 @@ class ScanPipeline:
                     "score": score.model_dump(mode="json"),
                     "discovery_report": discovery_report,
                 },
+                scan_run_id=scan.id,
             )
-            save_artifact(self.session, opportunity.id, "discovery_report", discovery_report)
+            save_artifact(
+                self.session,
+                opportunity.id,
+                "discovery_report",
+                discovery_report,
+                scan_run_id=scan.id,
+            )
             self._save_assessment_records(scan, opportunity.id, score, is_preliminary)
             if build_site and site_config:
                 save_artifact(
@@ -351,8 +358,15 @@ class ScanPipeline:
                     opportunity.id,
                     "domain_candidates",
                     {"domains": [d.model_dump(mode="json") for d in domains]},
+                    scan_run_id=scan.id,
                 )
-                save_artifact(self.session, opportunity.id, "outreach_drafts", {"drafts": outreach})
+                save_artifact(
+                    self.session,
+                    opportunity.id,
+                    "outreach_drafts",
+                    {"drafts": outreach},
+                    scan_run_id=scan.id,
+                )
                 save_artifact(
                     self.session,
                     opportunity.id,
@@ -361,6 +375,7 @@ class ScanPipeline:
                         "config": site_config.model_dump(mode="json"),
                         "generated_path": str(site_path) if site_path else None,
                     },
+                    scan_run_id=scan.id,
                 )
             self.session.commit()
             return {

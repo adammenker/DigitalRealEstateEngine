@@ -1004,6 +1004,7 @@ def api_opportunity_rescore(
     session.add(
         JsonArtifactORM(
             opportunity_id=opportunity_id,
+            scan_run_id=latest_scan.id,
             kind="rescore_result",
             payload={
                 "assessment_type": assessment_type,

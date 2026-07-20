@@ -74,7 +74,8 @@ bundle export verify the stored checksum before returning evidence.
 ## Migration Policy
 
 Revision `c9a4e7d2b6f1` is the Workstream C migration and directly follows the prior head
-`b7d2f4a9c6e1`. Workstream D revision `6f4c2d8a9b17` follows it as the current head. The C revision
+`b7d2f4a9c6e1`. Workstream D revision `6f4c2d8a9b17` follows it, and lead-delivery /
+decision-lineage revision `a6e2c9f4d7b1` is the current head. The C revision
 adds nullable blob-location fields so existing prototype rows remain readable, plus required
 retention/encryption classifications for forward writes. SQLite and PostgreSQL both use this
 single linear Alembic chain.

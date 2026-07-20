@@ -19,6 +19,12 @@ from rank_rent.db.orm import JsonArtifactORM, OpportunityORM, ScanRunORM
 from rank_rent.domain.models import Market, ServiceFamily
 from rank_rent.integrations.dataforseo.live import DataForSEOError, DataForSEOLiveProvider
 from rank_rent.integrations.dataforseo.replay import DataForSEOReplayProvider
+from rank_rent.lead_routing.adapters import (
+    FixtureDeliveryAdapter,
+    FixtureOperatorAlertAdapter,
+)
+from rank_rent.lead_routing.models import DeliveryChannel
+from rank_rent.lead_routing.worker import run_lead_delivery_runtime
 from rank_rent.qualification.report import fixture_capability_report
 from rank_rent.replay import (
     ReplayIntegrityError,
@@ -535,6 +541,41 @@ def worker(
             stop_event,
             concurrency=concurrency or settings.scan_worker_concurrency,
             settings=settings,
+        )
+
+    asyncio.run(serve())
+
+
+@app.command("lead-worker")
+def lead_worker(
+    concurrency: Annotated[int, typer.Option("--concurrency", min=1, max=32)] = 1,
+) -> None:
+    """Run durable lead delivery with non-network fixture adapters."""
+    init_db()
+    settings = get_settings()
+    if settings.app_env.strip().lower() == "production":
+        raise typer.BadParameter(
+            "Fixture lead adapters are prohibited in production. "
+            "Configure reviewed provider adapters before starting this worker."
+        )
+
+    async def serve() -> None:
+        stop_event = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for signal_name in (signal.SIGINT, signal.SIGTERM):
+            with suppress(NotImplementedError):
+                loop.add_signal_handler(signal_name, stop_event.set)
+        await run_lead_delivery_runtime(
+            stop_event,
+            concurrency=concurrency,
+            adapters={
+                DeliveryChannel.email: FixtureDeliveryAdapter("email"),
+                DeliveryChannel.phone: FixtureDeliveryAdapter("phone"),
+            },
+            alert_adapter=FixtureOperatorAlertAdapter(),
+            poll_seconds=settings.scan_worker_poll_seconds,
+            heartbeat_seconds=settings.scan_worker_heartbeat_seconds,
+            stale_after_seconds=settings.scan_worker_stale_after_seconds,
         )
 
     asyncio.run(serve())

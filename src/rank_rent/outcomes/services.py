@@ -71,6 +71,10 @@ class PropertyOutcomeService:
         evidence = self.session.get(JsonArtifactORM, decision.evidence_snapshot_id)
         if evidence is None or evidence.opportunity_id != decision.opportunity_id:
             raise OutcomeIntegrityError("evidence_does_not_match_opportunity")
+        if evidence.scan_run_id is None:
+            raise OutcomeIntegrityError("evidence_is_missing_scan_lineage")
+        if evidence.scan_run_id != score.scan_run_id:
+            raise OutcomeIntegrityError("score_and_evidence_scan_mismatch")
         if evidence.kind not in {"scan_result", "evidence_snapshot"}:
             raise OutcomeIntegrityError("artifact_is_not_an_evidence_snapshot")
         if evidence.kind == "scan_result" and evidence.payload.get("assessment_type") != "full":
@@ -78,6 +82,7 @@ class PropertyOutcomeService:
         row = PropertyDecisionORM(
             property_id=decision.property_id,
             opportunity_id=decision.opportunity_id,
+            scan_run_id=score.scan_run_id,
             full_score_id=decision.full_score_id,
             evidence_snapshot_id=decision.evidence_snapshot_id,
             score_version_at_selection=score.scoring_version,
@@ -89,6 +94,7 @@ class PropertyOutcomeService:
             selection_context={
                 "full_score_total": score.total_score,
                 "full_score_confidence": score.confidence,
+                "scan_run_id": score.scan_run_id,
                 "component_scores": score.payload.get("component_scores", {}),
             },
         )
@@ -189,6 +195,7 @@ class PropertyOutcomeService:
             "decision": {
                 "property_id": decision.property_id,
                 "opportunity_id": decision.opportunity_id,
+                "scan_run_id": decision.scan_run_id,
                 "full_score_id": decision.full_score_id,
                 "score_version_at_selection": decision.score_version_at_selection,
                 "evidence_snapshot_id": decision.evidence_snapshot_id,
