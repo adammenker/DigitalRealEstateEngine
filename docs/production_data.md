@@ -75,7 +75,9 @@ bundle export verify the stored checksum before returning evidence.
 
 Revision `c9a4e7d2b6f1` adds blob metadata after the lead/outcome schema. Workstream D
 revision `6f4c2d8a9b17` follows it, then cache versioning `8a7d3f2c1b90`, durable lead
-delivery and decision lineage `a6e2c9f4d7b1`, and worker recovery `1a7d9c4e6b20`.
+delivery and decision lineage `a6e2c9f4d7b1`, worker recovery `1a7d9c4e6b20`, opportunity
+review `8b3e1f4a6c2d`, security/audit `6a1c9e4b7d20`, and property workflow
+`d4a7c2e9f1b6`.
 The blob revision adds nullable location fields so existing prototype rows remain readable,
 plus required retention/encryption classifications for forward writes. SQLite and
 PostgreSQL both use this single linear Alembic chain.
@@ -100,9 +102,9 @@ Before production launch, the operator must configure and verify:
 
 The application records `raw_provider_response` as the retention classification. Raw paid
 responses, API-call ledger rows, scan plans, scores, and audit evidence should initially be
-retained indefinitely unless a legal/manual deletion request applies. Provider contact data,
-lead data, logs, and deleted-opportunity retention are outside Workstream C because those
-models do not exist yet.
+retained indefinitely unless a legal/manual deletion request applies. Provider contact and lead
+models now have privacy and retention services documented in `privacy.md` and
+`data_retention.md`; production scheduling and jurisdiction-specific approval remain open.
 
 No production backup scheduler, cloud bucket, PostgreSQL service, or legal-deletion workflow is
 created by this repository change. `tests/integration/test_postgres_concurrency.py` exercises

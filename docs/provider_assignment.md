@@ -35,8 +35,9 @@ history survive replacement. Only the destination assignment changes.
 
 ## Property compatibility
 
-Workstream I's authoritative `Property` table is not present in the baseline.
-J/K therefore use an opaque, unique `property_id` integration key. The routing
-profile ties that key to an existing opportunity. When Workstream I lands, its
-property identifier can become the foreign-key target without changing the
-provider or lead lifecycle APIs.
+Workstream I's authoritative `properties` table is integrated. Property creation uses the same
+stable string ID for the property and its routing profile, preserving the original J/K service
+contract. Provider assignments retain their foreign key to
+`property_routing_profiles.property_id`; the property workflow verifies the shared property
+identity and approval boundary before creating or changing assignments. Provider replacement does
+not alter the property, domain, SiteConfig, build history, or analytics lineage.

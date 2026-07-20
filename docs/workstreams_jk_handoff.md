@@ -1,5 +1,10 @@
 # Workstreams J/K Handoff
 
+> Historical note (2026-07-20): This document records the original isolated workstream handoff.
+> Workstream I, security, observability, and migration integration have since landed on `main`.
+> Use `production_status.md`, `production_status.yaml`, and `release_checklist.md` for current
+> status and blockers.
+
 ## Scope implemented
 
 Internal lead intake, provider operations, fixture delivery/call routing,

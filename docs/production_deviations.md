@@ -23,3 +23,22 @@ Implementing Release B code does not authorize a public launch. Domain purchase,
 provider activation, compliance approval, and production deployment remain explicit
 operator actions after Release A approval.
 
+## DEV-004: Addressable-Market CLI
+
+The addressable-market batch and top workflows are implemented through service APIs and
+`scripts/addressable_market.py`. The exact `rank-rent prefilter batch/top` command registration
+specified by the master document is still pending.
+
+## DEV-005: Property Security Integration
+
+Production authentication is globally fail-closed, but the centralized mutation-policy table and
+append-only audit integration do not yet cover every property/domain/site mutation. Release A and
+deployed property staging remain blocked until explicit permissions and audit tests cover those
+routes.
+
+## DEV-006: Lead And Outcome Provider Boundary
+
+Lead and outcome models, durable services, privacy controls, and fixture adapters are implemented.
+No public lead API or real delivery, call-routing, alert, registrar, hosting, analytics, or outcome
+adapter is approved. Provider-specific implementation is deferred until vendors and contracts are
+selected.

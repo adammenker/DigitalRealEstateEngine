@@ -1,5 +1,9 @@
 # Implementation Deviations
 
+> Historical remediation record: this document describes an earlier implementation slice and is
+> retained for provenance. It is not the current production backlog. See
+> `production_status.md`, `production_deviations.md`, and `production_backlog.md`.
+
 This file records known deviations from the remediation steering specification.
 
 ## Current Remediation Slice

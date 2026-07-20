@@ -39,7 +39,8 @@ discovery testing, but the scores and quality thresholds still require empirical
 against production-quality evidence and real business outcomes before production use.
 
 See [Current State](docs/current_state.md), [Discovery Exit Criteria](docs/discovery_exit_criteria.md),
-and the [Production Backlog](docs/production_backlog.md) for more detail.
+the [Production Status](docs/production_status.md), and the
+[Production Backlog](docs/production_backlog.md) for more detail.
 Operational contracts are documented in [Security](docs/security.md),
 [Observability](docs/observability.md), and
 [Deployment](docs/deployment.md).
@@ -231,7 +232,12 @@ become profitable. Assessments are research aids with explicit inputs, assumptio
 missing-data effects, and evidence-quality labels.
 
 Before production use, the project still needs labeled real-world calibration, validated local
-demand improvements, a deployed PostgreSQL concurrency test and backup/restore rehearsal,
-external observability and alert delivery, authentication and secret management, and downstream
-review/launch workflows. Workstream D's durable spend controls remain fail-closed until a current
-qualification matrix and, after the first production charge, clean billing reconciliation exist.
+demand improvements, explicit RBAC and append-only audit coverage for property mutations, a
+hosted PostgreSQL concurrency test and backup/restore rehearsal, and real OIDC, secret, Redis,
+telemetry, and alert configuration. Lead/outcome workflows currently use internal services and
+fixture adapters; public provider integrations require vendor selection and review. Workstream D's
+durable spend controls remain fail-closed until a current qualification matrix and, after the first
+production charge, clean billing reconciliation exist.
+
+Neither Release A nor public property launch is authorized. The exact current gate state is kept
+in `docs/production_status.yaml` and `docs/release_checklist.md`.

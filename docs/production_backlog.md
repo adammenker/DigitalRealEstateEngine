@@ -1,107 +1,72 @@
 # Production Backlog
 
-Completed items describe behavior present in the repository. Open items remain required or
-deliberately deferred before production use.
+Last reconciled: 2026-07-20
 
-## Discovery Foundation
+This backlog contains only work that remains after the production-readiness integration. Completed
+behavior is summarized in [production_status.md](production_status.md). Release gates are tracked
+in [release_checklist.md](release_checklist.md).
 
-- [x] Use a versioned authoritative service catalog with stable IDs, aliases, seeds, intent
-  modifiers, negative terms, and provider categories.
-- [x] Allow explicit draft services for testing while rejecting drafts from full scans and
-  promotion.
-- [x] Use immutable per-scan `testing` and `full` profiles.
-- [x] Promote eligible testing scans to full scans with lineage, an incremental request plan,
-  and explicit nonzero-cost confirmation.
-- [x] Keep preliminary assessments separate from full rankable assessments.
-- [x] Restrict ranking and comparison to eligible full assessments.
-- [x] Preserve latest assessment, typed score history, rescore reason, and score/component
-  differences.
-- [ ] Expand and review catalog coverage as additional service families enter the product.
-- [ ] Calibrate score thresholds and weights against real ranking, lead, and revenue outcomes.
+## Next Code Changes
 
-## Geography And Public Data
+- [ ] Add explicit centralized RBAC policies for property, domain, provider-assignment,
+  SiteConfig, compliance, deployment, and rollback mutations.
+- [ ] Append immutable actor/target audit events for every privileged property mutation.
+- [ ] Add permission-denial and audit-chain tests for those property routes.
+- [ ] Register `rank-rent prefilter batch` and `rank-rent prefilter top` as thin CLI wrappers
+  around the existing addressable-market service.
+- [ ] Design reviewed authenticated lead/outcome HTTP contracts before exposing the internal
+  service layer.
+- [ ] Schedule retention and call-route health jobs once the production worker identity and alert
+  destination are configured.
 
-- [x] Scope initial discovery to U.S. populated places and Census ZCTAs.
-- [x] Build a versioned offline index with canonical location IDs, city, state, ZIP, county,
-  metro, coordinates, population, reference population, aliases, and provenance.
-- [x] Require canonical resolution and a verified provider-search boundary before planning.
-- [x] Require explicit selection for ambiguous fuzzy matches and reject unsupported markets.
-- [x] Persist resolved geography and reuse the final resolved market during rescoring.
-- [x] Add a versioned zero-cost public-data prefilter using ACS household, housing-unit,
-  homeownership, and housing-age evidence.
-- [ ] Add validated service-to-NAICS mappings before incorporating County Business Patterns
-  or Nonemployer Statistics supply signals.
-- [ ] Add service-specific climate or incidence signals only with documented causal models.
-- [ ] Validate a richer local-demand estimator before increasing estimated-demand confidence
-  or score influence.
-- [ ] Add address-level or international resolution only when product scope requires it.
+## Release A Environment Work
 
-## Evidence Quality And Scoring
+- [ ] Rotate the previously shared DataForSEO API password.
+- [ ] Select and configure a production OIDC tenant, managed secret store, and Redis service.
+- [ ] Provision isolated staging PostgreSQL and S3-compatible object storage.
+- [ ] Run PostgreSQL worker/cost-control concurrency tests against staging.
+- [ ] Rehearse encrypted PostgreSQL and blob backup/restore; record measured RPO/RTO.
+- [ ] Configure telemetry export, dashboards, and paging destinations.
+- [ ] Exercise synthetic alerts, provider outage, database outage, stale worker, and cost-breaker
+  runbooks in staging.
+- [ ] Run the executable DataForSEO production qualification matrix.
+- [ ] Reconcile the first real DataForSEO billing export with the internal ledger.
+- [ ] Deploy staging through the approval workflow and rehearse rollback.
+- [ ] Run load, failure-injection, dependency, image, secret, and application security checks.
+- [ ] Complete owner UAT for discovery, review, approval, and evidence export.
+- [ ] Sign the Release A checklist.
 
-- [x] Gate evidence using keyword, representative-query, provider, geography, competitor, and
-  SERP-classification coverage checks.
-- [x] Mark failed evidence unusable, cap its score, and prevent it from ranking or promotion.
-- [x] Label national, measured-local, and population-estimated demand separately.
-- [x] Preserve per-group freshness and lower trust when evidence is stale or incomplete.
-- [x] Use position- and query-aware SERP and competitor observations.
-- [x] Distinguish page-scoped and domain-scoped competitor metrics and preserve unavailable
-  metrics as null.
-- [x] Provide component-specific calculations, missing-evidence effects, and confidence in
-  discovery reports.
-- [x] Test the complete discovery path with a realistic zero-network replay.
-- [ ] Perform empirical evidence-gate and scoring calibration with production-quality samples.
-- [ ] Establish labeled benchmark sets for SERP classification, provider suitability, and
-  opportunity outcomes.
+## Release B Provider Decisions
 
-## DataForSEO Cost Controls
+Do not implement speculative adapters before selecting vendors and approving their security and
+privacy contracts.
 
-- [x] Default to DataForSEO sandbox and require explicit production opt-in.
-- [x] Persist exact planned requests and require each attached live call to consume one unique
-  unused plan entry before network access.
-- [x] Reconcile planned and executed calls with cache, failure, unexpected-call, timing, and
-  actual-cost details.
-- [x] Show incremental uncached calls and estimated cost before full-scan promotion.
-- [x] Enforce per-scan request and estimated-cost limits.
-- [x] Add durable per-day production/testing request, spend, endpoint, cache-miss, and
-  unexpected-call counters with transactional pre-call limits.
-- [x] Evaluate synthetic alert conditions for repeated cache misses, unexpected calls, paid
-  testing responses, spend thresholds, provider/schema failures, stale workers, and poison jobs.
-- [x] Import and reconcile provider billing CSV exports against the internal call ledger.
+- [ ] Select email delivery and operator-alert providers.
+- [ ] Select a call-tracking/routing provider and complete recording/retention legal review.
+- [ ] Select registrar, DNS, and public hosting providers.
+- [ ] Select Search Console, analytics, and provider-reported outcome sources.
+- [ ] Implement adapters with idempotency, timeouts, retries, health checks, least privilege,
+  audit events, and fixture contract tests.
+- [ ] Exercise real staging form and call routing without exposing an indexable property.
+- [ ] Verify disclosure, claims, consent, privacy, retention, analytics, and rollback.
+- [ ] Sign the public-launch and operational-learning gates.
 
-## Operations
+## Empirical Product Work
 
-- [x] Run scans through a separate database-backed worker process with concurrency, lease-token
-  claims, heartbeat/expiry, cancellation, exponential retry, quarantine, and idempotent stages.
-- [x] Provide a confirmed one-command reset for local test data.
-- [x] Select PostgreSQL for production, retain SQLite for local/replay use, and define explicit
-  connection-pool and timeout policy with health/schema-readiness checks.
-- [x] Store new live-provider raw responses in immutable filesystem or optional S3-compatible
-  blobs with checksummed metadata and source-scan lineage.
-- [ ] Run PostgreSQL concurrency tests and rehearse the documented encrypted database/blob
-  backup and restore process in the selected production environment.
-- [ ] Add production-grade structured logs, metrics, traces, and alerting by scan and call.
-- [ ] Add deploy-time health checks for the database and provider credentials (frontend, backend,
-  and worker process health checks exist).
-- [x] Add CI gates for backend tests, frontend lint/build, migration checks, replay, and
-  container builds.
-- [ ] Operationalize the documented RPO/RTO, backup alerts, legal deletion, rollback,
-  disaster-recovery, and data-retention procedures.
+- [ ] Build labeled production-quality datasets for SERP classification, provider suitability,
+  evidence gates, and opportunity outcomes.
+- [ ] Validate local-demand estimates against measured local demand.
+- [ ] Calibrate scoring thresholds and confidence against ranking, lead, and revenue outcomes.
+- [ ] Review catalog coverage as new service families enter the product.
+- [ ] Add climate/incidence or new public-data signals only with documented causal models.
+- [ ] Keep every scoring change versioned, benchmarked, reviewer-approved, and historically
+  reproducible.
 
-## Security And Secrets
+## Deliberately Deferred Scope
 
-- [ ] Move production credentials to a managed secret store and rotate existing shared test
-  credentials before launch.
-- [ ] Add authentication, authorization, and audit logging for production users and actions.
-- [ ] Validate that logs, exports, errors, and API responses redact secrets and sensitive data.
-- [ ] Add rate limits, request-size limits, dependency scanning, and production security
-  headers.
-- [ ] Document least-privilege access for DataForSEO and future external providers.
-
-## Product Workflow
-
-- [ ] Add saved discovery templates and batch prefilter-to-testing workflows.
-- [ ] Add explicit opportunity review states, ownership, notes, and rejection reasons.
-- [ ] Add evidence export and review workflows for competitors and provider candidates.
-- [ ] Add approval gates before domain acquisition, site generation, outreach, or launch.
-- [ ] Define how discovery outcomes feed site production, lead routing, tenant matching, and
-  performance feedback.
+- International and address-level geography.
+- Automatic domain purchase.
+- Automatic outreach.
+- Fake business profiles, addresses, reviews, credentials, or claims.
+- Automatic scoring-weight changes.
+- Public deployment before Release A and all property gates pass.

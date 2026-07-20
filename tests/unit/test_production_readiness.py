@@ -369,7 +369,7 @@ def test_release_manifest_records_required_versions() -> None:
             "RELEASE_NOTES": "Security hardening.",
         },
     )
-    assert manifest["migration_version"] == "6a1c9e4b7d20"
+    assert manifest["migration_version"] == "d4a7c2e9f1b6"
     assert manifest["scoring_version"] == "v2.12"
     assert manifest["evidence_quality_version"] == "v1"
     assert manifest["service_catalog_version"] == "2026.07.1"

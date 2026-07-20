@@ -1,5 +1,9 @@
 # Discovery Completion Deviations
 
+> Historical discovery-completion record: retained to explain earlier implementation choices.
+> Current release blockers are tracked in `production_status.md`, `production_deviations.md`, and
+> `release_checklist.md`.
+
 The implemented discovery system intentionally keeps several boundaries narrow.
 
 ## Intentional Scope Limits

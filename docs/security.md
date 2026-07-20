@@ -33,9 +33,12 @@ Successful mutations are written to `audit_events` with actor, role, target,
 request ID, timestamp, metadata, previous hash, and event hash. Login/logout,
 scan creation, promotion, cost confirmation, cancellation, retry, and rescore
 are covered by current routes, as are review transitions, ownership, evidence
-overrides, templates, and batch plans. Future domain, deployment, routing,
-export, and deletion routes must call `append_audit_event` in the same
-transaction as their state change.
+overrides, templates, and batch plans.
+
+Property/domain/site routes now exist, but their centralized mutation permissions and
+`append_audit_event` coverage are incomplete. This is a Release A blocker: every privileged
+property, provider, domain, compliance, deployment, rollback, routing, export, and deletion action
+must enforce its explicit permission and write its audit event in the state-change transaction.
 
 ORM listeners and database triggers reject update/delete. Access to
 `GET /api/audit-events` is admin-only. Audit storage must be exported to

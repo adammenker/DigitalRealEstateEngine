@@ -1,5 +1,8 @@
 # V1 Hardening Deviations
 
+> Historical V1 record: later discovery and production-readiness work superseded portions of this
+> document. Use `production_status.md` and `production_deviations.md` for current state.
+
 This file records intentional deviations from `specs/DigitalRealEstateEngine_V1_HARDENING_SPEC.md`.
 
 ## Implemented In This Slice

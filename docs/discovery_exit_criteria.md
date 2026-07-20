@@ -25,8 +25,13 @@
   outcomes.
 - [ ] Local-demand estimation is validated before receiving greater confidence or influence.
 - [ ] Production database, backups, observability, alerts, and spend limits are exercised.
-- [ ] Authentication, authorization, secret management, and audit logging are complete.
-- [ ] CI and deployment gates run backend, frontend, migration, replay, and container checks.
+- [x] Authentication, authorization, secret references, and append-only audit infrastructure
+  exist for discovery and review workflows.
+- [ ] Property mutations have explicit centralized permissions and complete privileged-action
+  audit coverage.
+- [x] CI and deployment definitions run backend, frontend, migration, replay, security, and
+  container checks.
+- [ ] Those deployment and security gates are exercised successfully in staging.
 - [ ] Product owners approve the review and handoff workflow from discovery to launch.
 
 Discovery engineering is complete when `make verify` passes. Discovery is production-ready

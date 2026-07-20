@@ -1,114 +1,215 @@
+snapshot_date: "2026-07-20"
 baseline_commit: "f63991ae74a5daa733f6633ec6aee55578b0ee88"
-baseline_date: "2026-07-19"
-release_target: "A"
-overall_status: in_progress
+integrated_head_before_status_commit: "4244479c91dd26a4a3b87aef778f360b3c2b2c17"
+branch: main
+release_target: A
+overall_status: local_implementation_complete_production_validation_blocked
 production_authorized: false
 public_launch_authorized: false
+
+versions:
+  migration_head: "d4a7c2e9f1b6"
+  scoring: "v2.12"
+  evidence_quality: "v1"
+  service_catalog: "2026.07.1"
+  serp_classification: "v2"
+  addressable_market: "addressable-market-v2.0"
+  dataforseo_adapter: "dataforseo-v3-workstream-d-2"
+  geography: "us-geography-2024.2"
+
+local_verification:
+  backend_tests:
+    status: passed
+    passed: 292
+    skipped: 3
+    warnings: 1
+    note: "The warning is a third-party Starlette TestClient deprecation."
+  calibration:
+    status: passed
+    scenarios: "26/26"
+    pairwise_expectations: "12/12"
+    serp_labels: "12/12"
+    provider_checks: "15/15"
+    network_attempts: 0
+  ruff: passed
+  strict_mypy:
+    status: passed
+    source_files: 100
+  frontend_lint: passed
+  frontend_build: passed
+  docker_build: passed
+  local_compose:
+    status: healthy
+    services:
+      - database
+      - rank-rent
+      - worker
+      - frontend
+  alembic:
+    status: passed
+    heads: 1
+    head: "d4a7c2e9f1b6"
+
 workstreams:
   calibration:
     id: A
-    status: in_progress
-    owner: Franklin
-    branch: delegated-worktree
-    blockers: []
-    completed_acceptance_criteria: []
+    status: complete_local
+    completed:
+      - Offline benchmark harness and versioned scenario library
+      - Pairwise business-direction invariants
+      - SERP classification and provider suitability benchmarks
+      - Zero-network calibration CLI and CI coverage
+    blockers:
+      - Empirical calibration against real ranking, lead, and revenue outcomes
+
   public_data:
     id: B
-    status: in_progress
-    owner: McClintock
-    branch: delegated-worktree
-    blockers: []
-    completed_acceptance_criteria: []
+    status: partial_local
+    completed:
+      - Service-specific addressable-market profiles
+      - ACS, CBP, and NES acquisition and normalization adapters
+      - Immutable dataset registry with validation, activation, and rollback
+      - Zero-paid-call batch assessment service and standalone script
+    blockers:
+      - Register the specified rank-rent prefilter batch/top CLI commands
+      - Activate reviewed production datasets and validate mappings with real samples
+
   production_data:
     id: C
-    status: in_progress
-    owner: Halley
-    branch: delegated-worktree
+    status: complete_local
+    completed:
+      - PostgreSQL production policy and local PostgreSQL composition
+      - Separate API and worker sessions
+      - Immutable filesystem and S3-compatible raw-response blob stores
+      - Linear migrations and PostgreSQL concurrency test harness
     blockers:
-      - Production PostgreSQL and object-storage resources are not provisioned.
-    completed_acceptance_criteria: []
+      - Provision managed PostgreSQL and object storage
+      - Run hosted concurrency, encrypted backup, restore, and blob-survival rehearsals
+
   worker_controls:
     id: D
-    status: in_progress
-    owner: Halley
-    branch: delegated-worktree
+    status: complete_local
+    completed:
+      - Separate durable worker with leases, heartbeats, retries, and quarantine
+      - Exact planned-call consumption and transactional daily limits
+      - Kill switches, circuit breakers, synthetic incidents, and billing reconciliation
+      - Executable DataForSEO qualification matrix
     blockers:
-      - Production DataForSEO qualification and billing exports require operator credentials.
-    completed_acceptance_criteria: []
+      - Execute production DataForSEO qualification
+      - Reconcile the first real provider billing export
+
   security:
     id: E
-    status: in_progress
-    owner: Schrodinger
-    branch: delegated-worktree
+    status: partial_local
+    completed:
+      - Fail-closed OIDC verification and local test identities
+      - Central roles and permissions for discovery and review routes
+      - Append-only hash-linked audit records
+      - Security headers, request limits, rate limiting, CORS, SSRF controls, and secret references
     blockers:
-      - Production OIDC tenant and secret store are not configured.
-    completed_acceptance_criteria: []
+      - Add explicit centralized permissions for property mutations
+      - Add append-only audit events for privileged property actions
+      - Configure and validate a real OIDC tenant, Redis, and managed secret store
+      - Rotate previously shared DataForSEO test credentials before production
+
   observability:
     id: F
-    status: in_progress
-    owner: Schrodinger
-    branch: delegated-worktree
+    status: complete_local
+    completed:
+      - Correlated structured logs and trace context
+      - Prometheus metrics, health endpoints, SLOs, alerts, dashboard, and runbooks
     blockers:
-      - Production telemetry and alert destinations are not provisioned.
-    completed_acceptance_criteria: []
+      - Provision production telemetry and alert destinations
+      - Exercise staging alerts and incident response
+
   deployment:
     id: G
-    status: in_progress
-    owner: Schrodinger
-    branch: delegated-worktree
+    status: complete_local
+    completed:
+      - Hardened containers and isolated environment validation
+      - CI security, migration, replay, frontend, and container gates
+      - Approval-gated release and rollback workflows
+      - AWS Terraform reference infrastructure and immutable release manifests
     blockers:
-      - Cloud account, DNS, and production approval are operator-controlled.
-    completed_acceptance_criteria: []
+      - Provision staging and production infrastructure
+      - Rehearse deployment and rollback with protected environments
+
   opportunity_review:
     id: H
-    status: in_progress
-    owner: Hume
-    branch: delegated-worktree
-    blockers: []
-    completed_acceptance_criteria: []
+    status: complete_local
+    completed:
+      - Attributable review state machine and ownership
+      - Reversible evidence overrides
+      - Saved templates, aggregate-cost-bounded batches, and evidence exports
+      - Approval completeness gate before property creation
+    blockers:
+      - Complete owner UAT with production-quality evidence
+
   property_workflow:
     id: I
     status: complete_local
-    owner: Hume
-    branch: codex/workstream-i-property
+    completed:
+      - Versioned provider-independent properties and SiteConfig
+      - One-active-provider enforcement and configuration-only replacement
+      - Manual domain approval and verification workflow
+      - Deterministic noindex staging builds, compliance gates, deployment records, and rollback
     blockers:
-      - Public deployment remains blocked until Release A is approved.
-      - Registrar, DNS, and public hosting adapters are intentionally unavailable.
-    completed_acceptance_criteria:
-      - Approved opportunities create versioned provider-independent properties.
-      - Exactly one active provider is enforced through the shared assignment table.
-      - Domain purchase and public deployment fail closed.
-      - Staging is noindex and builds are deterministic.
-      - Compliance and production release gates are enforced.
-      - Rollback restores a prior immutable build.
+      - Resolve property-route RBAC and audit gaps from Workstream E
+      - Select registrar, DNS, and public hosting providers
+      - Release A approval is required before public deployment work
+
   lead_operations:
     id: J
-    status: in_progress
-    owner: Euler
-    branch: delegated-worktree
+    status: partial_local
+    completed:
+      - Durable, idempotent lead intake and delivery service layer
+      - Provider assignment, call-route, privacy, consent, analytics, and retention models
+      - Fixture delivery, call-tracking, spam, rate-limit, and alert adapters
     blockers:
-      - Production email and call-routing providers are not selected or configured.
-    completed_acceptance_criteria: []
+      - Expose reviewed authenticated HTTP workflows
+      - Select and implement production email, call-routing, and operator-alert adapters
+      - Schedule retention and route-health jobs
+
   outcome_feedback:
     id: K
-    status: in_progress
-    owner: Euler
-    branch: delegated-worktree
+    status: partial_local
+    completed:
+      - Immutable decision-to-evidence lineage
+      - Source-attributed outcome ingestion and descriptive calibration reports
+      - Guardrails preventing automatic scoring changes
     blockers:
-      - Real property outcomes do not exist yet.
-    completed_acceptance_criteria: []
+      - Select and implement production outcome-source adapters
+      - Collect enough real outcomes for meaningful calibration
+
   qa:
     id: L
-    status: not_started
-    owner: orchestrator
-    branch: main
+    status: partial
+    completed:
+      - Local backend, frontend, calibration, migration, and container verification
+      - CI definitions for PostgreSQL, dependency, secret, image, and Terraform checks
     blockers:
-      - Integration is incomplete.
-    completed_acceptance_criteria: []
+      - Run staging load, failure-injection, security, recovery, and rollback exercises
+      - Complete owner UAT and sign the release checklist
+
 release_gates:
-  calibration_ready: false
+  calibration_ready_local: true
   paid_scan_ready: false
   internal_production_ready: false
+  property_staging_ready_local: true
   property_staging_ready: false
   public_launch_ready: false
   operational_learning_ready: false
+
+next_code_priorities:
+  - Add property-route RBAC and append-only audit coverage
+  - Register rank-rent prefilter batch/top CLI commands
+  - Add authenticated lead and outcome APIs only after their production contract is approved
+  - Implement provider adapters after email, call-routing, registrar, hosting, and outcome vendors are selected
+
+operator_controlled_next_steps:
+  - Push the local main branch
+  - Rotate the shared DataForSEO API password
+  - Select a production cloud environment and OIDC provider
+  - Provision staging PostgreSQL, object storage, Redis, telemetry, and alerts
+  - Run DataForSEO production qualification and billing reconciliation
+  - Rehearse backup/restore, deployment/rollback, incidents, and owner UAT

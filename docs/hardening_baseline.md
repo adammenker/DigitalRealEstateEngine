@@ -1,5 +1,9 @@
 # V1 Hardening Baseline
 
+> Historical baseline: this file describes the repository before the production-readiness
+> workstreams were integrated. It is retained for change history, not current status. See
+> `production_status.md`.
+
 Recorded before V1 hardening edits on branch `v1-hardening-spec`.
 
 - Baseline HEAD: `fb20ba7f6bebebe0a7e6e1cb934b7f58b9a182f0`

@@ -37,20 +37,15 @@ Approval can be reversed by moving an opportunity from
 `approved_for_property` back to `full_review` or `needs_more_evidence`. Archival
 is terminal.
 
-## Local actor contract
+## Actor contract
 
-Until the authentication workstream protects these routes, review APIs accept:
+Review APIs derive their actor from the shared authenticated principal. Local and test
+environments use the explicit local authentication adapter with `X-Local-User` and
+`X-Local-Role`; staging and production require a validated OIDC bearer token. Supported review
+roles are `operator`, `reviewer`, and `admin`. A client cannot claim the reserved `system` role.
 
-```http
-X-Actor-Id: reviewer-123
-X-Actor-Role: reviewer
-```
-
-Supported roles are `operator`, `reviewer`, and `admin`. Development and tests
-default to `local-operator` when headers are absent. Staging and production
-require an actor header. A client cannot claim the reserved `system` role.
-
-These headers are an integration boundary, not production authentication.
+The centralized mutation policy requires reviewer/admin authority for approval transitions and
+evidence overrides. Accepted mutations append a hash-linked audit event in the same transaction.
 
 ## Approval completeness
 
@@ -200,3 +195,5 @@ scan_failed -> needs_more_evidence
 partial_review -> needs_more_evidence
 unusable_review -> needs_more_evidence
 ```
+
+The current linear migration head is `d4a7c2e9f1b6`.

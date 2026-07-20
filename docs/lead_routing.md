@@ -63,6 +63,8 @@ observed facts.
 A production adapter must provide shared rate limiting, authenticated operator
 alerts, encrypted delivery credentials, provider-side idempotency, and
 documented timeout/retry semantics. It must pass the fixture contract tests
-before activation. Public form endpoints remain blocked until authentication,
-authorization, CSRF/CORS, shared rate limiting, observability, and production
-storage workstreams are integrated.
+before activation. Shared authentication, authorization, CORS, rate-limit, observability, and
+production-storage foundations now exist, but no reviewed lead HTTP contract or real delivery,
+call-tracking, or alert adapter has been selected. Public form endpoints remain blocked until
+those contracts, provider adapters, route-specific permissions, audit events, abuse controls,
+staging exercises, and privacy approval are complete.

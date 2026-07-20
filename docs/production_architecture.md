@@ -1,5 +1,10 @@
 # Production Architecture
 
+This is the implemented target architecture and the local Compose topology. Local Compose
+currently runs PostgreSQL, a one-shot migration, a separate API, a separate worker, and the
+Next.js frontend. Managed OIDC, Redis, object storage, telemetry export, and public deployment
+remain unprovisioned production dependencies.
+
 ## Target Topology
 
 ```mermaid
@@ -46,4 +51,3 @@ Every scan records scoring, evidence-quality, service-catalog, classification, g
 prefilter, adapter, normalization, and cost-control versions. Every deployment records
 its site template, SiteConfig, provider assignment, compliance review, build, image, and
 release versions.
-

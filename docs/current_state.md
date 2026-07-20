@@ -110,10 +110,29 @@ Run the complete local verification suite with:
 make verify
 ```
 
+The 2026-07-20 integrated snapshot passed 292 backend tests with 3 optional PostgreSQL tests
+skipped, all 26 calibration scenarios, strict mypy over 100 source files, Ruff, frontend
+lint/build, Docker image builds, and local Compose health checks. Alembic has one head at
+`d4a7c2e9f1b6`.
+
+## Property, Lead, And Outcome Workflows
+
+- Approved opportunities can create versioned provider-independent properties.
+- Domain selection, manual registration evidence, DNS verification, SiteConfig, assets,
+  provider assignments, deterministic builds, compliance, deployment records, and rollback are
+  implemented locally.
+- Preview and staging are always noindex. Public deployment and automatic domain purchase fail
+  closed.
+- Lead routing and outcomes have durable, privacy-aware internal service layers with fixture
+  delivery, call, alert, and source adapters.
+- There is no reviewed public lead endpoint or real email, call-routing, hosting, registrar, or
+  outcome-source adapter.
+
 ## Remaining Production Work
 
-The discovery architecture is implemented, but production readiness still requires empirical
-score calibration with real outcomes, additional validated public datasets, a deployed PostgreSQL
-concurrency test and backup/restore rehearsal, external observability and alert delivery, security
-hardening, and downstream review and launch workflows. These
-items are tracked in `docs/production_backlog.md`.
+The current source of truth is `docs/production_status.yaml`. Immediate code gaps are centralized
+RBAC and append-only audit coverage for property mutations, exact prefilter CLI registration, and
+reviewed HTTP contracts for lead/outcome services. Production validation still requires real
+OIDC/Redis/secrets, hosted PostgreSQL and blob backup/restore, DataForSEO qualification and billing
+reconciliation, telemetry/alerts, deployment/rollback rehearsal, security/load/failure testing,
+owner UAT, and empirical calibration. See `docs/production_backlog.md`.

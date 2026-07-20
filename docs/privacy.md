@@ -57,10 +57,11 @@ age cutoff.
 
 ## Encryption and recording
 
-Production database, backup, and transport encryption belong to the production
-data and security workstreams. This module does not implement home-grown field
-encryption. It must not be publicly enabled until encrypted storage, secret
-management for the HMAC pepper, and authenticated access are verified.
+Production database, backup, transport-encryption, secret-reference, and authenticated-access
+contracts are implemented, but they have not been exercised in a provisioned production
+environment. This module does not implement home-grown field encryption. It must not be publicly
+enabled until encrypted storage, managed secret injection for the HMAC pepper, route permissions,
+audit events, and authenticated access are verified in staging.
 
 Call recording is off by default. Enabling it requires explicit approval and a
 retention period. Legal notice, jurisdiction review, provider support, secure

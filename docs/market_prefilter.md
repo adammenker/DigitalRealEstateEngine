@@ -111,8 +111,8 @@ rank-rent prefilter top
 ```
 
 still require thin command registration in `src/rank_rent/cli.py`. That file was intentionally
-left untouched in this focused workstream. The standalone script and service APIs contain all
-business logic needed for that wiring.
+left untouched during the original focused workstream. This remains a small current code backlog
+item. The standalone script and service APIs contain all business logic needed for that wiring.
 
 The frontend can continue consuming existing fields while progressively adopting
 `assessment_type`, `service_family_id`, `profile_version`, `evidence`, `provider_density`,
