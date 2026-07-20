@@ -40,6 +40,16 @@ from rank_rent.services.us_geography import USGeographyError, USGeographyIndex
 from rank_rent.settings import get_settings
 
 
+@pytest.fixture(autouse=True)
+def enable_test_live_policy(monkeypatch: pytest.MonkeyPatch):
+    """These tests use an in-memory fake provider and never open a network client."""
+    monkeypatch.setenv("ALLOW_LIVE_API_CALLS", "true")
+    monkeypatch.setenv("ALLOW_FULL_SCANS", "true")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 class MinimalResearchProvider:
     provider_name = "minimal-test-provider"
 

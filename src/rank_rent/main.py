@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
@@ -67,7 +66,7 @@ from rank_rent.services.locations import (
 )
 from rank_rent.services.market_prefilter import MarketPrefilter
 from rank_rent.services.records import save_scan_plan_calls
-from rank_rent.services.scan_worker import active_retry_for_scan, scan_worker_loop
+from rank_rent.services.scan_worker import active_retry_for_scan
 from rank_rent.services.scanner import ScanPipeline
 from rank_rent.services.service_catalog import (
     ServiceCatalog,
@@ -87,34 +86,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     init_db()
-    settings = get_settings()
-    stop_event: asyncio.Event | None = None
-    worker_task: asyncio.Task[None] | None = None
-    if settings.scan_worker_enabled:
-        stop_event = asyncio.Event()
-        worker_task = asyncio.create_task(
-            scan_worker_loop(
-                stop_event,
-                poll_seconds=settings.scan_worker_poll_seconds,
-                heartbeat_seconds=settings.scan_worker_heartbeat_seconds,
-                stale_after_seconds=settings.scan_worker_stale_after_seconds,
-            )
-        )
-    try:
-        yield
-    finally:
-        if stop_event is not None:
-            stop_event.set()
-        if worker_task is not None:
-            try:
-                await asyncio.wait_for(
-                    worker_task,
-                    timeout=max(1.0, settings.scan_worker_heartbeat_seconds + 1.0),
-                )
-            except TimeoutError:
-                worker_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await worker_task
+    yield
 
 
 app = FastAPI(title="Digital Real Estate Engine", lifespan=lifespan)
@@ -270,10 +242,15 @@ def _scan_summary(row: ScanRunORM, session: Session) -> dict[str, Any]:
         "cache_policy_version": row.cache_policy_version,
         "source_scan_run_id": row.source_scan_run_id,
         "retry_count": row.retry_count,
+        "max_attempts": row.max_attempts,
+        "next_attempt_at": row.next_attempt_at.isoformat() if row.next_attempt_at else None,
         "cancel_requested": row.cancel_requested,
         "worker_id": row.worker_id,
         "claimed_at": row.claimed_at.isoformat() if row.claimed_at else None,
         "heartbeat_at": row.heartbeat_at.isoformat() if row.heartbeat_at else None,
+        "lease_expires_at": row.lease_expires_at.isoformat() if row.lease_expires_at else None,
+        "quarantined_at": row.quarantined_at.isoformat() if row.quarantined_at else None,
+        "quarantine_reason": row.quarantine_reason,
         "integration_versions": row.integration_versions,
         "request_parameters": row.request_parameters,
         "typed_counts": typed_counts,
@@ -1380,6 +1357,8 @@ def api_cancel_scan(scan_id: int, session: Session = Depends(get_session)) -> di
         scan.completed_at = datetime.now(UTC)
         scan.worker_id = None
         scan.heartbeat_at = None
+        scan.lease_token = None
+        scan.lease_expires_at = None
     session.commit()
     return {
         "cancelled": True,
@@ -1615,12 +1594,13 @@ def _queue_scan(
         scan_profile=str(scan_plan.get("scan_profile") or "testing"),
         source_scan_run_id=source_scan_run_id,
         retry_count=retry_count,
+        max_attempts=get_settings().scan_worker_max_attempts,
         progress_stage="queued",
         cache_policy_version="v2",
         integration_versions={
             "data_mode": data_mode,
             "queued": True,
-            "async_worker": "database_in_process",
+            "async_worker": "separate_process",
         },
         request_parameters={
             "service": service.slug,

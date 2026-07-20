@@ -14,8 +14,14 @@ services:
       BLOB_STORE_BACKEND: filesystem
       BLOB_STORE_PATH: /data/raw-responses
       ALLOW_LIVE_API_CALLS: ${ALLOW_LIVE_API_CALLS:-false}
+      ALLOW_PRODUCTION_DATAFORSEO: ${ALLOW_PRODUCTION_DATAFORSEO:-false}
+      PAID_CALL_KILL_SWITCH: ${PAID_CALL_KILL_SWITCH:-false}
+      ALLOW_FULL_SCANS: ${ALLOW_FULL_SCANS:-false}
       LIVE_SCAN_DEPTH: ${LIVE_SCAN_DEPTH:-testing}
       MAX_SCAN_COST_USD: ${MAX_SCAN_COST_USD:-10.00}
+      PRODUCTION_DAILY_REQUEST_LIMIT: ${PRODUCTION_DAILY_REQUEST_LIMIT:-100}
+      PRODUCTION_DAILY_SPEND_USD: ${PRODUCTION_DAILY_SPEND_USD:-25.00}
+      TESTING_DAILY_SPEND_USD: ${TESTING_DAILY_SPEND_USD:-2.00}
       US_GEOGRAPHY_DATABASE_PATH: /app/data/us_geography.sqlite3
       DATAFORSEO_ENVIRONMENT: ${DATAFORSEO_ENVIRONMENT:-sandbox}
       DATAFORSEO_LOGIN: ${DATAFORSEO_LOGIN:-}
@@ -30,6 +36,43 @@ services:
     volumes:
       - rank_rent_data:/data
       - ./generated_sites:/app/generated_sites
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: digital-realestate-engine-worker
+    restart: unless-stopped
+    command: ["rank-rent", "worker"]
+    environment:
+      APP_ENV: development
+      DATA_MODE: ${DATA_MODE:-fixture}
+      DATABASE_URL: sqlite:////data/rank_rent.db
+      BLOB_STORE_BACKEND: filesystem
+      BLOB_STORE_PATH: /data/raw-responses
+      ALLOW_LIVE_API_CALLS: ${ALLOW_LIVE_API_CALLS:-false}
+      ALLOW_PRODUCTION_DATAFORSEO: ${ALLOW_PRODUCTION_DATAFORSEO:-false}
+      PAID_CALL_KILL_SWITCH: ${PAID_CALL_KILL_SWITCH:-false}
+      ALLOW_FULL_SCANS: ${ALLOW_FULL_SCANS:-false}
+      LIVE_SCAN_DEPTH: ${LIVE_SCAN_DEPTH:-testing}
+      MAX_SCAN_COST_USD: ${MAX_SCAN_COST_USD:-10.00}
+      PRODUCTION_DAILY_REQUEST_LIMIT: ${PRODUCTION_DAILY_REQUEST_LIMIT:-100}
+      PRODUCTION_DAILY_SPEND_USD: ${PRODUCTION_DAILY_SPEND_USD:-25.00}
+      TESTING_DAILY_SPEND_USD: ${TESTING_DAILY_SPEND_USD:-2.00}
+      SCAN_WORKER_CONCURRENCY: ${SCAN_WORKER_CONCURRENCY:-1}
+      US_GEOGRAPHY_DATABASE_PATH: /app/data/us_geography.sqlite3
+      DATAFORSEO_ENVIRONMENT: ${DATAFORSEO_ENVIRONMENT:-sandbox}
+      DATAFORSEO_LOGIN: ${DATAFORSEO_LOGIN:-}
+      DATAFORSEO_PASSWORD: ${DATAFORSEO_PASSWORD:-}
+    volumes:
+      - rank_rent_data:/data
+      - ./generated_sites:/app/generated_sites
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
 
   frontend:
     build:

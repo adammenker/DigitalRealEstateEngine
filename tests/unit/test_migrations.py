@@ -11,7 +11,7 @@ from rank_rent.db.base import SCHEMA_HEAD_REVISION
 from rank_rent.settings import get_settings
 
 
-def test_migration_graph_has_one_head_and_workstream_c_follows_prior_head() -> None:
+def test_migration_graph_has_one_linear_head_for_workstreams_c_and_d() -> None:
     revisions: dict[str, str | None] = {}
     for path in Path("migrations/versions").glob("*.py"):
         values: dict[str, str | None] = {}
@@ -27,7 +27,9 @@ def test_migration_graph_has_one_head_and_workstream_c_follows_prior_head() -> N
 
     referenced = {revision for revision in revisions.values() if revision is not None}
     assert set(revisions) - referenced == {SCHEMA_HEAD_REVISION}
-    assert revisions[SCHEMA_HEAD_REVISION] == "b7d2f4a9c6e1"
+    assert revisions[SCHEMA_HEAD_REVISION] == "c9a4e7d2b6f1"
+    assert revisions["c9a4e7d2b6f1"] == "f8c1d4e7a2b9"
+    assert revisions["f8c1d4e7a2b9"] == "b7d2f4a9c6e1"
 
 
 def test_alembic_upgrade_head_creates_v1_schema(tmp_path, monkeypatch) -> None:
@@ -79,6 +81,9 @@ def test_alembic_upgrade_head_creates_v1_schema(tmp_path, monkeypatch) -> None:
         index["name"] for index in inspector.get_indexes("provider_assignments")
     }
     assert "uq_provider_assignments_active_property" in provider_assignment_indexes
+    assert "provider_daily_usage" in tables
+    assert "provider_qualifications" in tables
+    assert "billing_reconciliations" in tables
     scan_columns = {column["name"] for column in inspector.get_columns("scan_runs")}
     assert {
         "data_mode",
@@ -88,6 +93,12 @@ def test_alembic_upgrade_head_creates_v1_schema(tmp_path, monkeypatch) -> None:
         "worker_id",
         "claimed_at",
         "heartbeat_at",
+        "lease_token",
+        "lease_expires_at",
+        "next_attempt_at",
+        "max_attempts",
+        "quarantined_at",
+        "quarantine_reason",
     } <= scan_columns
     response_columns = {column["name"] for column in inspector.get_columns("raw_api_responses")}
     assert {

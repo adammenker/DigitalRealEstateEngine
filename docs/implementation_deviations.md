@@ -29,8 +29,8 @@ The steering document is a multi-milestone remediation plan. This implementation
 
 The following later milestones are not complete yet:
 
-- full real qualification framework;
-- external queue workers beyond the V1 in-process database worker;
+- automated execution of the live qualification matrix (recording, expiry, and enforcement are implemented);
+- an external broker beyond the dedicated database-backed worker process;
 - approval-gated site generation;
 - registrar-grade domain availability;
 - real cloud staging deployment.
@@ -43,7 +43,7 @@ The offline remediation specification is intentionally broad. This implementatio
 
 - raw response storage extends the existing `raw_api_responses` table rather than renaming it to `stored_api_responses`;
 - scan planning uses maintained endpoint estimates rather than provider price-table extraction;
-- async scans use an in-process database-backed worker; an external queue service remains deferred;
+- async scans use a dedicated database-backed worker process; an external broker remains deferred;
 - geographic resolution now uses a versioned offline U.S. city/ZCTA index; address-level and
   international geography remain outside the selected production scope;
 - scoring is now version `v2`; remaining scoring work is real-market calibration after production

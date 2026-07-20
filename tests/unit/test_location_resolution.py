@@ -42,6 +42,7 @@ def live_settings(**updates: object) -> Settings:
     return settings(
         data_mode="live",
         allow_live_api_calls=True,
+        allow_production_dataforseo=True,
         dataforseo_login="user",
         dataforseo_password="password",
         dataforseo_environment="production",

@@ -176,6 +176,8 @@ def test_sandbox_provider_stores_free_sandbox_cache_rows() -> None:
     settings = Settings(
         data_mode="live",
         allow_live_api_calls=True,
+        allow_production_dataforseo=True,
+        allow_full_scans=True,
         dataforseo_login="user",
         dataforseo_password="password",
         dataforseo_environment="sandbox",
@@ -204,6 +206,8 @@ async def test_live_call_ledger_does_not_hold_sqlite_write_lock_during_slow_http
     settings = Settings(
         data_mode="live",
         allow_live_api_calls=True,
+        allow_production_dataforseo=True,
+        allow_full_scans=True,
         dataforseo_login="user",
         dataforseo_password="password",
         dataforseo_environment="sandbox",
@@ -262,6 +266,8 @@ def test_full_scan_plan_matches_executor_keyword_seed_requests() -> None:
     settings = Settings(
         data_mode="live",
         allow_live_api_calls=True,
+        allow_production_dataforseo=True,
+        allow_full_scans=True,
         dataforseo_login="user",
         dataforseo_password="password",
         live_scan_depth="full",
@@ -292,6 +298,8 @@ def test_full_scan_plan_with_offline_geography_fits_default_request_limit() -> N
     settings = Settings(
         data_mode="live",
         allow_live_api_calls=True,
+        allow_production_dataforseo=True,
+        allow_full_scans=True,
         dataforseo_login="user",
         dataforseo_password="password",
         live_scan_depth="full",
@@ -312,6 +320,7 @@ async def test_dataforseo_cache_hit_writes_api_call_ledger_row() -> None:
     settings = Settings(
         data_mode="live",
         allow_live_api_calls=True,
+        allow_production_dataforseo=True,
         dataforseo_login="user",
         dataforseo_password="password",
         dataforseo_environment="sandbox",
@@ -359,6 +368,7 @@ async def test_unplanned_production_scan_call_fails_before_network(
     settings = Settings(
         data_mode="live",
         allow_live_api_calls=True,
+        allow_production_dataforseo=True,
         dataforseo_login="user",
         dataforseo_password="password",
         dataforseo_environment="production",
@@ -400,6 +410,7 @@ def test_identical_requests_consume_distinct_planned_request_ids() -> None:
     settings = Settings(
         data_mode="live",
         allow_live_api_calls=True,
+        allow_production_dataforseo=True,
         dataforseo_login="user",
         dataforseo_password="password",
         dataforseo_environment="production",
@@ -441,6 +452,7 @@ def test_unique_reservation_constraint_rejects_a_matching_race(
     settings = Settings(
         data_mode="live",
         allow_live_api_calls=True,
+        allow_production_dataforseo=True,
         dataforseo_login="user",
         dataforseo_password="password",
         dataforseo_environment="production",
@@ -618,6 +630,7 @@ def test_testing_scan_plan_is_low_cost_and_blocks_over_budget() -> None:
     settings = Settings(
         data_mode="live",
         allow_live_api_calls=True,
+        allow_production_dataforseo=True,
         dataforseo_login="user",
         dataforseo_password="password",
         live_scan_depth="testing",
@@ -663,6 +676,7 @@ def test_scan_plan_marks_exact_cached_calls() -> None:
     settings = Settings(
         data_mode="live",
         allow_live_api_calls=True,
+        allow_production_dataforseo=True,
         dataforseo_login="user",
         dataforseo_password="password",
         live_scan_depth="testing",

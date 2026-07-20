@@ -67,6 +67,16 @@ def build_scan_plan(
             maximum_request_count=settings.max_scan_requests,
         )
 
+    switch_reason = _live_switch_block_reason(settings, profile)
+    if switch_reason:
+        return ScanPlan(
+            scan_profile=profile,
+            maximum_allowed_cost_usd=maximum,
+            maximum_request_count=settings.max_scan_requests,
+            blocked=True,
+            block_reason=switch_reason,
+        )
+
     validate_market_against_index(market, settings)
     provider = dataforseo_provider_name(settings)
     api_environment = normalize_dataforseo_environment(settings)
@@ -187,7 +197,9 @@ def build_scan_plan(
         (call.estimated_cost_usd for call in planned if call.cache_hit),
         Decimal("0"),
     )
-    paid_call_count = len([call for call in planned if not call.cache_hit and call.estimated_cost_usd > 0])
+    paid_call_count = len(
+        [call for call in planned if not call.cache_hit and call.estimated_cost_usd > 0]
+    )
     over_budget = uncached > maximum
     over_request_limit = len(planned) > settings.max_scan_requests
     return ScanPlan(
@@ -246,7 +258,10 @@ def _append_call(
 def _cache_hit(session: Session | None, key: str) -> bool:
     if session is None:
         return False
-    return session.scalar(select(RawApiResponseORM.id).where(RawApiResponseORM.cache_key == key)) is not None
+    return (
+        session.scalar(select(RawApiResponseORM.id).where(RawApiResponseORM.cache_key == key))
+        is not None
+    )
 
 
 def _keyword_seeds(service: ServiceFamily) -> list[str]:
@@ -264,3 +279,18 @@ def _scan_profile(value: str) -> str:
     if profile not in {"testing", "full"}:
         raise ValueError("scan_profile must be 'testing' or 'full'.")
     return profile
+
+
+def _live_switch_block_reason(settings: Settings, profile: str) -> str | None:
+    if not settings.allow_live_api_calls:
+        return "Live calls are disabled by ALLOW_LIVE_API_CALLS."
+    if settings.paid_call_kill_switch:
+        return "Paid calls are disabled by PAID_CALL_KILL_SWITCH."
+    if (
+        normalize_dataforseo_environment(settings) == "production"
+        and not settings.allow_production_dataforseo
+    ):
+        return "Production DataForSEO calls require ALLOW_PRODUCTION_DATAFORSEO=true."
+    if profile == "full" and not settings.allow_full_scans:
+        return "Full scans require ALLOW_FULL_SCANS=true."
+    return None

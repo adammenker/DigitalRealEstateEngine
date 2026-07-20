@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy import (
@@ -127,9 +127,7 @@ class MarketPrefilterAssessmentORM(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    prefilter_run_id: Mapped[int] = mapped_column(
-        ForeignKey("market_prefilter_runs.id")
-    )
+    prefilter_run_id: Mapped[int] = mapped_column(ForeignKey("market_prefilter_runs.id"))
     geography_id: Mapped[str] = mapped_column(String(80), index=True)
     rank: Mapped[int] = mapped_column(Integer)
     score: Mapped[float] = mapped_column(Float)
@@ -142,7 +140,9 @@ class ScanRunORM(TimestampMixin, Base):
     __tablename__ = "scan_runs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    opportunity_id: Mapped[int | None] = mapped_column(ForeignKey("opportunities.id"), nullable=True)
+    opportunity_id: Mapped[int | None] = mapped_column(
+        ForeignKey("opportunities.id"), nullable=True
+    )
     source: Mapped[str] = mapped_column(String(40))
     status: Mapped[str] = mapped_column(String(40), default="pending")
     estimated_cost_usd: Mapped[float] = mapped_column(Float, default=0)
@@ -160,14 +160,24 @@ class ScanRunORM(TimestampMixin, Base):
     scoring_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
     cache_policy_version: Mapped[str] = mapped_column(String(40), default="v2")
     planned_cost_usd: Mapped[float] = mapped_column(Float, default=0)
-    source_scan_run_id: Mapped[int | None] = mapped_column(ForeignKey("scan_runs.id"), nullable=True)
+    source_scan_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("scan_runs.id"), nullable=True
+    )
     progress_stage: Mapped[str] = mapped_column(String(80), default="queued")
     partial_outputs: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=4)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
     worker_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    lease_token: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    quarantined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    quarantine_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class ScanPlanCallORM(TimestampMixin, Base):
@@ -219,7 +229,9 @@ class RawApiResponseORM(TimestampMixin, Base):
     cost_usd: Mapped[float] = mapped_column(Float, default=0)
     provider_task_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     provider_request_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    source_scan_run_id: Mapped[int | None] = mapped_column(ForeignKey("scan_runs.id"), nullable=True)
+    source_scan_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("scan_runs.id"), nullable=True
+    )
     checksum: Mapped[str] = mapped_column(String(128), default="")
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     object_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -317,6 +329,67 @@ class ApiCallORM(TimestampMixin, Base):
     provider_request_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
 
+class ProviderDailyUsageORM(TimestampMixin, Base):
+    __tablename__ = "provider_daily_usage"
+    __table_args__ = (
+        UniqueConstraint(
+            "usage_date",
+            "usage_class",
+            "provider",
+            "endpoint",
+            name="uq_provider_daily_usage_bucket",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    usage_date: Mapped[date] = mapped_column(index=True)
+    usage_class: Mapped[str] = mapped_column(String(20), index=True)
+    provider: Mapped[str] = mapped_column(String(80), index=True)
+    endpoint: Mapped[str] = mapped_column(String(160), default="", index=True)
+    request_count: Mapped[int] = mapped_column(Integer, default=0)
+    spend_usd: Mapped[float] = mapped_column(Float, default=0)
+    reserved_spend_usd: Mapped[float] = mapped_column(Float, default=0)
+    cache_miss_count: Mapped[int] = mapped_column(Integer, default=0)
+    unexpected_call_count: Mapped[int] = mapped_column(Integer, default=0)
+    abnormal_cost_count: Mapped[int] = mapped_column(Integer, default=0)
+    provider_failure_count: Mapped[int] = mapped_column(Integer, default=0)
+    schema_drift_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ProviderQualificationORM(TimestampMixin, Base):
+    __tablename__ = "provider_qualifications"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    provider: Mapped[str] = mapped_column(String(80), index=True)
+    environment: Mapped[str] = mapped_column(String(20), index=True)
+    adapter_version: Mapped[str] = mapped_column(String(80), index=True)
+    status: Mapped[str] = mapped_column(String(20), index=True)
+    qualified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    checks: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    notes: Mapped[str] = mapped_column(Text, default="")
+
+
+class BillingReconciliationORM(TimestampMixin, Base):
+    __tablename__ = "billing_reconciliations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    provider: Mapped[str] = mapped_column(String(80), index=True)
+    environment: Mapped[str] = mapped_column(String(20), index=True)
+    period_start: Mapped[date] = mapped_column(index=True)
+    period_end: Mapped[date] = mapped_column(index=True)
+    reconciled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    status: Mapped[str] = mapped_column(String(20), index=True)
+    internal_call_count: Mapped[int] = mapped_column(Integer, default=0)
+    provider_call_count: Mapped[int] = mapped_column(Integer, default=0)
+    internal_cost_usd: Mapped[float] = mapped_column(Float, default=0)
+    provider_cost_usd: Mapped[float] = mapped_column(Float, default=0)
+    unmatched_provider_charges: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    unmatched_internal_calls: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    difference_usd: Mapped[float] = mapped_column(Float, default=0)
+    source_filename: Mapped[str] = mapped_column(String(240), default="")
+
+
 class ScanPlanORM(TimestampMixin, Base):
     __tablename__ = "scan_plans"
 
@@ -366,7 +439,9 @@ class JsonArtifactORM(TimestampMixin, Base):
     __tablename__ = "json_artifacts"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    opportunity_id: Mapped[int | None] = mapped_column(ForeignKey("opportunities.id"), nullable=True)
+    opportunity_id: Mapped[int | None] = mapped_column(
+        ForeignKey("opportunities.id"), nullable=True
+    )
     kind: Mapped[str] = mapped_column(String(80), index=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
@@ -376,7 +451,9 @@ class KeywordMetricORM(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id"))
-    opportunity_id: Mapped[int | None] = mapped_column(ForeignKey("opportunities.id"), nullable=True)
+    opportunity_id: Mapped[int | None] = mapped_column(
+        ForeignKey("opportunities.id"), nullable=True
+    )
     keyword: Mapped[str] = mapped_column(String(240))
     canonical_keyword: Mapped[str] = mapped_column(String(240))
     intent: Mapped[str] = mapped_column(String(80))
@@ -396,7 +473,9 @@ class SerpSnapshotORM(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id"))
-    opportunity_id: Mapped[int | None] = mapped_column(ForeignKey("opportunities.id"), nullable=True)
+    opportunity_id: Mapped[int | None] = mapped_column(
+        ForeignKey("opportunities.id"), nullable=True
+    )
     query: Mapped[str] = mapped_column(String(240))
     market_id: Mapped[str] = mapped_column(String(160))
     device: Mapped[str] = mapped_column(String(40))
@@ -434,7 +513,9 @@ class CompetitorMetricORM(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id"))
-    opportunity_id: Mapped[int | None] = mapped_column(ForeignKey("opportunities.id"), nullable=True)
+    opportunity_id: Mapped[int | None] = mapped_column(
+        ForeignKey("opportunities.id"), nullable=True
+    )
     url: Mapped[str] = mapped_column(Text)
     domain: Mapped[str] = mapped_column(String(240))
     page_url: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -457,9 +538,7 @@ class CompetitorMetricORM(TimestampMixin, Base):
     representative_query: Mapped[str | None] = mapped_column(Text, nullable=True)
     serp_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
     serp_observations: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
-    serp_observation_records: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSON, default=list
-    )
+    serp_observation_records: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -468,7 +547,9 @@ class ProviderCandidateORM(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id"))
-    opportunity_id: Mapped[int | None] = mapped_column(ForeignKey("opportunities.id"), nullable=True)
+    opportunity_id: Mapped[int | None] = mapped_column(
+        ForeignKey("opportunities.id"), nullable=True
+    )
     name: Mapped[str] = mapped_column(String(240))
     website: Mapped[str | None] = mapped_column(Text, nullable=True)
     phone: Mapped[str | None] = mapped_column(String(80), nullable=True)
@@ -485,9 +566,7 @@ class ProviderCandidateORM(TimestampMixin, Base):
     business_status: Mapped[str] = mapped_column(String(80))
     contact_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     source: Mapped[str] = mapped_column(String(120))
-    source_timestamp: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=now_utc
-    )
+    source_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     raw_response_ref: Mapped[str | None] = mapped_column(String(160), nullable=True)
     outreach_status: Mapped[str] = mapped_column(String(80))
     suitability_score: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -569,7 +648,9 @@ class AssetORM(TimestampMixin, Base):
     __tablename__ = "assets"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    opportunity_id: Mapped[int | None] = mapped_column(ForeignKey("opportunities.id"), nullable=True)
+    opportunity_id: Mapped[int | None] = mapped_column(
+        ForeignKey("opportunities.id"), nullable=True
+    )
     site_config_id: Mapped[int | None] = mapped_column(ForeignKey("site_configs.id"), nullable=True)
     type: Mapped[str] = mapped_column(String(80))
     source_provider: Mapped[str] = mapped_column(String(120), default="manual")
@@ -605,7 +686,9 @@ class InterventionLogORM(TimestampMixin, Base):
     __tablename__ = "intervention_logs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    opportunity_id: Mapped[int | None] = mapped_column(ForeignKey("opportunities.id"), nullable=True)
+    opportunity_id: Mapped[int | None] = mapped_column(
+        ForeignKey("opportunities.id"), nullable=True
+    )
     lifecycle_stage: Mapped[str] = mapped_column(String(80))
     action_type: Mapped[str] = mapped_column(String(80))
     estimated_minutes: Mapped[int] = mapped_column(Integer, default=0)

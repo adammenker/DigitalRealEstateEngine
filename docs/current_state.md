@@ -60,12 +60,17 @@ full scans and promotions require a configured service.
 - The reconciled ledger joins planned and executed calls by planned request ID and exposes
   planned, executed, cached, failed, unexecuted, unexpected, and actual-cost totals.
 - Sandbox remains the default DataForSEO environment. Production traffic requires explicit
-  configuration and live-call enablement.
+  configuration, all applicable kill switches, current adapter-version qualification, and clean
+  billing reconciliation.
+- Cache misses reserve durable daily request/spend counters transactionally before network access.
+  Counters include production/testing totals, endpoint spend, cache misses, unexpected calls,
+  provider failures, and schema drift.
 
 ## Persistence And Replay
 
-- Scans run synchronously or as durable database-backed jobs with atomic claim, heartbeat,
-  cancellation, retry, and stale-worker recovery.
+- Queued scans run in a dedicated worker process with configurable concurrency, atomic lease-token
+  claims, heartbeat/expiry, cancellation, exponential retry with jitter, stale recovery, and poison
+  job quarantine. FastAPI does not run an embedded worker.
 - Production configuration requires PostgreSQL and applies explicit pool, statement-timeout,
   idle-transaction-timeout, health, and schema-readiness policies. SQLite remains supported
   for local fixtures and lightweight replay.
@@ -97,6 +102,7 @@ make verify
 ## Remaining Production Work
 
 The discovery architecture is implemented, but production readiness still requires empirical
-score calibration with real outcomes, a deployed PostgreSQL concurrency test and backup/restore
-rehearsal, observability, security hardening, and downstream review and launch workflows. These
+score calibration with real outcomes, additional validated public datasets, a deployed PostgreSQL
+concurrency test and backup/restore rehearsal, external observability and alert delivery, security
+hardening, and downstream review and launch workflows. These
 items are tracked in `docs/production_backlog.md`.

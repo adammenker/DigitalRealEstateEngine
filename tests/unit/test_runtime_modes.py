@@ -37,6 +37,7 @@ def test_live_mode_never_instantiates_mock_adapter() -> None:
     settings = Settings(
         data_mode="live",
         allow_live_api_calls=True,
+        allow_production_dataforseo=True,
         dataforseo_login="user",
         dataforseo_password="password",
     )
@@ -66,6 +67,7 @@ def test_live_mode_can_explicitly_use_production_environment() -> None:
     settings = Settings(
         data_mode="live",
         allow_live_api_calls=True,
+        allow_production_dataforseo=True,
         dataforseo_login="user",
         dataforseo_password="password",
         dataforseo_environment="production",

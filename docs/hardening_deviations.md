@@ -12,8 +12,8 @@ This file records intentional deviations from `specs/DigitalRealEstateEngine_V1_
 - Cache keys include provider, endpoint, API version, response shape version, and normalized request.
 - Scan plans expose cache hit count, paid call count, request limit, confirmation requirement, and cost budget blocks.
 - Preliminary/full assessment and score-component tables are added.
-- Async scans now use a database-backed in-process worker with atomic claim, heartbeat,
-  stale recovery, cancellation, and idempotent active retry behavior.
+- Async scans now use a separate database-backed worker process with atomic lease-token claims,
+  heartbeat/expiry, stale recovery, cancellation, bounded retry, and poison-job quarantine.
 - Keyword handling now records exact duplicates, negative filters, close-variant clusters,
   representative SERP selections, and value-ranking reasons.
 
@@ -26,8 +26,10 @@ This file records intentional deviations from `specs/DigitalRealEstateEngine_V1_
 - Demand granularity is represented in scoring/reporting. Local demand estimation is deliberately
   conservative and only uses transparent provider-local volume or population-share estimation
   when population metadata exists.
-- Qualification harness is still a smoke/fixture/replay foundation rather than a complete capability matrix.
-- A separate external queue service is deferred; V1 intentionally uses the backend process worker.
+- Qualification is represented by a complete expiring capability matrix tied to the adapter
+  version; execution of the controlled live qualification run remains an operator procedure.
+- A separate broker is deferred; the dedicated worker intentionally uses the migrated database
+  queue and PostgreSQL row locking in production.
 - Site generator hardening is deferred beyond preserving the existing workflow separation.
 
 ## Rationale

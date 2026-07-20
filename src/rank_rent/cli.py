@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import signal
 import subprocess
 import sys
+from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -25,6 +28,14 @@ from rank_rent.replay import (
 )
 from rank_rent.repositories import market_from_orm, service_from_orm, upsert_market, upsert_service
 from rank_rent.runtime import ConfigurationError, DataMode, validate_runtime_mode
+from rank_rent.services.billing import reconcile_billing_csv
+from rank_rent.services.cost_controls import daily_usage, evaluate_alerts
+from rank_rent.services.qualification import (
+    DATAFORSEO_ADAPTER_VERSION,
+    current_qualification,
+    record_qualification,
+)
+from rank_rent.services.scan_worker import run_worker_runtime
 from rank_rent.services.scanner import ScanPipeline, score_summary
 from rank_rent.services.seeds import load_markets, load_services
 from rank_rent.settings import get_settings
@@ -36,11 +47,15 @@ replay_app = typer.Typer(no_args_is_help=True)
 fixtures_app = typer.Typer(no_args_is_help=True)
 data_app = typer.Typer(no_args_is_help=True)
 calibrate_app = typer.Typer(no_args_is_help=True)
+qualification_app = typer.Typer(no_args_is_help=True)
+billing_app = typer.Typer(no_args_is_help=True)
 app.add_typer(site_app, name="site")
 app.add_typer(replay_app, name="replay")
 app.add_typer(fixtures_app, name="fixtures")
 app.add_typer(data_app, name="data")
 app.add_typer(calibrate_app, name="calibrate")
+app.add_typer(qualification_app, name="qualification")
+app.add_typer(billing_app, name="billing")
 
 
 def require_runtime_mode(mode: DataMode) -> None:
@@ -90,10 +105,16 @@ def qualify(
 ) -> None:
     if live:
         require_runtime_mode(DataMode.live)
+        init_db()
         try:
-            provider = DataForSEOLiveProvider(settings=get_settings())
-            account = asyncio.run(provider.check_account())
-            location = asyncio.run(provider.resolve_location("Stamford, CT"))
+            with SessionLocal() as session:
+                provider = DataForSEOLiveProvider(
+                    settings=get_settings(),
+                    session=session,
+                    allow_unplanned_requests=True,
+                )
+                account = asyncio.run(provider.check_account())
+                location = asyncio.run(provider.resolve_location("Stamford, CT"))
         except DataForSEOError as exc:
             typer.secho(str(exc), fg=typer.colors.RED)
             raise typer.Exit(2) from exc
@@ -104,6 +125,11 @@ def qualify(
                     "account_status": account["status_message"],
                     "test_location": location.model_dump(mode="json"),
                     "paid_scan_calls_enabled": get_settings().allow_live_api_calls,
+                    "production_qualification_recorded": False,
+                    "qualification_note": (
+                        "This smoke check covers account access and location lookup only. "
+                        "Record the complete matrix with `rank-rent qualification record`."
+                    ),
                 },
                 indent=2,
             )
@@ -180,7 +206,9 @@ def replay_scan(scan_run_id: int) -> None:
                 build_site=False,
             )
         )
-        typer.echo(json.dumps({"replayed_from_scan_run_id": scan_run_id, "result": result["data_mode"]}))
+        typer.echo(
+            json.dumps({"replayed_from_scan_run_id": scan_run_id, "result": result["data_mode"]})
+        )
 
 
 @replay_app.command("bundle")
@@ -391,6 +419,127 @@ def calibrate_validate_config(
         raise typer.Exit(1)
 
 
+@data_app.command("usage")
+def data_usage() -> None:
+    init_db()
+    settings = get_settings()
+    provider = (
+        "dataforseo-live"
+        if settings.dataforseo_environment.strip().lower() == "production"
+        else "dataforseo-sandbox"
+    )
+    with SessionLocal() as session:
+        today = datetime.now(UTC).date()
+        payload = daily_usage(session, provider=provider, usage_date=today)
+        payload["alerts"] = evaluate_alerts(
+            session,
+            settings=settings,
+            provider=provider,
+            usage_date=today,
+        )
+        typer.echo(json.dumps(payload, indent=2))
+
+
+@qualification_app.command("record")
+def qualification_record(results_path: Path, notes: str = "") -> None:
+    """Persist a complete externally-run qualification matrix; this command makes no calls."""
+    init_db()
+    settings = get_settings()
+    checks = json.loads(results_path.read_text())
+    if not isinstance(checks, dict):
+        raise typer.BadParameter("Qualification results must be a JSON object keyed by check name.")
+    environment = settings.dataforseo_environment.strip().lower()
+    provider = "dataforseo-live" if environment == "production" else "dataforseo-sandbox"
+    with SessionLocal() as session:
+        row = record_qualification(
+            session,
+            provider=provider,
+            environment=environment,
+            adapter_version=DATAFORSEO_ADAPTER_VERSION,
+            checks=checks,
+            ttl_hours=settings.qualification_ttl_hours,
+            notes=notes,
+        )
+    typer.echo(
+        json.dumps(
+            {
+                "status": row.status,
+                "adapter_version": row.adapter_version,
+                "qualified_at": row.qualified_at.isoformat(),
+                "expires_at": row.expires_at.isoformat(),
+            },
+            indent=2,
+        )
+    )
+
+
+@qualification_app.command("status")
+def qualification_status() -> None:
+    init_db()
+    settings = get_settings()
+    environment = settings.dataforseo_environment.strip().lower()
+    provider = "dataforseo-live" if environment == "production" else "dataforseo-sandbox"
+    with SessionLocal() as session:
+        row = current_qualification(
+            session,
+            provider=provider,
+            environment=environment,
+            adapter_version=DATAFORSEO_ADAPTER_VERSION,
+        )
+    typer.echo(
+        json.dumps(
+            {
+                "current": row is not None,
+                "provider": provider,
+                "environment": environment,
+                "adapter_version": DATAFORSEO_ADAPTER_VERSION,
+                "expires_at": row.expires_at.isoformat() if row else None,
+            },
+            indent=2,
+        )
+    )
+
+
+@billing_app.command("reconcile")
+def billing_reconcile(csv_path: Path) -> None:
+    init_db()
+    settings = get_settings()
+    environment = settings.dataforseo_environment.strip().lower()
+    provider = "dataforseo-live" if environment == "production" else "dataforseo-sandbox"
+    with SessionLocal() as session:
+        report = reconcile_billing_csv(
+            session,
+            csv_path,
+            provider=provider,
+            environment=environment,
+            tolerance_usd=settings.billing_reconciliation_tolerance_usd,
+        )
+    typer.echo(json.dumps(report, indent=2))
+
+
+@app.command("worker")
+def worker(
+    concurrency: Annotated[int | None, typer.Option("--concurrency", min=1, max=32)] = None,
+) -> None:
+    """Run the durable scan worker as a process separate from the API server."""
+    init_db()
+    settings = get_settings()
+
+    async def serve() -> None:
+        stop_event = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for signal_name in (signal.SIGINT, signal.SIGTERM):
+            with suppress(NotImplementedError):
+                loop.add_signal_handler(signal_name, stop_event.set)
+        await run_worker_runtime(
+            stop_event,
+            concurrency=concurrency or settings.scan_worker_concurrency,
+            settings=settings,
+        )
+
+    asyncio.run(serve())
+
+
 @site_app.command("generate")
 def site_generate(opportunity_id: int) -> None:
     init_db()
@@ -421,7 +570,9 @@ def site_preview(opportunity_id: int, port: int = 8008) -> None:
         if opportunity is None:
             raise typer.BadParameter(f"Opportunity {opportunity_id} not found")
         path = generate_static_site(
-            build_site_config(service_from_orm(opportunity.service_family), market_from_orm(opportunity.market))
+            build_site_config(
+                service_from_orm(opportunity.service_family), market_from_orm(opportunity.market)
+            )
         )
     typer.echo(f"Serving {path} at http://127.0.0.1:{port}")
     subprocess.run([sys.executable, "-m", "http.server", str(port), "-d", str(path)], check=False)
@@ -439,7 +590,9 @@ def site_deploy_staging(opportunity_id: int, confirm: bool = False) -> None:
         if opportunity is None:
             raise typer.BadParameter(f"Opportunity {opportunity_id} not found")
         path = generate_static_site(
-            build_site_config(service_from_orm(opportunity.service_family), market_from_orm(opportunity.market))
+            build_site_config(
+                service_from_orm(opportunity.service_family), market_from_orm(opportunity.market)
+            )
         )
         result = asyncio.run(
             LocalStagingDeploymentProvider().deploy_staging(path, f"opportunity-{opportunity_id}")

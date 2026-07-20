@@ -35,6 +35,12 @@ def validate_runtime_mode(settings: Settings, mode: DataMode | None = None) -> D
             missing.append("DATAFORSEO_ENVIRONMENT=sandbox|production")
         if not settings.allow_live_api_calls:
             missing.append("ALLOW_LIVE_API_CALLS=true")
+        if settings.paid_call_kill_switch:
+            missing.append("PAID_CALL_KILL_SWITCH=false")
+        if environment == "production" and not settings.allow_production_dataforseo:
+            missing.append("ALLOW_PRODUCTION_DATAFORSEO=true")
+        if settings.live_scan_depth.strip().lower() == "full" and not settings.allow_full_scans:
+            missing.append("ALLOW_FULL_SCANS=true")
         if not settings.dataforseo_login:
             missing.append("DATAFORSEO_LOGIN")
         if not settings.dataforseo_password:

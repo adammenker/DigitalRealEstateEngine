@@ -26,7 +26,15 @@ from rank_rent.domain.models import (
 )
 from rank_rent.runtime import DataMode, validate_runtime_mode
 from rank_rent.services.cache import RawResponseCache, cache_key, normalize_request
+from rank_rent.services.cost_controls import (
+    CircuitOpenError,
+    UsageReservation,
+    finish_provider_call,
+    record_unexpected_call,
+    reserve_provider_call,
+)
 from rank_rent.services.keywords import service_seed_keywords
+from rank_rent.services.qualification import DATAFORSEO_ADAPTER_VERSION
 from rank_rent.services.us_geography import validate_market_against_index
 from rank_rent.settings import Settings, get_settings
 from rank_rent.storage.blobs import build_blob_store
@@ -37,6 +45,18 @@ class DataForSEOError(RuntimeError):
 
 
 class DataForSEOPlanError(DataForSEOError):
+    pass
+
+
+class DataForSEOAuthenticationError(DataForSEOError):
+    pass
+
+
+class DataForSEORateLimitError(DataForSEOError):
+    pass
+
+
+class DataForSEOSchemaError(DataForSEOError):
     pass
 
 
@@ -71,9 +91,7 @@ def serp_location_payload(market: Market) -> dict[str, Any]:
             )
         radius_meters = max(200, min(199_999, round(market.boundary_radius_km * 1_000)))
         return {
-            "location_coordinate": (
-                f"{market.latitude:.6f},{market.longitude:.6f},{radius_meters}"
-            )
+            "location_coordinate": (f"{market.latitude:.6f},{market.longitude:.6f},{radius_meters}")
         }
     if market.provider_location_code:
         return {"location_code": int(market.provider_location_code)}
@@ -98,11 +116,7 @@ def business_listings_location_payload(
             "Provider discovery requires canonical coordinates and a positive boundary radius."
         )
     radius = f"{market.boundary_radius_km:g}"
-    return {
-        "location_coordinate": (
-            f"{market.latitude:.6f},{market.longitude:.6f},{radius}"
-        )
-    }
+    return {"location_coordinate": (f"{market.latitude:.6f},{market.longitude:.6f},{radius}")}
 
 
 STATE_NAMES = {
@@ -158,10 +172,12 @@ STATE_NAMES = {
     "wy": "wyoming",
 }
 
+
 class DataForSEOLiveProvider:
     provider_name = "dataforseo-live"
     api_version = "v3"
     response_shape_version = "v1"
+    adapter_version = DATAFORSEO_ADAPTER_VERSION
     us_labs_location_code = 2840
     us_labs_location_name = "United States"
 
@@ -217,7 +233,9 @@ class DataForSEOLiveProvider:
         payload = await self._get(f"/v3/serp/google/locations/{self.settings_country_code.lower()}")
         locations = self._first_result(payload)
         if not locations:
-            raise DataForSEOError("DataForSEO returned no Google locations for the configured country.")
+            raise DataForSEOError(
+                "DataForSEO returned no Google locations for the configured country."
+            )
 
         match = self._best_location_match(cleaned, cast(list[dict[str, Any]], locations))
         if match is None:
@@ -249,7 +267,9 @@ class DataForSEOLiveProvider:
                 "keyword_volume_granularity": "nearest_city" if is_zip else "city",
             },
         )
-        notes = ["ZIP resolved to the nearest DataForSEO supported Google location."] if is_zip else []
+        notes = (
+            ["ZIP resolved to the nearest DataForSEO supported Google location."] if is_zip else []
+        )
         return ResolvedLocation(
             original_input=cleaned,
             market=market,
@@ -272,7 +292,9 @@ class DataForSEOLiveProvider:
                 "include_seed_keyword": True,
                 **self._labs_location_payload(market),
             }
-            payload = await self._post("/v3/dataforseo_labs/google/keyword_suggestions/live", [task])
+            payload = await self._post(
+                "/v3/dataforseo_labs/google/keyword_suggestions/live", [task]
+            )
             items = self._extract_items(payload)
             for item in items:
                 keyword = str(item.get("keyword") or item.get("se_results_keyword") or "").strip()
@@ -308,8 +330,13 @@ class DataForSEOLiveProvider:
                 KeywordMetric(
                     keyword=keyword,
                     canonical_keyword=slugify(keyword).replace("-", " "),
-                    intent=str(item.get("search_intent_info", {}).get("main_intent") or self._infer_intent(keyword)),
-                    search_volume=self._to_int(keyword_info.get("search_volume") or item.get("search_volume")),
+                    intent=str(
+                        item.get("search_intent_info", {}).get("main_intent")
+                        or self._infer_intent(keyword)
+                    ),
+                    search_volume=self._to_int(
+                        keyword_info.get("search_volume") or item.get("search_volume")
+                    ),
                     cpc=self._to_float(keyword_info.get("cpc") or item.get("cpc")),
                     paid_competition=self._to_float(
                         keyword_info.get("competition") or item.get("competition")
@@ -466,7 +493,9 @@ class DataForSEOLiveProvider:
                     latitude=self._to_float(item.get("latitude")),
                     longitude=self._to_float(item.get("longitude")),
                     rating=self._to_float(rating.get("value") or item.get("rating")),
-                    review_count=self._to_int(rating.get("votes_count") or item.get("review_count")),
+                    review_count=self._to_int(
+                        rating.get("votes_count") or item.get("review_count")
+                    ),
                     business_status=self._provider_business_status(
                         work_hours.get("current_status")
                         or work_time.get("current_status")
@@ -526,7 +555,20 @@ class DataForSEOLiveProvider:
             return cached_payload
 
         api_call = self._start_api_call(path, normalized)
+        reservation: UsageReservation | None = None
         try:
+            if self.session is not None and api_call is not None:
+                reservation = reserve_provider_call(
+                    self.session,
+                    settings=self.settings,
+                    provider=self.provider_name,
+                    environment=self.api_environment,
+                    adapter_version=self.adapter_version,
+                    endpoint=path,
+                    estimated_cost_usd=api_call.estimated_cost_usd,
+                    scan_profile=self.scan_depth,
+                    cache_miss=True,
+                )
             async with self._client() as client:
                 if method == "GET":
                     response = await client.get(path)
@@ -535,7 +577,20 @@ class DataForSEOLiveProvider:
                     response = await client.post(path, json=tasks)
             payload = self._parse_response(response)
         except Exception as exc:
-            self._finish_api_call(api_call, status="failed", error=exc)
+            self._finish_api_call(
+                api_call,
+                status="blocked" if isinstance(exc, CircuitOpenError) else "failed",
+                error=exc,
+                commit=reservation is None,
+            )
+            if self.session is not None and reservation is not None:
+                finish_provider_call(
+                    self.session,
+                    reservation,
+                    actual_cost_usd=0,
+                    failed=not isinstance(exc, CircuitOpenError),
+                    schema_drift=isinstance(exc, DataForSEOSchemaError),
+                )
             raise
 
         key = self._cache_set(path, normalized, payload, status_code=response.status_code)
@@ -546,7 +601,16 @@ class DataForSEOLiveProvider:
             payload=payload,
             raw_response_id=cached_row.id if cached_row else None,
             cache_key_override=key,
+            commit=reservation is None,
         )
+        if self.session is not None and reservation is not None:
+            actual_cost = self._payload_cost(payload)
+            finish_provider_call(
+                self.session,
+                reservation,
+                actual_cost_usd=actual_cost,
+                abnormal_cost=actual_cost > self.settings.single_call_abnormal_cost_usd,
+            )
         return payload
 
     def _cache_get(self, path: str, params: dict[str, Any]) -> dict[str, Any] | None:
@@ -606,6 +670,7 @@ class DataForSEOLiveProvider:
         raw_response_id: int | None = None,
         cache_key_override: str | None = None,
         error: Exception | None = None,
+        commit: bool = True,
     ) -> None:
         if row is None:
             return
@@ -618,7 +683,9 @@ class DataForSEOLiveProvider:
         if payload is not None:
             task = self._first_task(payload) if payload.get("tasks") else {}
             row.actual_cost_usd = (
-                0.0 if self.api_environment == "sandbox" else self._to_float(task.get("cost")) or 0.0
+                0.0
+                if self.api_environment == "sandbox"
+                else self._to_float(task.get("cost")) or 0.0
             )
             row.provider_task_id = self._clean_optional_str(task.get("id"))
             row.provider_request_id = self._clean_optional_str(
@@ -629,7 +696,8 @@ class DataForSEOLiveProvider:
             row.error_summary = str(error)
         if self.session is not None:
             self.session.flush()
-            self.session.commit()
+            if commit:
+                self.session.commit()
 
     def _record_cache_hit(
         self,
@@ -669,14 +737,14 @@ class DataForSEOLiveProvider:
                 select(ApiCallORM.planned_request_id).where(
                     ApiCallORM.scan_run_id == self.current_scan_run_id,
                     ApiCallORM.planned_request_id.is_not(None),
+                    ApiCallORM.status != "failed",
                 )
             ).all()
         )
         unused = [
             call
             for call in matching
-            if call.planned_request_id is not None
-            and call.planned_request_id not in consumed_ids
+            if call.planned_request_id is not None and call.planned_request_id not in consumed_ids
         ]
         if params is not None:
             request_cache_key = self._cache_key(path, params)
@@ -707,26 +775,66 @@ class DataForSEOLiveProvider:
     ) -> ApiCallORM:
         assert self.session is not None
         plan = self._planned_call(path, params)
-        if (
-            self.current_scan_run_id is not None
-            and not plan
-            and not self.allow_unplanned_requests
-        ):
+        request_cache_key = self._cache_key(path, params)
+        if cache_hit and self.current_scan_run_id is not None and not plan:
+            existing = self.session.scalars(
+                select(ApiCallORM)
+                .where(
+                    ApiCallORM.scan_run_id == self.current_scan_run_id,
+                    ApiCallORM.endpoint == path,
+                    ApiCallORM.cache_key == request_cache_key,
+                    ApiCallORM.status.in_({"completed", "cache_hit"}),
+                )
+                .order_by(ApiCallORM.id)
+                .limit(1)
+            ).first()
+            if existing is not None:
+                return existing
+        if self.current_scan_run_id is not None and not plan and not self.allow_unplanned_requests:
+            record_unexpected_call(
+                self.session,
+                provider=self.provider_name,
+                scan_profile=self.scan_depth,
+                endpoint=path,
+            )
             raise DataForSEOPlanError(
                 f"Scan {self.current_scan_run_id} has no unused planned request "
                 f"matching {path}; no external request was sent."
             )
         now = datetime.now(UTC)
+        planned_request_id = plan.get("planned_request_id")
+        if planned_request_id is not None and self.current_scan_run_id is not None:
+            retry_row = self.session.scalars(
+                select(ApiCallORM)
+                .where(
+                    ApiCallORM.scan_run_id == self.current_scan_run_id,
+                    ApiCallORM.planned_request_id == planned_request_id,
+                    ApiCallORM.status == "failed",
+                )
+                .limit(1)
+            ).first()
+            if retry_row is not None:
+                retry_row.status = status
+                retry_row.started_at = now
+                retry_row.completed_at = now if status == "cache_hit" else None
+                retry_row.error_type = None
+                retry_row.error_summary = None
+                retry_row.cache_hit = cache_hit
+                retry_row.force_refresh = force_refresh
+                if raw_response is not None:
+                    retry_row.raw_api_response_id = raw_response.id
+                    retry_row.provider_task_id = raw_response.provider_task_id
+                    retry_row.provider_request_id = raw_response.provider_request_id
+                self.session.commit()
+                return retry_row
         row = ApiCallORM(
             scan_run_id=self.current_scan_run_id,
-            planned_request_id=plan.get("planned_request_id"),
+            planned_request_id=planned_request_id,
             raw_api_response_id=raw_response.id if raw_response else None,
             provider=self.provider_name,
             endpoint=path,
             stage=str(plan.get("stage") or self._stage_for_endpoint(path)),
-            cache_key=raw_response.cache_key
-            if raw_response
-            else self._cache_key(path, params),
+            cache_key=raw_response.cache_key if raw_response else self._cache_key(path, params),
             cache_hit=cache_hit,
             force_refresh=force_refresh,
             estimated_cost_usd=float(plan.get("estimated_cost_usd") or 0),
@@ -735,9 +843,7 @@ class DataForSEOLiveProvider:
             started_at=now,
             completed_at=now if status == "cache_hit" else None,
             provider_task_id=raw_response.provider_task_id if raw_response else None,
-            provider_request_id=raw_response.provider_request_id
-            if raw_response
-            else None,
+            provider_request_id=raw_response.provider_request_id if raw_response else None,
         )
         self.session.add(row)
         try:
@@ -811,24 +917,48 @@ class DataForSEOLiveProvider:
 
     def _parse_response(self, response: httpx.Response) -> dict[str, Any]:
         try:
-            payload = cast(dict[str, Any], response.json())
+            raw_payload = response.json()
         except ValueError as exc:
-            raise DataForSEOError(f"DataForSEO returned non-JSON response: HTTP {response.status_code}") from exc
+            raise DataForSEOSchemaError(
+                f"DataForSEO returned non-JSON response: HTTP {response.status_code}"
+            ) from exc
+        if not isinstance(raw_payload, dict):
+            raise DataForSEOSchemaError("DataForSEO returned a non-object JSON response.")
+        payload = cast(dict[str, Any], raw_payload)
+        if response.status_code in {401, 403}:
+            raise DataForSEOAuthenticationError(
+                f"DataForSEO authentication failed: HTTP {response.status_code}."
+            )
+        if response.status_code == 429:
+            raise DataForSEORateLimitError("DataForSEO rate limit reached: HTTP 429.")
+        if response.status_code >= 500:
+            raise DataForSEOError(f"DataForSEO transient HTTP {response.status_code}.")
         if response.status_code >= 400:
             message = payload.get("status_message") or response.text
             if response.status_code == 402:
-                message = (
-                    f"{message} DataForSEO returned HTTP 402; check the account balance or billing limits."
-                )
+                message = f"{message} DataForSEO returned HTTP 402; check the account balance or billing limits."
             raise DataForSEOError(f"DataForSEO HTTP {response.status_code}: {message}")
         status_code = self._to_int(payload.get("status_code"))
         if status_code is not None and status_code >= 40000:
-            raise DataForSEOError(str(payload.get("status_message") or f"DataForSEO error {status_code}"))
-        for task in cast(list[dict[str, Any]], payload.get("tasks") or []):
+            raise DataForSEOError(
+                str(payload.get("status_message") or f"DataForSEO error {status_code}")
+            )
+        tasks = payload.get("tasks")
+        if not isinstance(tasks, list) or any(not isinstance(task, dict) for task in tasks):
+            raise DataForSEOSchemaError("DataForSEO response did not include a valid task list.")
+        for task in cast(list[dict[str, Any]], tasks):
             task_code = self._to_int(task.get("status_code"))
             if task_code is not None and task_code >= 40000:
-                raise DataForSEOError(str(task.get("status_message") or f"DataForSEO task error {task_code}"))
+                raise DataForSEOError(
+                    str(task.get("status_message") or f"DataForSEO task error {task_code}")
+                )
         return payload
+
+    def _payload_cost(self, payload: dict[str, Any]) -> float:
+        if self.api_environment == "sandbox":
+            return 0.0
+        task = self._first_task(payload) if payload.get("tasks") else {}
+        return self._to_float(task.get("cost")) or 0.0
 
     def _first_task(self, payload: dict[str, Any]) -> dict[str, Any]:
         tasks = payload.get("tasks") or []
@@ -954,8 +1084,19 @@ class DataForSEOLiveProvider:
         return values
 
     def _infer_intent(self, keyword: str) -> str:
-        transactional_terms = ("repair", "replacement", "installation", "emergency", "near me", "service")
-        return "transactional" if any(term in keyword.lower() for term in transactional_terms) else "commercial"
+        transactional_terms = (
+            "repair",
+            "replacement",
+            "installation",
+            "emergency",
+            "near me",
+            "service",
+        )
+        return (
+            "transactional"
+            if any(term in keyword.lower() for term in transactional_terms)
+            else "commercial"
+        )
 
     def _target_domain(self, url: str) -> str:
         parsed = urlparse(url if "://" in url else f"https://{url}")
@@ -990,9 +1131,7 @@ class DataForSEOLiveProvider:
                 if not isinstance(service, dict):
                     continue
                 values.extend(
-                    str(value)
-                    for value in (service.get("category"), service.get("title"))
-                    if value
+                    str(value) for value in (service.get("category"), service.get("title")) if value
                 )
         seen: set[str] = set()
         output: list[str] = []

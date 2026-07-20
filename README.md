@@ -187,6 +187,15 @@ npm run build
 GitHub Actions runs backend lint, strict typing, migrations, tests and replay coverage,
 frontend lint/build, and Docker image builds. Verification never enables production API calls.
 
+Run queued scans in a process separate from the API:
+
+```bash
+rank-rent worker --concurrency 2
+```
+
+Paid-call limits, kill switches, qualification expiry, billing reconciliation, and worker retry /
+quarantine operations are documented in `docs/workstream_d_operations.md`.
+
 ## Repository Layout
 
 - `src/rank_rent/`: FastAPI API, durable scan worker, provider adapters, scoring, and persistence.
@@ -208,5 +217,6 @@ missing-data effects, and evidence-quality labels.
 
 Before production use, the project still needs labeled real-world calibration, validated local
 demand improvements, a deployed PostgreSQL concurrency test and backup/restore rehearsal,
-observability, authentication and secret management, durable spend limits and alerts, and
-downstream review/launch workflows.
+external observability and alert delivery, authentication and secret management, and downstream
+review/launch workflows. Workstream D's durable spend controls remain fail-closed until a current
+qualification matrix and, after the first production charge, clean billing reconciliation exist.

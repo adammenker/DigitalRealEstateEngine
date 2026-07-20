@@ -14,7 +14,7 @@ The implemented discovery system intentionally keeps several boundaries narrow.
   tested but cannot produce full rankable assessments.
 - Page-level competitor metrics remain unavailable when the provider returns only domain
   metrics. The engine records the distinction instead of manufacturing page evidence.
-- Async execution uses a database-backed in-process worker rather than an external queue.
+- Async execution uses a dedicated database-backed worker process rather than an external broker.
 - Discovery does not include domain acquisition, site generation, outreach, lead routing,
   billing, or launch approval workflows.
 

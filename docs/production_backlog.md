@@ -62,15 +62,16 @@ deliberately deferred before production use.
   actual-cost details.
 - [x] Show incremental uncached calls and estimated cost before full-scan promotion.
 - [x] Enforce per-scan request and estimated-cost limits.
-- [ ] Add durable per-day production spend limits.
-- [ ] Alert on repeated cache misses, unexpected calls, paid testing responses, and abnormal
-  provider cost.
-- [ ] Validate provider-reported cost reconciliation against production billing exports.
+- [x] Add durable per-day production/testing request, spend, endpoint, cache-miss, and
+  unexpected-call counters with transactional pre-call limits.
+- [x] Evaluate synthetic alert conditions for repeated cache misses, unexpected calls, paid
+  testing responses, spend thresholds, provider/schema failures, stale workers, and poison jobs.
+- [x] Import and reconcile provider billing CSV exports against the internal call ledger.
 
 ## Operations
 
-- [x] Run scans through a database-backed worker with atomic claim, heartbeat, cancellation,
-  retry, stale recovery, and idempotent active retries.
+- [x] Run scans through a separate database-backed worker process with concurrency, lease-token
+  claims, heartbeat/expiry, cancellation, exponential retry, quarantine, and idempotent stages.
 - [x] Provide a confirmed one-command reset for local test data.
 - [x] Select PostgreSQL for production, retain SQLite for local/replay use, and define explicit
   connection-pool and timeout policy with health/schema-readiness checks.
@@ -79,8 +80,8 @@ deliberately deferred before production use.
 - [ ] Run PostgreSQL concurrency tests and rehearse the documented encrypted database/blob
   backup and restore process in the selected production environment.
 - [ ] Add production-grade structured logs, metrics, traces, and alerting by scan and call.
-- [ ] Add deploy-time health checks for the frontend, backend, database, worker, and provider
-  credentials.
+- [ ] Add deploy-time health checks for the database and provider credentials (frontend, backend,
+  and worker process health checks exist).
 - [x] Add CI gates for backend tests, frontend lint/build, migration checks, replay, and
   container builds.
 - [ ] Operationalize the documented RPO/RTO, backup alerts, legal deletion, rollback,

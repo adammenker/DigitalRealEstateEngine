@@ -146,6 +146,7 @@ def test_testing_assessment_can_plan_and_queue_full_promotion(
 ) -> None:
     monkeypatch.setenv("DATA_MODE", "live")
     monkeypatch.setenv("ALLOW_LIVE_API_CALLS", "true")
+    monkeypatch.setenv("ALLOW_FULL_SCANS", "true")
     monkeypatch.setenv("DATAFORSEO_LOGIN", "test")
     monkeypatch.setenv("DATAFORSEO_PASSWORD", "test")
     monkeypatch.setenv("DATAFORSEO_ENVIRONMENT", "sandbox")
