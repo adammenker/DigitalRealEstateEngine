@@ -5,7 +5,10 @@
 `local`, `test`, `staging`, and `production` have separate databases, object
 storage, credentials, cost limits, domains, logs, metrics, identity audiences,
 and Terraform state. Staging and production fail startup unless OIDC, HTTPS
-CORS, PostgreSQL, secret injection, and environment isolation are valid.
+CORS, PostgreSQL, S3 blob storage, secret injection, and environment isolation
+are valid. The production edge must complete OIDC Authorization Code with PKCE
+or inject a validated bearer token for the frontend proxy; the API never falls
+back to local identity outside development and test.
 
 Local Compose starts PostgreSQL, a one-shot migration, API, durable worker, and
 frontend. API and worker use the same immutable backend image but different
@@ -45,3 +48,7 @@ plus release notes. Runtime metadata is queryable at `GET /api/release`.
 Rehearse staging rollback before the first production release and quarterly
 afterward.
 
+The manual `Rollback` workflow runs under the same protected GitHub environment
+as deployment. `RELEASE_MANIFEST_FETCH_COMMAND` must retrieve the selected
+immutable manifest into `release/GIT_SHA.json`; `ROLLBACK_COMMAND` must apply
+the recorded image digests and versioned configuration/dataset pointers.

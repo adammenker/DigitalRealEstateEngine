@@ -211,6 +211,26 @@ def test_ci_network_guard_fails_before_http_client_creation(
         )
 
 
+def test_public_data_transport_rejects_unsafe_redirect_before_following() -> None:
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            302,
+            headers={"location": "https://127.0.0.1/private"},
+            request=request,
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        with pytest.raises(PublicDataAcquisitionError, match="safety validation"):
+            HttpxPublicDataTransport(client).fetch(
+                SourceRequest("https://api.census.gov/data/2023/test", {})
+            )
+
+    assert len(requests) == 1
+
+
 @pytest.mark.parametrize(
     "content, message",
     [

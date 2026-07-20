@@ -16,6 +16,7 @@ from typing import Any, ClassVar, Protocol, runtime_checkable
 import httpx
 
 from rank_rent.public_data.models import DatasetKind, DatasetRecord, DatasetRelease
+from rank_rent.security.ssrf import UnsafeURLError, validate_outbound_url
 
 
 class PublicDataAcquisitionError(ValueError):
@@ -57,29 +58,58 @@ class PublicDataHTTPTransport(Protocol):
 class HttpxPublicDataTransport:
     """Production Census downloader with bounded redirects and response validation."""
 
-    def __init__(self, client: httpx.Client | None = None) -> None:
+    def __init__(
+        self,
+        client: httpx.Client | None = None,
+        *,
+        allowed_hosts: frozenset[str] = frozenset(
+            {"api.census.gov", "www.census.gov", "www2.census.gov"}
+        ),
+    ) -> None:
         self._client = client
+        self._allowed_hosts = allowed_hosts
 
     def fetch(self, request: SourceRequest) -> AcquiredSource:
         if _environment_flag("PUBLIC_DATA_NETWORK_DISABLED"):
             raise PublicDataAcquisitionError(
                 "Public-data network acquisition is disabled in this environment."
             )
-        if not request.url.startswith("https://"):
-            raise PublicDataAcquisitionError("Public-data acquisition requires HTTPS.")
         owns_client = self._client is None
-        client = self._client or httpx.Client(follow_redirects=True)
+        client = self._client or httpx.Client(follow_redirects=False)
+        url = request.url
+        params: dict[str, str] | None = dict(request.params)
         try:
-            response = client.get(
-                request.url,
-                params=dict(request.params),
-                timeout=request.timeout_seconds,
-            )
+            for _ in range(4):
+                try:
+                    validate_outbound_url(
+                        url,
+                        allowed_hosts=self._allowed_hosts,
+                        resolve_dns=False,
+                    )
+                except UnsafeURLError as exc:
+                    raise PublicDataAcquisitionError(
+                        "Public-data URL failed outbound safety validation."
+                    ) from exc
+                response = client.get(
+                    url,
+                    params=params,
+                    timeout=request.timeout_seconds,
+                    follow_redirects=False,
+                )
+                if not response.is_redirect:
+                    break
+                location = response.headers.get("location")
+                if not location:
+                    break
+                url = str(response.url.join(location))
+                params = None
+            else:
+                raise PublicDataAcquisitionError(
+                    "Public-data request exceeded the redirect limit."
+                )
             response.raise_for_status()
         except httpx.HTTPError as exc:
-            raise PublicDataAcquisitionError(
-                f"Public-data request failed for {request.url}: {exc}"
-            ) from exc
+            raise PublicDataAcquisitionError("Public-data HTTPS request failed.") from exc
         finally:
             if owns_client:
                 client.close()

@@ -5,7 +5,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import event, select
+from sqlalchemy import event, select, text
 from sqlalchemy.orm import Session
 
 from rank_rent.db.orm import AuditEventORM
@@ -30,6 +30,9 @@ def append_audit_event(
     request_id: str | None,
     metadata: dict[str, Any] | None = None,
 ) -> AuditEventORM:
+    if session.get_bind().dialect.name == "postgresql":
+        # Serialize chain-head selection even when the table is still empty.
+        session.execute(text("SELECT pg_advisory_xact_lock(74291731)"))
     previous = session.scalar(select(AuditEventORM).order_by(AuditEventORM.id.desc()).limit(1))
     previous_hash = previous.event_hash if previous is not None else "GENESIS"
     occurred_at = datetime.now(UTC)

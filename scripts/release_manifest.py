@@ -72,10 +72,52 @@ def build_manifest(root: Path, environment: dict[str, str]) -> dict[str, Any]:
     return manifest
 
 
+def verify_manifest(path: Path, *, environment: str, git_sha: str) -> None:
+    payload = json.loads(path.read_text())
+    if not isinstance(payload, dict):
+        raise ValueError("Release manifest must be a JSON object.")
+    fingerprint = payload.pop("release_fingerprint", None)
+    expected = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+    if fingerprint != expected:
+        raise ValueError("Release manifest fingerprint is invalid.")
+    if payload.get("environment") != environment:
+        raise ValueError("Release manifest environment does not match rollback target.")
+    if payload.get("git_sha") != git_sha:
+        raise ValueError("Release manifest Git SHA does not match rollback target.")
+    required = {
+        "api_image_digest",
+        "worker_image_digest",
+        "frontend_image_digest",
+        "migration_version",
+        "scoring_version",
+        "evidence_quality_version",
+        "service_catalog_version",
+        "geography_version",
+        "prefilter_version",
+    }
+    missing = sorted(key for key in required if not payload.get(key))
+    if missing:
+        raise ValueError(f"Release manifest is missing: {', '.join(missing)}.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output", type=Path, required=True)
+    action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument("--output", type=Path)
+    action.add_argument("--verify", type=Path)
+    parser.add_argument("--expected-environment")
+    parser.add_argument("--expected-sha")
     args = parser.parse_args()
+    if args.verify:
+        if not args.expected_environment or not args.expected_sha:
+            parser.error("--verify requires --expected-environment and --expected-sha")
+        verify_manifest(
+            args.verify,
+            environment=args.expected_environment,
+            git_sha=args.expected_sha,
+        )
+        return
+    assert args.output is not None
     manifest = build_manifest(Path(__file__).resolve().parents[1], dict(os.environ))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")

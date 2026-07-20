@@ -14,6 +14,7 @@ from rank_rent.db.orm import (
     ProviderDailyUsageORM,
     ScanRunORM,
 )
+from rank_rent.observability.metrics import UNPLANNED_PAID_CALLS
 from rank_rent.services.qualification import current_qualification
 from rank_rent.services.scan_leases import ScanExecutionLease, assert_current_scan_lease
 from rank_rent.settings import Settings
@@ -318,6 +319,7 @@ def record_unexpected_call(
     endpoint: str,
     now: datetime | None = None,
 ) -> None:
+    UNPLANNED_PAID_CALLS.inc()
     called_at = now or datetime.now(UTC)
     usage_class = _usage_class(environment)
     for bucket_endpoint in ("", endpoint):

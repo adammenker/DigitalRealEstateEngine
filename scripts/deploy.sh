@@ -19,6 +19,10 @@ case "$action" in
     : "${MIGRATION_TASK_COMMAND:?Configure in protected CI environment}"
     sh -c "$MIGRATION_TASK_COMMAND"
     ;;
+  publish-manifest)
+    : "${RELEASE_MANIFEST_PUBLISH_COMMAND:?Configure in protected CI environment}"
+    sh -c "$RELEASE_MANIFEST_PUBLISH_COMMAND"
+    ;;
   backend)
     : "${BACKEND_DEPLOY_COMMAND:?Configure in protected CI environment}"
     sh -c "$BACKEND_DEPLOY_COMMAND"
@@ -44,4 +48,3 @@ PY
     ;;
   *) echo "unknown deployment action" >&2; exit 2 ;;
 esac
-

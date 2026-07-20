@@ -8,7 +8,7 @@ import yaml
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from scripts.check_licenses import _is_denied, denied_licenses
-from scripts.release_manifest import build_manifest
+from scripts.release_manifest import build_manifest, verify_manifest
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
@@ -51,6 +51,14 @@ def _app(settings: Settings) -> FastAPI:
         require_permission(request, Permission.run_testing_scan)
         return {"status": "queued"}
 
+    @app.post("/api/opportunities/{opportunity_id}/review/transition")
+    def review_transition(opportunity_id: int) -> dict[str, int]:
+        return {"opportunity_id": opportunity_id}
+
+    @app.put("/api/discovery-templates/{template_id}")
+    def update_template(template_id: int) -> dict[str, int]:
+        return {"template_id": template_id}
+
     return app
 
 
@@ -62,6 +70,7 @@ def _production_settings() -> Settings:
         secrets_injected_by_platform=True,
         oidc_issuer="https://identity.example.com",
         oidc_audience="rank-rent",
+        oidc_jwks_url="https://identity.example.com/.well-known/jwks.json",
         oidc_allowed_jwks_hosts=["identity.example.com"],
         database_url="postgresql+psycopg://runtime@db.example.com/rank_rent",
         blob_store_backend="s3",
@@ -106,6 +115,31 @@ def test_read_only_user_cannot_trigger_scan() -> None:
             json={},
         )
     assert response.status_code == 403
+
+
+def test_review_and_configuration_mutations_enforce_distinct_roles() -> None:
+    settings = Settings(app_env="test", rate_limit_requests=10)
+    with TestClient(_app(settings)) as client:
+        operator_review = client.post(
+            "/api/opportunities/7/review/transition",
+            headers={"X-Local-Role": "operator"},
+        )
+        reviewer_review = client.post(
+            "/api/opportunities/7/review/transition",
+            headers={"X-Local-Role": "reviewer"},
+        )
+        operator_config = client.put(
+            "/api/discovery-templates/4",
+            headers={"X-Local-Role": "operator"},
+        )
+        admin_config = client.put(
+            "/api/discovery-templates/4",
+            headers={"X-Local-Role": "admin"},
+        )
+    assert operator_review.status_code == 403
+    assert reviewer_review.status_code == 200
+    assert operator_config.status_code == 403
+    assert admin_config.status_code == 200
 
 
 def test_rate_and_request_size_limits() -> None:
@@ -342,6 +376,36 @@ def test_release_manifest_records_required_versions() -> None:
     assert manifest["geography_version"] == "us-geography-2024.2"
     assert manifest["prefilter_version"] == "addressable-market-v2.0"
     assert manifest["release_fingerprint"]
+
+
+def test_release_manifest_verification_rejects_tampering(tmp_path: Path) -> None:
+    path = tmp_path / "release.json"
+    payload = {
+        "environment": "staging",
+        "git_sha": "abc123",
+        "api_image_digest": "sha256:api",
+        "worker_image_digest": "sha256:api",
+        "frontend_image_digest": "sha256:frontend",
+        "migration_version": "head",
+        "scoring_version": "score",
+        "evidence_quality_version": "quality",
+        "service_catalog_version": "catalog",
+        "geography_version": "geography",
+        "prefilter_version": "prefilter",
+    }
+    import hashlib
+    import json
+
+    payload["release_fingerprint"] = hashlib.sha256(
+        json.dumps(payload, sort_keys=True).encode()
+    ).hexdigest()
+    path.write_text(json.dumps(payload))
+    verify_manifest(path, environment="staging", git_sha="abc123")
+
+    payload["scoring_version"] = "tampered"
+    path.write_text(json.dumps(payload))
+    with pytest.raises(ValueError, match="fingerprint"):
+        verify_manifest(path, environment="staging", git_sha="abc123")
 
 
 def test_dependency_licenses_match_policy() -> None:

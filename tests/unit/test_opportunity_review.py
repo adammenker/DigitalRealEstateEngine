@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from rank_rent.db.base import Base, get_session, make_engine
 from rank_rent.db.orm import (
+    AuditEventORM,
     CompetitorMetricORM,
     FullOpportunityScoreORM,
     KeywordDecisionORM,
@@ -469,5 +470,48 @@ def test_evidence_packet_json_and_csv_api_are_complete(
         assert csv_response.headers["content-type"].startswith("text/csv")
         assert "keyword_decisions" in csv_response.text
         assert "review_notes" in csv_response.text
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_review_transition_api_uses_authenticated_actor_and_appends_audit(
+    tmp_path,
+) -> None:
+    engine = make_engine(f"sqlite:///{tmp_path / 'review-audit.db'}")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    with factory() as setup_session:
+        opportunity = _opportunity(setup_session)
+        setup_session.commit()
+        opportunity_id = opportunity.id
+
+    def override_session():
+        with factory() as active:
+            yield active
+
+    app.dependency_overrides[get_session] = override_session
+    try:
+        response = TestClient(app).post(
+            f"/api/opportunities/{opportunity_id}/review/transition",
+            headers={
+                "X-Local-User": "reviewer-authenticated",
+                "X-Local-Role": "reviewer",
+                "X-Actor-Id": "spoofed-actor",
+                "X-Actor-Role": "admin",
+            },
+            json={
+                "target_state": "prefilter_review",
+                "decision": "prefilter_selected",
+                "decision_reason": "Public evidence warrants review.",
+            },
+        )
+        assert response.status_code == 200
+        with factory() as verification:
+            audit = verification.query(AuditEventORM).one()
+            review = verification.query(OpportunityReviewORM).one()
+            assert audit.event_type == "opportunity.review.transition"
+            assert audit.actor_user_id == "reviewer-authenticated"
+            assert audit.actor_role == "reviewer"
+            assert review.reviewer_user_id == "reviewer-authenticated"
     finally:
         app.dependency_overrides.clear()

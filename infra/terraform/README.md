@@ -19,7 +19,8 @@ Image variables reject mutable tags and require digest references. Store values
 in Secrets Manager after Terraform creates the empty secret; never put secret
 values in `.tfvars` or Terraform state.
 
-The task definitions are edge-neutral. Attach them to environment-specific ECS
-services, service discovery, target groups, certificates, and DNS through the
-organization's deployment module. Set `backend_internal_url` to the private API
-service-discovery URL used by the frontend proxy.
+The root creates ECS services with deployment circuit breakers, private API
+service discovery, and a TLS application load balancer with an environment-
+specific Route 53 record. Supply an existing validated ACM certificate and
+hosted zone. Private subnets must have the controlled egress needed to pull
+images, reach AWS APIs, and call allowlisted providers.

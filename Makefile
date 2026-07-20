@@ -1,4 +1,4 @@
-.PHONY: verify backend-check calibration frontend-build docker-build security-check
+.PHONY: verify backend-check calibration frontend-build docker-build security-check lock
 
 verify: backend-check calibration frontend-build docker-build security-check
 
@@ -19,7 +19,11 @@ docker-build:
 	docker compose build
 
 security-check:
-	python3 -m pip_audit
+	python3 -m pip_audit --requirement requirements.lock
 	python3 -m bandit -q -lll -r src -x tests
 	python3 scripts/check_licenses.py
 	cd frontend && npm audit --audit-level=critical
+
+lock:
+	python3 -m piptools compile --strip-extras --extra s3 --output-file requirements.lock pyproject.toml
+	python3 -m piptools compile --strip-extras --extra dev --extra s3 --output-file requirements-dev.lock pyproject.toml

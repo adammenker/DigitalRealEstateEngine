@@ -1,0 +1,50 @@
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment target
+        required: true
+        type: choice
+        options: [staging, production]
+      release_sha:
+        description: Previously published release Git SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    concurrency: rank-rent-${{ inputs.environment }}
+    env:
+      RELEASE_MANIFEST_FETCH_COMMAND: ${{ vars.RELEASE_MANIFEST_FETCH_COMMAND }}
+      ROLLBACK_COMMAND: ${{ vars.ROLLBACK_COMMAND }}
+      SMOKE_TEST_URL: ${{ vars.SMOKE_TEST_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Fetch immutable release manifest
+        env:
+          ROLLBACK_RELEASE_SHA: ${{ inputs.release_sha }}
+          ROLLBACK_ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          test -n "$RELEASE_MANIFEST_FETCH_COMMAND"
+          mkdir -p release
+          sh -c "$RELEASE_MANIFEST_FETCH_COMMAND"
+          test -f "release/${ROLLBACK_RELEASE_SHA}.json"
+      - name: Roll back application, worker, frontend, configuration, and datasets
+        run: scripts/rollback.sh "${{ inputs.environment }}" "${{ inputs.release_sha }}"
+      - name: No-cost health verification
+        run: scripts/deploy.sh smoke "${{ inputs.environment }}"

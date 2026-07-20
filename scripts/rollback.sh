@@ -12,6 +12,10 @@ test -f "release/${release_sha}.json" || {
   echo "release manifest not found" >&2
   exit 2
 }
+python3 scripts/release_manifest.py \
+  --verify "release/${release_sha}.json" \
+  --expected-environment "$environment" \
+  --expected-sha "$release_sha"
 
 : "${ROLLBACK_COMMAND:?Configure in protected CI environment}"
 export ROLLBACK_RELEASE_MANIFEST="release/${release_sha}.json"

@@ -20,6 +20,10 @@ DataForSEO or any other paid provider:
 - `/health/dependencies`: safe dependency details and an explicit
   `paid_provider_probe_performed: false`.
 
+The deployment platform must publish the `up`, backup, restore-check, and
+deployment-readiness series referenced by the alert rules. Missing series fail
+closed and page, preventing a silent monitoring misconfiguration.
+
 ## Initial service levels
 
 | Objective | Indicator | Target | 30-day error budget |
@@ -44,4 +48,3 @@ queueing a fixture scan with the worker stopped, and incrementing the fixture
 routing-failure path. Cost alerts must be tested with injected metrics, never
 paid calls. Record timestamps, alert delivery, owner acknowledgement, and
 runbook outcome.
-

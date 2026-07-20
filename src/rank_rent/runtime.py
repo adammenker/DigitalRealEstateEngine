@@ -29,6 +29,8 @@ def validate_environment(settings: Settings) -> None:
         failures.append("OIDC_ISSUER=https://...")
     if not settings.oidc_audience:
         failures.append("OIDC_AUDIENCE")
+    if not settings.oidc_jwks_url.startswith("https://"):
+        failures.append("OIDC_JWKS_URL=https://...")
     if not settings.oidc_allowed_jwks_hosts:
         failures.append("OIDC_ALLOWED_JWKS_HOSTS")
     if not settings.database_url.startswith(("postgresql://", "postgresql+psycopg://")):

@@ -63,6 +63,7 @@ jobs:
       MIGRATION_TASK_COMMAND: ${{ vars.MIGRATION_TASK_COMMAND }}
       BACKEND_DEPLOY_COMMAND: ${{ vars.BACKEND_DEPLOY_COMMAND }}
       FRONTEND_DEPLOY_COMMAND: ${{ vars.FRONTEND_DEPLOY_COMMAND }}
+      RELEASE_MANIFEST_PUBLISH_COMMAND: ${{ vars.RELEASE_MANIFEST_PUBLISH_COMMAND }}
       SMOKE_TEST_URL: ${{ vars.SMOKE_TEST_URL }}
     steps:
       - uses: actions/checkout@v4
@@ -89,6 +90,10 @@ jobs:
           path: release/${{ github.sha }}.json
           if-no-files-found: error
           retention-days: 90
+      - name: Publish immutable release manifest
+        env:
+          RELEASE_MANIFEST_PATH: release/${{ github.sha }}.json
+        run: scripts/deploy.sh publish-manifest "${{ inputs.environment }}"
       - name: Backup verification
         run: scripts/deploy.sh backup-check "${{ inputs.environment }}"
       - name: Migration job

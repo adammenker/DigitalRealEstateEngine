@@ -106,7 +106,7 @@ SCAN_COST_LIMIT_BLOCKS = Counter(
 )
 UNPLANNED_PAID_CALLS = Counter(
     "rank_rent_unplanned_paid_calls_total",
-    "Paid provider calls executed without a matching planned request.",
+    "Unplanned paid-provider call attempts blocked or detected.",
 )
 UNPLANNED_PAID_CALLS.inc(0)
 

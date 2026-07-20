@@ -1,5 +1,10 @@
 locals {
   name = "rank-rent-${var.environment}"
+  backend_internal_url = (
+    var.backend_internal_url != ""
+    ? var.backend_internal_url
+    : "http://api.${var.environment}.rank-rent.internal:8000"
+  )
   common_environment = [
     { name = "APP_ENV", value = var.environment },
     { name = "AUTH_MODE", value = "oidc" },
@@ -7,6 +12,7 @@ locals {
     { name = "SECRETS_INJECTED_BY_PLATFORM", value = "true" },
     { name = "OIDC_ISSUER", value = var.oidc_issuer },
     { name = "OIDC_AUDIENCE", value = var.oidc_audience },
+    { name = "OIDC_JWKS_URL", value = var.oidc_jwks_url },
     { name = "OIDC_ALLOWED_JWKS_HOSTS", value = jsonencode([var.oidc_jwks_host]) },
     { name = "CORS_ALLOWED_ORIGINS", value = jsonencode([var.cors_origin]) },
     { name = "RELEASE_GIT_SHA", value = var.release_git_sha },
@@ -75,6 +81,12 @@ resource "aws_security_group" "application" {
   egress      = []
 }
 
+resource "aws_security_group" "load_balancer" {
+  name_prefix = "${local.name}-load-balancer-"
+  vpc_id      = var.vpc_id
+  egress      = []
+}
+
 resource "aws_security_group" "database" {
   name_prefix = "${local.name}-database-"
   vpc_id      = var.vpc_id
@@ -86,6 +98,76 @@ resource "aws_security_group_rule" "application_https" {
   type              = "egress"
   from_port         = 443
   to_port           = 443
+  protocol          = "tcp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.application.id
+}
+
+resource "aws_security_group_rule" "load_balancer_https" {
+  description       = "Public HTTPS"
+  type              = "ingress"
+  from_port         = 443
+  to_port           = 443
+  protocol          = "tcp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.load_balancer.id
+}
+
+resource "aws_security_group_rule" "load_balancer_to_frontend" {
+  description              = "Frontend traffic"
+  type                     = "egress"
+  from_port                = 3000
+  to_port                  = 3000
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.application.id
+  security_group_id        = aws_security_group.load_balancer.id
+}
+
+resource "aws_security_group_rule" "frontend_from_load_balancer" {
+  description              = "Frontend from load balancer"
+  type                     = "ingress"
+  from_port                = 3000
+  to_port                  = 3000
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.load_balancer.id
+  security_group_id        = aws_security_group.application.id
+}
+
+resource "aws_security_group_rule" "api_from_application" {
+  description              = "API from frontend tasks"
+  type                     = "ingress"
+  from_port                = 8000
+  to_port                  = 8000
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.application.id
+  security_group_id        = aws_security_group.application.id
+}
+
+resource "aws_security_group_rule" "application_to_api" {
+  description              = "Frontend to API"
+  type                     = "egress"
+  from_port                = 8000
+  to_port                  = 8000
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.application.id
+  security_group_id        = aws_security_group.application.id
+}
+
+resource "aws_security_group_rule" "application_dns_udp" {
+  description       = "DNS resolution"
+  type              = "egress"
+  from_port         = 53
+  to_port           = 53
+  protocol          = "udp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.application.id
+}
+
+resource "aws_security_group_rule" "application_dns_tcp" {
+  description       = "DNS resolution fallback"
+  type              = "egress"
+  from_port         = 53
+  to_port           = 53
   protocol          = "tcp"
   cidr_blocks       = ["0.0.0.0/0"]
   security_group_id = aws_security_group.application.id
@@ -183,6 +265,26 @@ resource "aws_ecs_cluster" "main" {
   setting {
     name  = "containerInsights"
     value = "enabled"
+  }
+}
+
+resource "aws_service_discovery_private_dns_namespace" "main" {
+  name = "${var.environment}.rank-rent.internal"
+  vpc  = var.vpc_id
+}
+
+resource "aws_service_discovery_service" "api" {
+  name = "api"
+  dns_config {
+    namespace_id = aws_service_discovery_private_dns_namespace.main.id
+    dns_records {
+      ttl  = 10
+      type = "A"
+    }
+    routing_policy = "MULTIVALUE"
+  }
+  health_check_custom_config {
+    failure_threshold = 1
   }
 }
 
@@ -361,7 +463,7 @@ resource "aws_ecs_task_definition" "frontend" {
     essential = true
     environment = [
       { name = "NODE_ENV", value = "production" },
-      { name = "BACKEND_INTERNAL_URL", value = var.backend_internal_url },
+      { name = "BACKEND_INTERNAL_URL", value = local.backend_internal_url },
       { name = "RELEASE_GIT_SHA", value = var.release_git_sha },
     ]
     portMappings = [{ containerPort = 3000 }]
@@ -414,5 +516,109 @@ resource "aws_ecs_task_definition" "migration" {
   }])
 }
 
-# ECS services, target groups, DNS, and certificates are environment integration
-# inputs so organizations can attach these immutable tasks to their existing edge.
+resource "aws_lb" "frontend" {
+  name               = substr("${local.name}-frontend", 0, 32)
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.load_balancer.id]
+  subnets            = var.public_subnet_ids
+}
+
+resource "aws_lb_target_group" "frontend" {
+  name        = substr("${local.name}-frontend", 0, 32)
+  port        = 3000
+  protocol    = "HTTP"
+  target_type = "ip"
+  vpc_id      = var.vpc_id
+  health_check {
+    path                = "/"
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+    timeout             = 5
+    interval            = 30
+    matcher             = "200-399"
+  }
+}
+
+resource "aws_lb_listener" "https" {
+  load_balancer_arn = aws_lb.frontend.arn
+  port              = 443
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+  certificate_arn   = var.certificate_arn
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.frontend.arn
+  }
+}
+
+resource "aws_route53_record" "frontend" {
+  zone_id = var.hosted_zone_id
+  name    = var.public_domain
+  type    = "A"
+  alias {
+    name                   = aws_lb.frontend.dns_name
+    zone_id                = aws_lb.frontend.zone_id
+    evaluate_target_health = true
+  }
+}
+
+resource "aws_ecs_service" "api" {
+  name            = "${local.name}-api"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.api.arn
+  desired_count   = var.environment == "production" ? 2 : 1
+  launch_type     = "FARGATE"
+  network_configuration {
+    subnets          = var.private_subnet_ids
+    security_groups  = [aws_security_group.application.id]
+    assign_public_ip = false
+  }
+  service_registries {
+    registry_arn = aws_service_discovery_service.api.arn
+  }
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+}
+
+resource "aws_ecs_service" "worker" {
+  name            = "${local.name}-worker"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.worker.arn
+  desired_count   = var.environment == "production" ? 2 : 1
+  launch_type     = "FARGATE"
+  network_configuration {
+    subnets          = var.private_subnet_ids
+    security_groups  = [aws_security_group.application.id]
+    assign_public_ip = false
+  }
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+}
+
+resource "aws_ecs_service" "frontend" {
+  name            = "${local.name}-frontend"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.frontend.arn
+  desired_count   = var.environment == "production" ? 2 : 1
+  launch_type     = "FARGATE"
+  network_configuration {
+    subnets          = var.private_subnet_ids
+    security_groups  = [aws_security_group.application.id]
+    assign_public_ip = false
+  }
+  load_balancer {
+    target_group_arn = aws_lb_target_group.frontend.arn
+    container_name   = "frontend"
+    container_port   = 3000
+  }
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+  depends_on = [aws_lb_listener.https]
+}

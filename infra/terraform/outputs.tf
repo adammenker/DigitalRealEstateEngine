@@ -31,3 +31,19 @@ output "frontend_task_definition_arn" {
 output "migration_task_definition_arn" {
   value = aws_ecs_task_definition.migration.arn
 }
+
+output "frontend_url" {
+  value = "https://${aws_route53_record.frontend.fqdn}"
+}
+
+output "api_service_name" {
+  value = aws_ecs_service.api.name
+}
+
+output "worker_service_name" {
+  value = aws_ecs_service.worker.name
+}
+
+output "frontend_service_name" {
+  value = aws_ecs_service.frontend.name
+}

@@ -2,17 +2,17 @@ groups:
   - name: rank-rent-slos
     rules:
       - alert: RankRentApiUnavailable
-        expr: sum(rate(rank_rent_api_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(rank_rent_api_requests_total[5m])), 1) > 0.005
+        expr: (up{job="rank-rent-api"} == 0) or absent(up{job="rank-rent-api"})
         for: 10m
         labels: { severity: page }
         annotations: { runbook: "docs/runbooks/database-outage.md" }
       - alert: RankRentWorkerUnavailable
-        expr: rank_rent_worker_heartbeat_age_seconds > 60
+        expr: (rank_rent_worker_heartbeat_age_seconds > 60) or absent(rank_rent_worker_heartbeat_age_seconds)
         for: 5m
         labels: { severity: page }
         annotations: { runbook: "docs/runbooks/worker-stuck.md" }
       - alert: RankRentDatabaseUnavailable
-        expr: rank_rent_database_available == 0
+        expr: (rank_rent_database_available == 0) or absent(rank_rent_database_available)
         for: 2m
         labels: { severity: page }
         annotations: { runbook: "docs/runbooks/database-outage.md" }
@@ -38,15 +38,15 @@ groups:
         labels: { severity: ticket }
         annotations: { runbook: "docs/runbooks/credential-leak.md" }
       - alert: RankRentBackupFailure
-        expr: time() - rank_rent_backup_last_success_timestamp_seconds > 86400
+        expr: (time() - rank_rent_backup_last_success_timestamp_seconds > 86400) or absent(rank_rent_backup_last_success_timestamp_seconds)
         labels: { severity: page }
         annotations: { runbook: "docs/runbooks/backup-restore.md" }
       - alert: RankRentRestoreCheckFailure
-        expr: rank_rent_restore_check_success == 0
+        expr: (rank_rent_restore_check_success == 0) or absent(rank_rent_restore_check_success)
         labels: { severity: page }
         annotations: { runbook: "docs/runbooks/backup-restore.md" }
       - alert: RankRentDeploymentHealthFailure
-        expr: rank_rent_deployment_ready == 0
+        expr: (rank_rent_deployment_ready == 0) or absent(rank_rent_deployment_ready)
         for: 5m
         labels: { severity: page }
         annotations: { runbook: "docs/runbooks/bad-public-deployment.md" }

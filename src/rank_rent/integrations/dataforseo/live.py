@@ -27,6 +27,7 @@ from rank_rent.domain.models import (
     ServiceFamily,
     slugify,
 )
+from rank_rent.observability.context import planned_request_id_var
 from rank_rent.observability.logging import log_event
 from rank_rent.observability.metrics import (
     PROVIDER_CACHE_HITS,
@@ -34,6 +35,7 @@ from rank_rent.observability.metrics import (
     PROVIDER_COST,
     PROVIDER_LATENCY,
     PROVIDER_RATE_LIMITS,
+    PROVIDER_SCHEMA_MISMATCHES,
 )
 from rank_rent.runtime import DataMode, validate_runtime_mode
 from rank_rent.security.secrets import resolve_secret_reference
@@ -590,6 +592,11 @@ class DataForSEOLiveProvider:
                 return cached.payload
 
         api_call = self._start_api_call(path, normalized)
+        planned_token = planned_request_id_var.set(
+            str(api_call.planned_request_id)
+            if api_call is not None and api_call.planned_request_id is not None
+            else None
+        )
         reservation: UsageReservation | None = None
         payload: dict[str, Any] | None = None
         response: httpx.Response | None = None
@@ -699,8 +706,13 @@ class DataForSEOLiveProvider:
                     schema_drift=isinstance(exc, DataForSEOSchemaError),
                     provider_outcome_unknown=ambiguous,
                 )
-            if "HTTP 429" in str(exc):
+            if isinstance(exc, DataForSEORateLimitError):
                 PROVIDER_RATE_LIMITS.labels(
+                    provider=self.provider_name,
+                    endpoint=path,
+                ).inc()
+            if isinstance(exc, DataForSEOSchemaError):
+                PROVIDER_SCHEMA_MISMATCHES.labels(
                     provider=self.provider_name,
                     endpoint=path,
                 ).inc()
@@ -723,6 +735,8 @@ class DataForSEOLiveProvider:
                 error_type=type(exc).__name__,
             )
             raise
+        finally:
+            planned_request_id_var.reset(planned_token)
 
     def _assert_execution_lease(self) -> None:
         if self.session is not None and self.execution_lease is not None:

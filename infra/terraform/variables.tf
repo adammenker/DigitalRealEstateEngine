@@ -23,6 +23,21 @@ variable "public_subnet_ids" {
   type = list(string)
 }
 
+variable "public_domain" {
+  type        = string
+  description = "Environment-specific frontend hostname, for example console.example.com."
+}
+
+variable "hosted_zone_id" {
+  type        = string
+  description = "Route 53 hosted zone containing public_domain."
+}
+
+variable "certificate_arn" {
+  type        = string
+  description = "Validated ACM certificate ARN for public_domain."
+}
+
 variable "api_image" {
   type        = string
   description = "Immutable API image reference including sha256 digest."
@@ -53,7 +68,7 @@ variable "frontend_image" {
 variable "backend_internal_url" {
   type        = string
   description = "Private API origin used by the frontend server-side proxy."
-  default     = "http://rank-rent-api:8000"
+  default     = ""
 }
 
 variable "oidc_issuer" {
@@ -62,6 +77,14 @@ variable "oidc_issuer" {
 
 variable "oidc_audience" {
   type = string
+}
+
+variable "oidc_jwks_url" {
+  type = string
+  validation {
+    condition     = startswith(var.oidc_jwks_url, "https://")
+    error_message = "oidc_jwks_url must use HTTPS"
+  }
 }
 
 variable "oidc_jwks_host" {

@@ -26,7 +26,6 @@ from rank_rent.opportunity_review.services import (
 )
 from rank_rent.security.audit import append_audit_event
 from rank_rent.security.auth import Role, principal_from_request
-from rank_rent.settings import get_settings
 
 router = APIRouter(prefix="/api", tags=["opportunity-review"])
 
@@ -35,7 +34,6 @@ def review_actor(
     request: Request,
 ) -> ReviewActor:
     principal = principal_from_request(request)
-    settings = get_settings()
     role_mapping = {
         Role.admin: ReviewRole.admin,
         Role.operator: ReviewRole.operator,
@@ -44,22 +42,10 @@ def review_actor(
         # mutations, while reviewer semantics permit evidence packet reads.
         Role.read_only: ReviewRole.reviewer,
     }
-    actor_id = principal.user_id
-    role = role_mapping[principal.role]
-    if settings.app_env in {"local", "test", "development"}:
-        actor_id = request.headers.get("x-actor-id", actor_id)
-        local_role = request.headers.get("x-actor-role")
-        if local_role:
-            try:
-                role = ReviewRole(local_role)
-            except ValueError as exc:
-                raise HTTPException(status_code=403, detail="Unknown review actor role.") from exc
-            if role == ReviewRole.system:
-                raise HTTPException(
-                    status_code=403,
-                    detail="System actors cannot be supplied by clients.",
-                )
-    return ReviewActor(actor_id=actor_id, role=role)
+    return ReviewActor(
+        actor_id=principal.user_id,
+        role=role_mapping[principal.role],
+    )
 
 
 def _execute(

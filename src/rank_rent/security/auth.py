@@ -73,7 +73,9 @@ class AuthenticationError(ValueError):
 class OIDCVerifier:
     def __init__(self, settings: Settings) -> None:
         issuer = settings.oidc_issuer.rstrip("/")
-        jwks_url = settings.oidc_jwks_url or f"{issuer}/.well-known/jwks.json"
+        jwks_url = settings.oidc_jwks_url
+        if not jwks_url:
+            raise AuthenticationError("OIDC_JWKS_URL must be configured.")
         try:
             validate_outbound_url(
                 jwks_url,
@@ -168,4 +170,3 @@ def require_permission(request: Request, permission: Permission) -> Principal:
             detail="You do not have permission to perform this action.",
         )
     return principal
-

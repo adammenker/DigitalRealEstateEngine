@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -19,12 +20,14 @@ from rank_rent.integrations.factory import (
     build_domain_availability_provider,
     build_market_research_provider,
 )
+from rank_rent.observability.logging import log_event
 from rank_rent.observability.metrics import (
     COST_RECONCILIATION_FAILURES,
     DISCOVERY_CONFIDENCE,
     DISCOVERY_SCANS,
     EVIDENCE_GATE_RESULTS,
     SCORE_VERSIONS,
+    WORKER_STAGE_DURATION,
 )
 from rank_rent.opportunity_review.models import OpportunityState
 from rank_rent.opportunity_review.services import (
@@ -113,6 +116,8 @@ class ScanPipeline:
         self.evidence_quality = EvidenceQualityEvaluator(
             self.settings.project_root / "config/evidence_quality.yaml"
         )
+        self._current_stage: str | None = None
+        self._stage_started_at: float | None = None
 
     async def run(
         self,
@@ -319,6 +324,7 @@ class ScanPipeline:
                 opportunity.confidence = score.confidence.value
             opportunity.missing_data_flags = score.missing_fields
             scan.status = "completed"
+            self._observe_current_stage()
             scan.progress_stage = "completed"
             scan.completed_at = datetime.now(UTC)
             cost_ledger = build_api_cost_ledger(self.session, scan.id)
@@ -448,6 +454,7 @@ class ScanPipeline:
             self.session.rollback()
             raise
         except ScanCancelled:
+            self._observe_current_stage()
             scan.status = "cancelled"
             scan.progress_stage = "cancelled"
             scan.completed_at = datetime.now(UTC)
@@ -468,6 +475,7 @@ class ScanPipeline:
             DISCOVERY_SCANS.labels(profile=scan.scan_profile, status="cancelled").inc()
             raise
         except Exception as exc:
+            self._observe_current_stage()
             failed_stage = scan.progress_stage
             scan.status = "failed"
             scan.progress_stage = "failed"
@@ -528,6 +536,8 @@ class ScanPipeline:
         scan.cache_policy_version = "v2"
         scan.planned_cost_usd = float(plan.estimated_uncached_cost_usd)
         scan.progress_stage = "planning"
+        self._current_stage = "planning"
+        self._stage_started_at = time.perf_counter()
         scan.estimated_cost_usd = float(plan.estimated_uncached_cost_usd)
         scan.actual_cost_usd = 0
         scan.started_at = datetime.now(UTC)
@@ -577,6 +587,7 @@ class ScanPipeline:
             raise ScanCancelled(f"Scan {scan.id} was cancelled.")
 
     def _set_stage(self, scan: ScanRunORM, stage: str) -> None:
+        self._observe_current_stage()
         outputs = {
             **(scan.partial_outputs or {}),
             "last_successful_stage": stage,
@@ -605,6 +616,23 @@ class ScanPipeline:
             scan.partial_outputs = outputs
         self.session.commit()
         self.session.refresh(scan)
+        self._current_stage = stage
+        self._stage_started_at = time.perf_counter()
+        log_event(
+            "scan.stage.started",
+            scan_run_id=scan.id,
+            opportunity_id=scan.opportunity_id,
+            stage=stage,
+        )
+
+    def _observe_current_stage(self) -> None:
+        if self._current_stage is None or self._stage_started_at is None:
+            return
+        WORKER_STAGE_DURATION.labels(stage=self._current_stage).observe(
+            time.perf_counter() - self._stage_started_at
+        )
+        self._current_stage = None
+        self._stage_started_at = None
 
     def _ensure_lease(self, *, lock: bool = False) -> None:
         if self.execution_lease is not None:

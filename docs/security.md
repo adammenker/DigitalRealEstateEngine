@@ -15,7 +15,7 @@ configuration prevents startup. The recognized roles are `admin`, `operator`,
 `rank_rent.security.auth.ROLE_PERMISSIONS`.
 
 All production backend routes require authentication except `/live`, `/ready`,
-`/healthz`, and `/health/dependencies`. Read operations require an authenticated
+`/healthz`, `/readyz`, and `/health/dependencies`. Read operations require an authenticated
 role. Mutation policies enforce scan, review, deployment, routing, export, and
 deletion permissions. Full scans require `run_full_scan`; no anonymous or
 read-only request can confirm or trigger paid work.
@@ -32,9 +32,10 @@ protection.
 Successful mutations are written to `audit_events` with actor, role, target,
 request ID, timestamp, metadata, previous hash, and event hash. Login/logout,
 scan creation, promotion, cost confirmation, cancellation, retry, and rescore
-are covered by current routes. Future domain, deployment, routing, export,
-deletion, override, and approval services must call `append_audit_event` in the
-same transaction as their state change.
+are covered by current routes, as are review transitions, ownership, evidence
+overrides, templates, and batch plans. Future domain, deployment, routing,
+export, and deletion routes must call `append_audit_event` in the same
+transaction as their state change.
 
 ORM listeners and database triggers reject update/delete. Access to
 `GET /api/audit-events` is admin-only. Audit storage must be exported to

@@ -23,7 +23,8 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -e ".[dev]"
+      - run: pip install --requirement requirements-dev.lock
+      - run: pip install --no-deps --editable .
       - run: ruff check src tests scripts
       - run: mypy --strict src
       - run: alembic upgrade head
@@ -108,7 +109,8 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -e ".[dev]"
+      - run: pip install --requirement requirements-dev.lock
+      - run: pip install --no-deps --editable .
       - run: alembic upgrade head
       - run: pytest -q tests/unit/test_migrations.py tests/e2e
 
@@ -120,8 +122,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -e ".[dev]"
-      - run: python -m pip_audit
+      - run: pip install --requirement requirements-dev.lock
+      - run: pip install --no-deps --editable .
+      - run: python -m pip_audit --requirement requirements.lock
       - uses: actions/setup-node@v4
         with:
           node-version: "20.19.4"
