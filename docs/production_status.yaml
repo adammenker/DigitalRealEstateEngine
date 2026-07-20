@@ -1,0 +1,108 @@
+baseline_commit: "f63991ae74a5daa733f6633ec6aee55578b0ee88"
+baseline_date: "2026-07-19"
+release_target: "A"
+overall_status: in_progress
+production_authorized: false
+public_launch_authorized: false
+workstreams:
+  calibration:
+    id: A
+    status: in_progress
+    owner: Franklin
+    branch: delegated-worktree
+    blockers: []
+    completed_acceptance_criteria: []
+  public_data:
+    id: B
+    status: in_progress
+    owner: McClintock
+    branch: delegated-worktree
+    blockers: []
+    completed_acceptance_criteria: []
+  production_data:
+    id: C
+    status: in_progress
+    owner: Halley
+    branch: delegated-worktree
+    blockers:
+      - Production PostgreSQL and object-storage resources are not provisioned.
+    completed_acceptance_criteria: []
+  worker_controls:
+    id: D
+    status: in_progress
+    owner: Halley
+    branch: delegated-worktree
+    blockers:
+      - Production DataForSEO qualification and billing exports require operator credentials.
+    completed_acceptance_criteria: []
+  security:
+    id: E
+    status: in_progress
+    owner: Schrodinger
+    branch: delegated-worktree
+    blockers:
+      - Production OIDC tenant and secret store are not configured.
+    completed_acceptance_criteria: []
+  observability:
+    id: F
+    status: in_progress
+    owner: Schrodinger
+    branch: delegated-worktree
+    blockers:
+      - Production telemetry and alert destinations are not provisioned.
+    completed_acceptance_criteria: []
+  deployment:
+    id: G
+    status: in_progress
+    owner: Schrodinger
+    branch: delegated-worktree
+    blockers:
+      - Cloud account, DNS, and production approval are operator-controlled.
+    completed_acceptance_criteria: []
+  opportunity_review:
+    id: H
+    status: in_progress
+    owner: Hume
+    branch: delegated-worktree
+    blockers: []
+    completed_acceptance_criteria: []
+  property_workflow:
+    id: I
+    status: in_progress
+    owner: Hume
+    branch: delegated-worktree
+    blockers:
+      - Public deployment remains blocked until Release A is approved.
+    completed_acceptance_criteria: []
+  lead_operations:
+    id: J
+    status: in_progress
+    owner: Euler
+    branch: delegated-worktree
+    blockers:
+      - Production email and call-routing providers are not selected or configured.
+    completed_acceptance_criteria: []
+  outcome_feedback:
+    id: K
+    status: in_progress
+    owner: Euler
+    branch: delegated-worktree
+    blockers:
+      - Real property outcomes do not exist yet.
+    completed_acceptance_criteria: []
+  qa:
+    id: L
+    status: not_started
+    owner: orchestrator
+    branch: main
+    blockers:
+      - Integration is incomplete.
+    completed_acceptance_criteria: []
+release_gates:
+  calibration_ready: false
+  paid_scan_ready: false
+  internal_production_ready: false
+  property_staging_ready: false
+  public_launch_ready: false
+  operational_learning_ready: false
+
