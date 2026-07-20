@@ -1,10 +1,12 @@
-# Offline calibration
+# Calibration
+
+## Offline benchmark calibration
 
 The calibration harness protects the discovery score's business direction before paid
 production scanning. It is synthetic underwriting evidence, not a profitability model and
 not a substitute for future outcome calibration.
 
-## What runs
+### What runs
 
 `config/benchmarks/manifest.yaml` pins the suite, active scoring snapshot, and all fixture
 libraries. Suite `2026.07.1` contains:
@@ -25,7 +27,7 @@ Socket connections are denied for the complete run and comparison. A network att
 an error instead of falling through to DataForSEO or another provider. Reports record the
 attempt count, which must remain zero.
 
-## Commands
+### Commands
 
 ```bash
 rank-rent calibrate validate-config
@@ -46,7 +48,7 @@ manifest. Passing the same version is a useful determinism and zero-network smok
 The Make target `calibration` validates configuration and runs the suite without writing an
 artifact. CI runs the same two commands before pytest.
 
-## Version discipline
+### Version discipline
 
 1. Change configuration instead of adding exceptions for a named scenario.
 2. Increment `config/scoring.yaml`'s version for every scoring behavior change.
@@ -63,7 +65,7 @@ The benchmark hash covers the manifest, all scenario and label libraries, the se
 catalog, classifier and evidence-quality configuration, the active scoring config, and every
 registered scoring snapshot. The scorer's own hash is recorded separately.
 
-## Reading a report
+### Reading a benchmark report
 
 The JSON report includes scenario checks, failed pairwise expectations, component
 distributions, expected-versus-observed rankability counts, classification confusion,
@@ -72,3 +74,64 @@ provider signal results, scoring identity, suite identity, and configuration has
 A passing synthetic suite proves directional invariants only. It does not establish expected
 revenue, lead volume, ranking time, or return on investment. Those require observed outcomes
 linked to the exact historical score and evidence.
+
+## Outcome feedback calibration
+
+### Historical decision record
+
+Before outcomes are imported, `PropertyOutcomeService.record_decision()` pins:
+
+- Property integration ID
+- Original opportunity
+- Original `FullOpportunityScore`
+- Exact scoring version
+- Exact evidence artifact
+- Selection date
+- Service family, market-size band, and evidence quality
+- Validated-opportunity acquisition cost
+- Component scores present in the original full-score payload
+
+The opportunity, score, and evidence artifact must agree. A second request with
+the same property is idempotent only when those immutable references match.
+Rescoring an opportunity does not alter the property decision.
+
+### Outcome ingestion
+
+`OutcomeSourceAdapter` returns typed daily records. Included fixture adapters
+perform no network calls. Each record has a source type, source name, source
+record ID, truth basis, confidence, and nonnegative metrics. The unique source
+identity makes imports idempotent.
+
+Supported source types cover Search Console, web analytics, call tracking,
+forms, providers, and operators. Provider-reported and operator-verified facts
+must use their corresponding source types. Reported revenue cannot be
+estimated.
+
+### Outcome reports
+
+`CalibrationReportService` persists a versioned descriptive report containing:
+
+- Selection score versus indexing time
+- Selection score versus impression growth
+- Selection score versus top-10 achievement
+- Each captured score component versus qualified-lead volume
+- Provider suitability versus won jobs
+- Addressable-market score versus qualified-lead demand
+- Segments by service family, market size, and evidence quality
+- Cost per property that produced at least one qualified lead
+- Separate observed and provider-reported totals
+
+Pearson coefficients are emitted only as descriptive correlations. Every
+comparison includes its sample size and a configured sufficiency flag. Reports
+always state that correlation does not establish causation and
+`scoring_changes_applied` is always false.
+
+### Scoring guardrail
+
+`ScoringChangeGuard` cannot write scoring configuration. It only records that a
+human-initiated, version-changing proposal has a passing benchmark and named
+reviewer. System-, report-, or automatically initiated proposals are rejected.
+The stored review explicitly records `applied_automatically = false`.
+
+Applying a reviewed scoring change remains a separate versioned configuration
+workflow with benchmark comparison, reviewer approval, and rollback.
