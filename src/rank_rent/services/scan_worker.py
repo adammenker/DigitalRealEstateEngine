@@ -26,14 +26,14 @@ from rank_rent.integrations.dataforseo.live import (
     DataForSEORateLimitError,
     DataForSEOSchemaError,
 )
+from rank_rent.opportunity_review.models import OpportunityState
+from rank_rent.opportunity_review.services import OpportunityReviewService
 from rank_rent.runtime import ConfigurationError
 from rank_rent.services.cost_controls import (
     CircuitOpenError,
     reconcile_stale_api_call_attempts,
 )
 from rank_rent.services.scan_leases import ScanExecutionLease, ScanLeaseLost
-from rank_rent.opportunity_review.models import OpportunityState
-from rank_rent.opportunity_review.services import OpportunityReviewService
 from rank_rent.services.scanner import ScanCancelled, ScanPipeline
 from rank_rent.settings import Settings, get_settings
 

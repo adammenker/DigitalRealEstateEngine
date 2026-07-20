@@ -9,8 +9,6 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from rank_rent.db.orm import OpportunityORM
-from rank_rent.lead_routing.adapters import RetryableDeliveryError
 from rank_rent.lead_routing.interfaces import (
     CallTrackingAdapter,
     DeliveryAdapter,
