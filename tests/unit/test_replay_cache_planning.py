@@ -246,7 +246,9 @@ async def test_live_call_ledger_does_not_hold_sqlite_write_lock_during_slow_http
 
         with Session() as other_session:
             running_call = other_session.query(ApiCallORM).one()
-            assert running_call.status == "running"
+            assert running_call.status == "in_flight"
+            assert running_call.reservation_state == "reserved"
+            assert running_call.provider_outcome == "submitted"
             same_scan = other_session.get(ScanRunORM, scan.id)
             assert same_scan is not None
             same_scan.heartbeat_at = datetime.now(UTC)

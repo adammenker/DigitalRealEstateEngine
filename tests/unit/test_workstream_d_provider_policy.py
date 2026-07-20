@@ -120,7 +120,7 @@ def test_failed_planned_request_reuses_the_same_idempotency_row() -> None:
 
         assert second is not None
         assert second.id == first.id
-        assert second.status == "running"
+        assert second.status == "prepared"
         assert session.query(ApiCallORM).count() == 1
 
 

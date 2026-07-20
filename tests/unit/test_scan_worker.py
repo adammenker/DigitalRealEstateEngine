@@ -323,3 +323,64 @@ def test_retryable_failure_requeues_and_releases_lease(
         assert stored.next_attempt_at is not None
         assert stored.worker_id is None
         assert stored.lease_token is None
+
+
+def test_heartbeat_loss_cancels_old_pipeline_before_it_can_complete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    Session = session_factory()
+    with Session() as session:
+        scan = ScanRunORM(
+            source="manual_async",
+            status="queued",
+            request_parameters=_queued_request(),
+        )
+        session.add(scan)
+        session.commit()
+        scan_id = scan.id
+        lease = claim_next_scan(session, worker_id="worker-a", lease_seconds=30)
+    assert lease is not None
+
+    pipeline_started = asyncio.Event()
+    pipeline_cancelled = asyncio.Event()
+
+    class SlowPipeline:
+        def __init__(self, session, **_: object) -> None:
+            self.session = session
+
+        async def run(self, *_: object, **__: object) -> dict[str, object]:
+            pipeline_started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                pipeline_cancelled.set()
+            return {}
+
+    async def failed_heartbeat(
+        _lease,
+        *,
+        lease_lost_event: asyncio.Event,
+        **_: object,
+    ) -> None:
+        await pipeline_started.wait()
+        lease_lost_event.set()
+
+    monkeypatch.setattr("rank_rent.services.scan_worker.ScanPipeline", SlowPipeline)
+    monkeypatch.setattr("rank_rent.services.scan_worker._heartbeat_scan", failed_heartbeat)
+
+    asyncio.run(
+        run_scan_by_id(
+            lease,
+            session_factory=Session,
+            heartbeat_seconds=0.01,
+            lease_seconds=30,
+            settings=Settings(),
+        )
+    )
+
+    assert pipeline_cancelled.is_set()
+    with Session() as session:
+        stored = session.get(ScanRunORM, scan_id)
+        assert stored is not None
+        assert stored.status == "running"
+        assert stored.progress_stage != "completed"

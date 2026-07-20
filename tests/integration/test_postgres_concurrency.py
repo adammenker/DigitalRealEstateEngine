@@ -22,7 +22,7 @@ from rank_rent.services.cost_controls import CircuitOpenError, reserve_provider_
 from rank_rent.services.qualification import (
     DATAFORSEO_ADAPTER_VERSION,
     REQUIRED_QUALIFICATION_CHECKS,
-    record_qualification,
+    record_executed_qualification,
 )
 from rank_rent.services.scan_worker import claim_next_scan
 from rank_rent.settings import Settings
@@ -88,13 +88,17 @@ def test_postgres_daily_limit_is_transactional(postgres_session: sessionmaker) -
         production_daily_request_limit=1,
     )
     with postgres_session() as session:
-        record_qualification(
+        record_executed_qualification(
             session,
             provider="dataforseo-live",
             environment="production",
             adapter_version=DATAFORSEO_ADAPTER_VERSION,
-            checks={name: True for name in REQUIRED_QUALIFICATION_CHECKS},
+            checks={
+                name: {"passed": True, "evidence": {"source": "postgres-test"}}
+                for name in REQUIRED_QUALIFICATION_CHECKS
+            },
             ttl_hours=24,
+            executed_by="test-suite",
             now=now,
         )
         session.add(

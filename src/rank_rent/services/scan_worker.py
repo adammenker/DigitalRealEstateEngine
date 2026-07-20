@@ -8,7 +8,6 @@ import socket
 import uuid
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -28,7 +27,11 @@ from rank_rent.integrations.dataforseo.live import (
     DataForSEOSchemaError,
 )
 from rank_rent.runtime import ConfigurationError
-from rank_rent.services.cost_controls import CircuitOpenError
+from rank_rent.services.cost_controls import (
+    CircuitOpenError,
+    reconcile_stale_api_call_attempts,
+)
+from rank_rent.services.scan_leases import ScanExecutionLease, ScanLeaseLost
 from rank_rent.services.scanner import ScanCancelled, ScanPipeline
 from rank_rent.settings import Settings, get_settings
 
@@ -42,11 +45,7 @@ WORKER_SCAN_SOURCES = {WORKER_SCAN_SOURCE, "promotion_async"}
 SessionFactory = Callable[[], Session]
 
 
-@dataclass(frozen=True)
-class WorkerLease:
-    scan_id: int
-    worker_id: str
-    lease_token: str
+WorkerLease = ScanExecutionLease
 
 
 def build_worker_id(slot: int | None = None) -> str:
@@ -92,6 +91,11 @@ def recover_stale_scans(
     active_settings = settings or get_settings()
     recovered_at = now or datetime.now(UTC)
     cutoff = recovered_at - timedelta(seconds=stale_after_seconds)
+    reconcile_stale_api_call_attempts(
+        session,
+        stale_before=cutoff,
+        now=recovered_at,
+    )
     stale_scans = session.scalars(
         select(ScanRunORM)
         .where(
@@ -109,6 +113,13 @@ def recover_stale_scans(
         .with_for_update(skip_locked=True)
     ).all()
     for scan in stale_scans:
+        reconcile_stale_api_call_attempts(
+            session,
+            stale_before=recovered_at + timedelta(microseconds=1),
+            scan_run_id=scan.id,
+            now=recovered_at,
+            commit=False,
+        )
         previous_stage = scan.progress_stage
         if scan.cancel_requested:
             _cancel_scan(scan, recovered_at, timed_out=True)
@@ -250,6 +261,7 @@ async def run_scan_by_id(
         market = Market(**market_payload)
 
     heartbeat_stop = asyncio.Event()
+    lease_lost = asyncio.Event()
     heartbeat_task = asyncio.create_task(
         _heartbeat_scan(
             lease,
@@ -257,23 +269,45 @@ async def run_scan_by_id(
             session_factory=factory,
             heartbeat_seconds=heartbeat_seconds,
             lease_seconds=lease_seconds,
+            lease_lost_event=lease_lost,
         )
     )
     error: Exception | None = None
     try:
         with factory() as session:
-            await ScanPipeline(
-                session,
-                data_mode=data_mode,
-                scan_profile=scan_profile,
-            ).run(
-                service,
-                market,
-                source=scan_source,
-                existing_scan_id=lease.scan_id,
+            pipeline_task = asyncio.create_task(
+                ScanPipeline(
+                    session,
+                    data_mode=data_mode,
+                    scan_profile=scan_profile,
+                    execution_lease=lease,
+                ).run(
+                    service,
+                    market,
+                    source=scan_source,
+                    existing_scan_id=lease.scan_id,
+                )
             )
+            lease_lost_task = asyncio.create_task(lease_lost.wait())
+            done, _ = await asyncio.wait(
+                {pipeline_task, lease_lost_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if lease_lost_task in done and lease_lost.is_set():
+                pipeline_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await pipeline_task
+                raise ScanLeaseLost(
+                    f"Worker {lease.worker_id} stopped scan {lease.scan_id} after lease loss."
+                )
+            lease_lost_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await lease_lost_task
+            await pipeline_task
     except ScanCancelled:
         logger.info("Durable worker scan %s was cancelled.", lease.scan_id)
+    except ScanLeaseLost as exc:
+        logger.warning("%s", exc)
     except Exception as exc:
         error = exc
         logger.exception("Durable worker scan %s failed unexpectedly.", lease.scan_id)
@@ -419,28 +453,36 @@ async def _heartbeat_scan(
     session_factory: SessionFactory,
     heartbeat_seconds: float,
     lease_seconds: float,
+    lease_lost_event: asyncio.Event,
 ) -> None:
-    while not stop_event.is_set():
-        now = datetime.now(UTC)
-        with session_factory() as session:
-            result = session.execute(
-                update(ScanRunORM)
-                .where(
-                    ScanRunORM.id == lease.scan_id,
-                    ScanRunORM.status == "running",
-                    ScanRunORM.worker_id == lease.worker_id,
-                    ScanRunORM.lease_token == lease.lease_token,
+    try:
+        while not stop_event.is_set():
+            now = datetime.now(UTC)
+            with session_factory() as session:
+                result = session.execute(
+                    update(ScanRunORM)
+                    .where(
+                        ScanRunORM.id == lease.scan_id,
+                        ScanRunORM.status == "running",
+                        ScanRunORM.worker_id == lease.worker_id,
+                        ScanRunORM.lease_token == lease.lease_token,
+                    )
+                    .values(
+                        heartbeat_at=now,
+                        lease_expires_at=now + timedelta(seconds=lease_seconds),
+                    )
                 )
-                .values(
-                    heartbeat_at=now,
-                    lease_expires_at=now + timedelta(seconds=lease_seconds),
-                )
-            )
-            session.commit()
-            if not _rowcount(result):
-                return
-        with suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(stop_event.wait(), timeout=heartbeat_seconds)
+                session.commit()
+                if not _rowcount(result):
+                    lease_lost_event.set()
+                    return
+            with suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(stop_event.wait(), timeout=heartbeat_seconds)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("Heartbeat failed for scan %s; terminating lease owner.", lease.scan_id)
+        lease_lost_event.set()
 
 
 def _retry_or_quarantine(

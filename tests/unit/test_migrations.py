@@ -40,7 +40,8 @@ def test_migration_graph_has_one_linear_head_for_workstreams_c_and_d() -> None:
 
     referenced = {revision for revision in revisions.values() if revision is not None}
     assert set(revisions) - referenced == {SCHEMA_HEAD_REVISION}
-    assert revisions[SCHEMA_HEAD_REVISION] == "8a7d3f2c1b90"
+    assert revisions[SCHEMA_HEAD_REVISION] == "a6e2c9f4d7b1"
+    assert revisions["a6e2c9f4d7b1"] == "8a7d3f2c1b90"
     assert revisions["8a7d3f2c1b90"] == "6f4c2d8a9b17"
     assert revisions["6f4c2d8a9b17"] == "c9a4e7d2b6f1"
     assert revisions["c9a4e7d2b6f1"] == "f8c1d4e7a2b9"
@@ -152,7 +153,32 @@ def test_alembic_upgrade_head_creates_v1_schema(tmp_path, monkeypatch) -> None:
         "provider_task_id",
         "provider_request_id",
         "error_type",
+        "attempt_token",
+        "attempt_state",
+        "provider_outcome",
+        "reservation_state",
+        "reservation_usage_date",
+        "reservation_usage_class",
+        "reservation_estimated_cost_usd",
+        "network_started_at",
+        "reconciled_at",
+        "execution_worker_id",
+        "execution_lease_token",
     } <= api_call_columns
+    usage_columns = {
+        column["name"] for column in inspector.get_columns("provider_daily_usage")
+    }
+    assert "unreconciled_spend_usd" in usage_columns
+    qualification_columns = {
+        column["name"] for column in inspector.get_columns("provider_qualifications")
+    }
+    assert {
+        "execution_method",
+        "gate_eligible",
+        "evidence_sha256",
+        "executed_by",
+        "override_reason",
+    } <= qualification_columns
     api_call_unique_constraints = {
         tuple(constraint["column_names"])
         for constraint in inspector.get_unique_constraints("api_calls")
@@ -387,3 +413,58 @@ def test_workstream_c_upgrade_preserves_populated_legacy_raw_response(
     assert row.retention_classification == "raw_provider_response"
     assert row.encryption_status == "not_encrypted"
     assert pointer > 0
+
+
+def test_worker_recovery_upgrade_conservatively_backfills_legacy_calls(
+    tmp_path, monkeypatch
+) -> None:
+    db_path = tmp_path / "worker-upgrade.db"
+    database_url = f"sqlite:///{db_path}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    get_settings.cache_clear()
+    config = Config(str(Path.cwd() / "alembic.ini"))
+    config.set_main_option("script_location", str(Path.cwd() / "migrations"))
+    config.set_main_option("sqlalchemy.url", database_url)
+    command.upgrade(config, "6f4c2d8a9b17")
+
+    engine = create_engine(database_url)
+    with engine.begin() as connection:
+        for cache_key, status in (
+            ("legacy-completed", "completed"),
+            ("legacy-running", "running"),
+        ):
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO api_calls (
+                        provider, endpoint, stage, cache_key, cache_hit, force_refresh,
+                        estimated_cost_usd, actual_cost_usd, status
+                    ) VALUES (
+                        'dataforseo-live', '/legacy', 'legacy', :cache_key, false, false,
+                        0.25, 0, :status
+                    )
+                    """
+                ),
+                {"cache_key": cache_key, "status": status},
+            )
+
+    command.upgrade(config, "head")
+
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text(
+                """
+                SELECT cache_key, status, attempt_state, provider_outcome
+                FROM api_calls ORDER BY cache_key
+                """
+            )
+        ).all()
+    assert [tuple(row) for row in rows] == [
+        ("legacy-completed", "completed", "completed", "completed"),
+        (
+            "legacy-running",
+            "provider_outcome_unknown",
+            "provider_outcome_unknown",
+            "unknown",
+        ),
+    ]

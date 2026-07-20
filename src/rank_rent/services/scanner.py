@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from rank_rent.db.orm import (
@@ -46,6 +47,11 @@ from rank_rent.services.market_prefilter import MarketPrefilter
 from rank_rent.services.outreach import generate_initial_email
 from rank_rent.services.providers import score_provider_suitability
 from rank_rent.services.records import save_scan_plan_calls, save_scan_records
+from rank_rent.services.scan_leases import (
+    ScanExecutionLease,
+    ScanLeaseLost,
+    assert_current_scan_lease,
+)
 from rank_rent.services.service_catalog import load_service_catalog
 from rank_rent.settings import get_settings
 from rank_rent.site_generator.generator import build_site_config, generate_static_site
@@ -63,6 +69,7 @@ class ScanPipeline:
         domain_provider: DomainAvailabilityProvider | None = None,
         data_mode: DataMode | str | None = None,
         scan_profile: str | None = None,
+        execution_lease: ScanExecutionLease | None = None,
     ) -> None:
         self.session = session
         self.settings = get_settings()
@@ -85,9 +92,11 @@ class ScanPipeline:
         self.scan_profile = _scan_profile(
             scan_profile or self.settings.live_scan_depth
         )
+        self.execution_lease = execution_lease
         if self.data_mode == DataMode.live:
             provider = cast(Any, self.research_provider)
             provider.scan_profile_override = self.scan_profile
+            provider.execution_lease = execution_lease
         self.scorer = OpportunityScorer()
         self.evidence_quality = EvidenceQualityEvaluator(
             self.settings.project_root / "config/evidence_quality.yaml"
@@ -102,6 +111,7 @@ class ScanPipeline:
         build_site: bool = False,
         existing_scan_id: int | None = None,
     ) -> dict[str, Any]:
+        self._ensure_lease()
         public_data_prefilter = MarketPrefilter.from_settings(
             self.settings
         ).assess_market(service, market)
@@ -220,6 +230,7 @@ class ScanPipeline:
                 **(scan.partial_outputs or {}),
                 "evidence_quality": evidence_quality_payload,
             }
+            self._set_stage(scan, "persisting_results")
             save_scan_records(
                 self.session,
                 scan_run_id=scan.id,
@@ -247,6 +258,7 @@ class ScanPipeline:
             site_config = build_site_config(service, market, domains[0].domain if domains else None) if build_site else None
             site_path: Path | None = generate_static_site(site_config) if build_site and site_config else None
 
+            self._ensure_not_cancelled(scan)
             opportunity.status = (
                 "evidence_rejected"
                 if evidence_quality.status == "fail"
@@ -377,6 +389,7 @@ class ScanPipeline:
                     },
                     scan_run_id=scan.id,
                 )
+            self._ensure_lease(lock=True)
             self.session.commit()
             return {
                 "opportunity_id": opportunity.id,
@@ -391,6 +404,9 @@ class ScanPipeline:
                 "evidence_quality": evidence_quality,
                 "site_path": site_path,
             }
+        except ScanLeaseLost:
+            self.session.rollback()
+            raise
         except ScanCancelled:
             scan.status = "cancelled"
             scan.progress_stage = "cancelled"
@@ -433,6 +449,7 @@ class ScanPipeline:
         plan: ScanPlan,
         public_data_prefilter: dict[str, Any] | None,
     ) -> ScanRunORM:
+        self._ensure_lease()
         scan = self.session.get(ScanRunORM, existing_scan_id) if existing_scan_id else None
         if scan is None:
             scan = ScanRunORM(opportunity_id=opportunity_id, source=source)
@@ -501,17 +518,48 @@ class ScanPipeline:
         return scan
 
     def _ensure_not_cancelled(self, scan: ScanRunORM) -> None:
+        self._ensure_lease()
         self.session.refresh(scan)
         if scan.cancel_requested:
             raise ScanCancelled(f"Scan {scan.id} was cancelled.")
 
     def _set_stage(self, scan: ScanRunORM, stage: str) -> None:
-        scan.progress_stage = stage
-        scan.partial_outputs = {
+        outputs = {
             **(scan.partial_outputs or {}),
             "last_successful_stage": stage,
         }
+        if self.execution_lease is not None:
+            now = datetime.now(UTC)
+            result = self.session.execute(
+                update(ScanRunORM)
+                .where(
+                    ScanRunORM.id == self.execution_lease.scan_id,
+                    ScanRunORM.status == "running",
+                    ScanRunORM.worker_id == self.execution_lease.worker_id,
+                    ScanRunORM.lease_token == self.execution_lease.lease_token,
+                    ScanRunORM.lease_expires_at.is_not(None),
+                    ScanRunORM.lease_expires_at > now,
+                )
+                .values(progress_stage=stage, partial_outputs=outputs)
+            )
+            if int(getattr(result, "rowcount", 0) or 0) != 1:
+                self.session.rollback()
+                raise ScanLeaseLost(
+                    f"Worker lease was lost before scan {scan.id} could enter stage {stage}."
+                )
+        else:
+            scan.progress_stage = stage
+            scan.partial_outputs = outputs
         self.session.commit()
+        self.session.refresh(scan)
+
+    def _ensure_lease(self, *, lock: bool = False) -> None:
+        if self.execution_lease is not None:
+            assert_current_scan_lease(
+                self.session,
+                self.execution_lease,
+                lock=lock,
+            )
 
     def _save_assessment_records(
         self,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import getpass
 import json
 import signal
 import subprocess
@@ -35,7 +36,13 @@ from rank_rent.replay import (
 from rank_rent.repositories import market_from_orm, service_from_orm, upsert_market, upsert_service
 from rank_rent.runtime import ConfigurationError, DataMode, validate_runtime_mode
 from rank_rent.services.billing import reconcile_billing_csv
-from rank_rent.services.cost_controls import daily_usage, evaluate_alerts
+from rank_rent.services.cost_controls import (
+    daily_usage,
+    evaluate_alerts,
+    resolve_unknown_provider_call,
+)
+from rank_rent.services.dataforseo_qualification import run_dataforseo_qualification
+from rank_rent.services.locations import market_from_geography_record
 from rank_rent.services.qualification import (
     DATAFORSEO_ADAPTER_VERSION,
     current_qualification,
@@ -44,6 +51,7 @@ from rank_rent.services.qualification import (
 from rank_rent.services.scan_worker import run_worker_runtime
 from rank_rent.services.scanner import ScanPipeline, score_summary
 from rank_rent.services.seeds import load_markets, load_services
+from rank_rent.services.us_geography import USGeographyIndex
 from rank_rent.settings import get_settings
 from rank_rent.site_generator.generator import build_site_config, generate_static_site
 
@@ -446,9 +454,44 @@ def data_usage() -> None:
         typer.echo(json.dumps(payload, indent=2))
 
 
+@data_app.command("resolve-unknown-call")
+def data_resolve_unknown_call(
+    api_call_id: int,
+    outcome: str,
+    actual_cost_usd: float,
+    reason: Annotated[str, typer.Option("--reason")],
+) -> None:
+    """Reconcile an ambiguous provider attempt without resending it."""
+    init_db()
+    with SessionLocal() as session:
+        row = resolve_unknown_provider_call(
+            session,
+            api_call_id=api_call_id,
+            outcome=outcome,
+            actual_cost_usd=actual_cost_usd,
+            resolution_note=reason,
+        )
+    typer.echo(
+        json.dumps(
+            {
+                "api_call_id": row.id,
+                "status": row.status,
+                "provider_outcome": row.provider_outcome,
+                "actual_cost_usd": row.actual_cost_usd,
+                "reconciled_at": row.reconciled_at.isoformat() if row.reconciled_at else None,
+            },
+            indent=2,
+        )
+    )
+
+
 @qualification_app.command("record")
-def qualification_record(results_path: Path, notes: str = "") -> None:
-    """Persist a complete externally-run qualification matrix; this command makes no calls."""
+def qualification_record(
+    results_path: Path,
+    override_reason: Annotated[str, typer.Option("--reason")],
+    notes: str = "",
+) -> None:
+    """Import audited manual results; imports never unlock production paid calls."""
     init_db()
     settings = get_settings()
     checks = json.loads(results_path.read_text())
@@ -465,11 +508,60 @@ def qualification_record(results_path: Path, notes: str = "") -> None:
             checks=checks,
             ttl_hours=settings.qualification_ttl_hours,
             notes=notes,
+            executed_by=getpass.getuser(),
+            override_reason=override_reason,
         )
     typer.echo(
         json.dumps(
             {
                 "status": row.status,
+                "adapter_version": row.adapter_version,
+                "qualified_at": row.qualified_at.isoformat(),
+                "expires_at": row.expires_at.isoformat(),
+                "execution_method": row.execution_method,
+                "gate_eligible": row.gate_eligible,
+                "warning": "Manual qualification records do not unlock production paid calls.",
+            },
+            indent=2,
+        )
+    )
+
+
+@qualification_app.command("run")
+def qualification_run(notes: str = "") -> None:
+    """Execute the production qualification matrix and persist hashed evidence."""
+    init_db()
+    settings = get_settings()
+    require_runtime_mode(DataMode.live)
+    service = ServiceFamily(
+        id="plumbing",
+        display_name="Plumbing Services",
+        seed_queries=["plumber", "plumbing repair"],
+        provider_categories=["plumber"],
+    )
+    matches = USGeographyIndex.from_settings(settings).search("St. Louis, MO", limit=1)
+    if not matches:
+        raise typer.BadParameter(
+            "The offline geography index could not resolve the qualification market."
+        )
+    market = market_from_geography_record(matches[0].record)
+    with SessionLocal() as session:
+        row = asyncio.run(
+            run_dataforseo_qualification(
+                session,
+                settings=settings,
+                service=service,
+                market=market,
+                executed_by=getpass.getuser(),
+                notes=notes,
+            )
+        )
+    typer.echo(
+        json.dumps(
+            {
+                "status": row.status,
+                "gate_eligible": row.gate_eligible,
+                "evidence_sha256": row.evidence_sha256,
                 "adapter_version": row.adapter_version,
                 "qualified_at": row.qualified_at.isoformat(),
                 "expires_at": row.expires_at.isoformat(),
@@ -500,6 +592,8 @@ def qualification_status() -> None:
                 "environment": environment,
                 "adapter_version": DATAFORSEO_ADAPTER_VERSION,
                 "expires_at": row.expires_at.isoformat() if row else None,
+                "execution_method": row.execution_method if row else None,
+                "evidence_sha256": row.evidence_sha256 if row else None,
             },
             indent=2,
         )

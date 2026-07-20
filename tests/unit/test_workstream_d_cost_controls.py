@@ -25,7 +25,7 @@ from rank_rent.services.cost_controls import (
 from rank_rent.services.qualification import (
     DATAFORSEO_ADAPTER_VERSION,
     REQUIRED_QUALIFICATION_CHECKS,
-    record_qualification,
+    record_executed_qualification,
 )
 from rank_rent.settings import Settings
 
@@ -53,13 +53,17 @@ def production_settings(**overrides: object) -> Settings:
 
 
 def qualify_and_reconcile(session, now: datetime) -> None:
-    record_qualification(
+    record_executed_qualification(
         session,
         provider="dataforseo-live",
         environment="production",
         adapter_version=DATAFORSEO_ADAPTER_VERSION,
-        checks={name: True for name in REQUIRED_QUALIFICATION_CHECKS},
+        checks={
+            name: {"passed": True, "evidence": {"source": "test-executor"}}
+            for name in REQUIRED_QUALIFICATION_CHECKS
+        },
         ttl_hours=24,
+        executed_by="test-suite",
         now=now,
     )
     session.add(
@@ -123,13 +127,17 @@ def test_production_call_requires_current_qualification_and_timely_reconciliatio
                 cache_miss=True,
                 now=now,
             )
-        record_qualification(
+        record_executed_qualification(
             session,
             provider="dataforseo-live",
             environment="production",
             adapter_version="old-adapter",
-            checks={name: True for name in REQUIRED_QUALIFICATION_CHECKS},
+            checks={
+                name: {"passed": True, "evidence": {"source": "test-executor"}}
+                for name in REQUIRED_QUALIFICATION_CHECKS
+            },
             ttl_hours=24,
+            executed_by="test-suite",
             now=now,
         )
         with pytest.raises(CircuitOpenError, match="adapter version"):
@@ -145,13 +153,17 @@ def test_production_call_requires_current_qualification_and_timely_reconciliatio
                 cache_miss=True,
                 now=now,
             )
-        record_qualification(
+        record_executed_qualification(
             session,
             provider="dataforseo-live",
             environment="production",
             adapter_version=DATAFORSEO_ADAPTER_VERSION,
-            checks={name: True for name in REQUIRED_QUALIFICATION_CHECKS},
+            checks={
+                name: {"passed": True, "evidence": {"source": "test-executor"}}
+                for name in REQUIRED_QUALIFICATION_CHECKS
+            },
             ttl_hours=1,
+            executed_by="test-suite",
             now=now - timedelta(hours=2),
         )
         with pytest.raises(CircuitOpenError, match="stale"):
@@ -167,13 +179,17 @@ def test_production_call_requires_current_qualification_and_timely_reconciliatio
                 cache_miss=True,
                 now=now,
             )
-        record_qualification(
+        record_executed_qualification(
             session,
             provider="dataforseo-live",
             environment="production",
             adapter_version=DATAFORSEO_ADAPTER_VERSION,
-            checks={name: True for name in REQUIRED_QUALIFICATION_CHECKS},
+            checks={
+                name: {"passed": True, "evidence": {"source": "test-executor"}}
+                for name in REQUIRED_QUALIFICATION_CHECKS
+            },
             ttl_hours=24,
+            executed_by="test-suite",
             now=now,
         )
         bootstrap = reserve_provider_call(

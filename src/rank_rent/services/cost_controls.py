@@ -15,6 +15,7 @@ from rank_rent.db.orm import (
     ScanRunORM,
 )
 from rank_rent.services.qualification import current_qualification
+from rank_rent.services.scan_leases import ScanExecutionLease, assert_current_scan_lease
 from rank_rent.settings import Settings
 
 
@@ -29,6 +30,7 @@ class UsageReservation:
     provider: str
     endpoint: str
     estimated_cost_usd: float
+    api_call_id: int | None = None
 
 
 def reserve_provider_call(
@@ -43,16 +45,29 @@ def reserve_provider_call(
     scan_profile: str,
     cache_miss: bool,
     require_current_qualification: bool = True,
+    api_call_id: int | None = None,
+    execution_lease: ScanExecutionLease | None = None,
     now: datetime | None = None,
 ) -> UsageReservation:
     called_at = now or datetime.now(UTC)
     usage_class = _usage_class(environment)
+    if execution_lease is not None:
+        assert_current_scan_lease(session, execution_lease, now=called_at, lock=True)
     _assert_switches(settings, environment=environment, scan_profile=scan_profile)
     if estimated_cost_usd > settings.single_call_abnormal_cost_usd:
         raise CircuitOpenError(
             f"Estimated endpoint cost ${estimated_cost_usd:.4f} exceeds the abnormal-call limit "
             f"${settings.single_call_abnormal_cost_usd:.4f}."
         )
+    api_call = None
+    if api_call_id is not None:
+        api_call = session.get(ApiCallORM, api_call_id, with_for_update=True)
+        if api_call is None:
+            raise CircuitOpenError(f"API call attempt {api_call_id} no longer exists.")
+        if api_call.reservation_state != "none" or api_call.attempt_state != "prepared":
+            raise CircuitOpenError(
+                f"API call attempt {api_call_id} is not eligible for a new reservation."
+            )
 
     summary = _locked_bucket(
         session,
@@ -87,6 +102,12 @@ def reserve_provider_call(
     if cache_miss:
         summary.cache_miss_count += 1
         endpoint_bucket.cache_miss_count += 1
+    if api_call is not None:
+        api_call.reservation_state = "reserved"
+        api_call.reservation_usage_date = called_at.date()
+        api_call.reservation_usage_class = usage_class
+        api_call.reservation_estimated_cost_usd = estimated_cost_usd
+        api_call.attempt_state = "reserved"
     session.commit()
     return UsageReservation(
         usage_date=called_at.date(),
@@ -94,7 +115,34 @@ def reserve_provider_call(
         provider=provider,
         endpoint=endpoint,
         estimated_cost_usd=estimated_cost_usd,
+        api_call_id=api_call_id,
     )
+
+
+def mark_provider_call_submitted(
+    session: Session,
+    reservation: UsageReservation,
+    *,
+    execution_lease: ScanExecutionLease | None = None,
+    now: datetime | None = None,
+) -> None:
+    submitted_at = now or datetime.now(UTC)
+    if execution_lease is not None:
+        assert_current_scan_lease(session, execution_lease, now=submitted_at, lock=True)
+    if reservation.api_call_id is None:
+        return
+    api_call = session.get(ApiCallORM, reservation.api_call_id, with_for_update=True)
+    if (
+        api_call is None
+        or api_call.reservation_state != "reserved"
+        or api_call.attempt_state != "reserved"
+    ):
+        raise CircuitOpenError("Provider call attempt is not reserved for submission.")
+    api_call.attempt_state = "in_flight"
+    api_call.provider_outcome = "submitted"
+    api_call.network_started_at = submitted_at
+    api_call.status = "in_flight"
+    session.commit()
 
 
 def finish_provider_call(
@@ -105,7 +153,21 @@ def finish_provider_call(
     failed: bool = False,
     schema_drift: bool = False,
     abnormal_cost: bool = False,
+    provider_outcome_unknown: bool = False,
+    now: datetime | None = None,
 ) -> None:
+    finished_at = now or datetime.now(UTC)
+    api_call = (
+        session.get(ApiCallORM, reservation.api_call_id, with_for_update=True)
+        if reservation.api_call_id is not None
+        else None
+    )
+    if api_call is not None and api_call.reservation_state in {
+        "finalized",
+        "released",
+        "reconciled_unknown",
+    }:
+        return
     for endpoint in ("", reservation.endpoint):
         bucket = _locked_bucket(
             session,
@@ -118,14 +180,134 @@ def finish_provider_call(
             0.0,
             bucket.reserved_spend_usd - reservation.estimated_cost_usd,
         )
-        bucket.spend_usd += max(0.0, actual_cost_usd)
+        if provider_outcome_unknown:
+            bucket.unreconciled_spend_usd += reservation.estimated_cost_usd
+        else:
+            bucket.spend_usd += max(0.0, actual_cost_usd)
         if failed:
             bucket.provider_failure_count += 1
         if schema_drift:
             bucket.schema_drift_count += 1
         if abnormal_cost:
             bucket.abnormal_cost_count += 1
+    if api_call is not None:
+        api_call.reservation_state = (
+            "reconciled_unknown" if provider_outcome_unknown else "finalized"
+        )
+        api_call.reconciled_at = finished_at
+        if provider_outcome_unknown:
+            api_call.attempt_state = "provider_outcome_unknown"
+            api_call.provider_outcome = "unknown"
+            api_call.status = "provider_outcome_unknown"
     session.commit()
+
+
+def reconcile_stale_api_call_attempts(
+    session: Session,
+    *,
+    stale_before: datetime,
+    scan_run_id: int | None = None,
+    now: datetime | None = None,
+    commit: bool = True,
+) -> int:
+    reconciled_at = now or datetime.now(UTC)
+    statement = (
+        select(ApiCallORM)
+        .where(
+            ApiCallORM.attempt_state.in_({"prepared", "reserved", "in_flight"}),
+            ApiCallORM.started_at.is_not(None),
+            ApiCallORM.started_at < stale_before,
+        )
+        .order_by(ApiCallORM.id)
+        .with_for_update(skip_locked=True)
+    )
+    if scan_run_id is not None:
+        statement = statement.where(ApiCallORM.scan_run_id == scan_run_id)
+    rows = list(session.scalars(statement).all())
+    for row in rows:
+        if row.network_started_at is not None or row.attempt_state == "in_flight":
+            _reconcile_attempt_reservation(
+                session,
+                row,
+                unknown=True,
+                reconciled_at=reconciled_at,
+            )
+            row.status = "provider_outcome_unknown"
+            row.attempt_state = "provider_outcome_unknown"
+            row.provider_outcome = "unknown"
+            row.error_type = "StaleProviderAttempt"
+            row.error_summary = (
+                "Worker stopped after provider submission; outcome requires billing or "
+                "provider-side reconciliation and will not be retried automatically."
+            )
+        else:
+            _reconcile_attempt_reservation(
+                session,
+                row,
+                unknown=False,
+                reconciled_at=reconciled_at,
+            )
+            row.status = "failed_before_network"
+            row.attempt_state = "failed_before_network"
+            row.provider_outcome = "not_sent"
+            row.error_type = "StaleProviderAttempt"
+            row.error_summary = "Worker stopped before provider submission; reservation released."
+        row.completed_at = reconciled_at
+        row.reconciled_at = reconciled_at
+    if rows and commit:
+        session.commit()
+    return len(rows)
+
+
+def resolve_unknown_provider_call(
+    session: Session,
+    *,
+    api_call_id: int,
+    outcome: str,
+    actual_cost_usd: float,
+    resolution_note: str,
+    now: datetime | None = None,
+) -> ApiCallORM:
+    if outcome not in {"billed", "not_billed"}:
+        raise ValueError("outcome must be 'billed' or 'not_billed'.")
+    if actual_cost_usd < 0:
+        raise ValueError("actual_cost_usd cannot be negative.")
+    if not resolution_note.strip():
+        raise ValueError("An auditable resolution note is required.")
+    resolved_at = now or datetime.now(UTC)
+    row = session.get(ApiCallORM, api_call_id, with_for_update=True)
+    if (
+        row is None
+        or row.attempt_state != "provider_outcome_unknown"
+        or row.reservation_state not in {"none", "reconciled_unknown"}
+    ):
+        raise ValueError("API call is not awaiting provider-outcome reconciliation.")
+    estimated_cost = row.reservation_estimated_cost_usd
+    usage_class = row.reservation_usage_class or "testing"
+    if row.reservation_usage_date is not None:
+        for endpoint in ("", row.endpoint):
+            bucket = _locked_bucket(
+                session,
+                usage_date=row.reservation_usage_date,
+                usage_class=usage_class,
+                provider=row.provider,
+                endpoint=endpoint,
+            )
+            bucket.unreconciled_spend_usd = max(
+                0.0,
+                bucket.unreconciled_spend_usd - estimated_cost,
+            )
+            bucket.spend_usd += actual_cost_usd
+    row.actual_cost_usd = actual_cost_usd
+    row.attempt_state = "reconciled"
+    row.provider_outcome = outcome
+    row.reservation_state = "finalized"
+    row.status = "completed" if outcome == "billed" else "provider_confirmed_not_billed"
+    row.reconciled_at = resolved_at
+    row.completed_at = resolved_at
+    row.error_summary = f"{row.error_summary or ''}\nResolution: {resolution_note}".strip()
+    session.commit()
+    return row
 
 
 def record_unexpected_call(
@@ -169,13 +351,22 @@ def daily_usage(
     return {
         "production_requests_today": production.request_count if production else 0,
         "production_spend_today": production.spend_usd if production else 0.0,
+        "production_unreconciled_spend_today": (
+            production.unreconciled_spend_usd if production else 0.0
+        ),
         "testing_requests_today": testing.request_count if testing else 0,
         "testing_spend_today": testing.spend_usd if testing else 0.0,
+        "testing_unreconciled_spend_today": (
+            testing.unreconciled_spend_usd if testing else 0.0
+        ),
         "cache_misses": sum(row.cache_miss_count for row in summaries.values()),
         "unexpected_calls": sum(row.unexpected_call_count for row in summaries.values()),
         "abnormal_cost_calls": sum(row.abnormal_cost_count for row in summaries.values()),
         "provider_endpoint_spend": {
-            f"{row.usage_class}:{row.endpoint}": row.spend_usd for row in endpoints
+            f"{row.usage_class}:{row.endpoint}": (
+                row.spend_usd + row.unreconciled_spend_usd
+            )
+            for row in endpoints
         },
     }
 
@@ -203,7 +394,7 @@ def evaluate_alerts(
             if row.usage_class == "production"
             else settings.testing_daily_spend_usd
         )
-        spend = row.spend_usd + row.reserved_spend_usd
+        spend = row.spend_usd + row.reserved_spend_usd + row.unreconciled_spend_usd
         if row.unexpected_call_count:
             alerts.append("unexpected_paid_call")
         if row.abnormal_cost_count:
@@ -271,6 +462,15 @@ def evaluate_alerts(
         .limit(1)
     ):
         alerts.append("paid_call_without_plan")
+    if session.scalar(
+        select(ApiCallORM.id)
+        .where(
+            ApiCallORM.provider == provider,
+            ApiCallORM.status == "provider_outcome_unknown",
+        )
+        .limit(1)
+    ):
+        alerts.append("provider_outcome_unknown")
     latest_reconciliation = session.scalars(
         select(BillingReconciliationORM)
         .where(BillingReconciliationORM.provider == provider)
@@ -306,7 +506,12 @@ def _assert_durable_breakers(
     require_current_qualification: bool,
     now: datetime,
 ) -> None:
-    projected_spend = summary.spend_usd + summary.reserved_spend_usd + estimated_cost_usd
+    projected_spend = (
+        summary.spend_usd
+        + summary.reserved_spend_usd
+        + summary.unreconciled_spend_usd
+        + estimated_cost_usd
+    )
     if usage_class == "production":
         if summary.request_count >= settings.production_daily_request_limit:
             raise CircuitOpenError("Production daily request limit reached.")
@@ -406,3 +611,29 @@ def _aware_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def _reconcile_attempt_reservation(
+    session: Session,
+    api_call: ApiCallORM,
+    *,
+    unknown: bool,
+    reconciled_at: datetime,
+) -> None:
+    if api_call.reservation_state != "reserved" or api_call.reservation_usage_date is None:
+        return
+    usage_class = api_call.reservation_usage_class or "testing"
+    estimated_cost = api_call.reservation_estimated_cost_usd
+    for endpoint in ("", api_call.endpoint):
+        bucket = _locked_bucket(
+            session,
+            usage_date=api_call.reservation_usage_date,
+            usage_class=usage_class,
+            provider=api_call.provider,
+            endpoint=endpoint,
+        )
+        bucket.reserved_spend_usd = max(0.0, bucket.reserved_spend_usd - estimated_cost)
+        if unknown:
+            bucket.unreconciled_spend_usd += estimated_cost
+    api_call.reservation_state = "reconciled_unknown" if unknown else "released"
+    api_call.reconciled_at = reconciled_at

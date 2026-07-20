@@ -74,12 +74,12 @@ immediately. Repeated unexpected calls and excessive provider/schema failure rat
 
 ## Qualification Matrix
 
-The adapter version is `dataforseo-v3-workstream-d-1`. A qualification is current only when every
-required check passes, it has not expired, its provider/environment match, and its adapter version
-is exact. Adapter changes therefore invalidate previous results. The explicit qualification
-adapter path may run before that record exists, but it still honors credentials, production opt-in,
-the global paid-call switch, and all daily request/spend limits. Ordinary market scans cannot use
-this exception.
+The adapter version is `dataforseo-v3-workstream-d-2`. A qualification is current only when the
+executable runner produced evidence for every required check, every check passed, the record has
+not expired, its provider/environment match, and its adapter version is exact. Adapter changes
+therefore invalidate previous results. The qualification runner may run before a gate-eligible
+record exists, but it still honors credentials, production opt-in, the global paid-call switch,
+and all daily request/spend limits. Ordinary market scans cannot use this exception.
 
 Required JSON keys are:
 
@@ -89,15 +89,52 @@ serp_features, backlinks, business_listings, partial_tasks, rate_limits,
 billing_errors, authentication_errors, schema_drift
 ```
 
-Record results from a controlled qualification run without making another call:
+Run the controlled qualification matrix:
 
 ```bash
-rank-rent qualification record qualification-results.json
+rank-rent qualification run
 rank-rent qualification status
 ```
 
-`rank-rent qualify --live` is only an account/location smoke check and is explicitly not complete
-production qualification.
+The runner records per-check timestamps, sanitized evidence, failures, the executing operator, and
+a SHA-256 evidence digest. Positive provider checks execute against the configured environment;
+error handling and schema-drift checks execute deterministic adapter contract probes.
+
+Historical or externally supplied results may be retained for audit:
+
+```bash
+rank-rent qualification record qualification-results.json \
+  --reason "Imported historical provider certification"
+```
+
+Manual imports and overrides are always `gate_eligible=false`, even when every imported boolean is
+true. They never unlock production paid calls. `rank-rent qualify --live` remains only an
+account/location smoke check and is not complete production qualification.
+
+## Lease Loss And Ambiguous Calls
+
+Every asynchronous pipeline stage transition is conditioned on the current worker ID, lease token,
+running status, and unexpired lease. The same lease is checked transactionally before cost
+reservation and again before network submission. A failed heartbeat signals the active task to
+stop; an old worker cannot complete a stage after another worker owns the scan.
+
+API calls persist `prepared`, `reserved`, and `in_flight` attempt states. Recovery distinguishes:
+
+- Attempts stopped before network submission become `failed_before_network`, release reserved
+  spend, and may reuse the same planned request.
+- Attempts that may have reached the provider become `provider_outcome_unknown`, move estimated
+  cost into unreconciled spend, and permanently consume the planned request. They are never resent
+  automatically.
+
+Unknown outcomes open an operational alert and continue to count against the spend breaker until
+an operator reconciles the call as billed or not billed with an auditable note.
+
+```bash
+rank-rent data resolve-unknown-call CALL_ID billed ACTUAL_COST \
+  --reason "Matched provider billing export row 2026-07-20/abc123"
+rank-rent data resolve-unknown-call CALL_ID not_billed 0 \
+  --reason "Provider export and support case confirmed no request was accepted"
+```
 
 ## Billing Reconciliation
 

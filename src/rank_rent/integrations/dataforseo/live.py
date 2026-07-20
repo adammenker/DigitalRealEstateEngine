@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import re
+import uuid
 from datetime import UTC, datetime
 from typing import Any, cast
 from urllib.parse import urlparse
@@ -30,11 +32,17 @@ from rank_rent.services.cost_controls import (
     CircuitOpenError,
     UsageReservation,
     finish_provider_call,
+    mark_provider_call_submitted,
     record_unexpected_call,
     reserve_provider_call,
 )
 from rank_rent.services.keywords import service_seed_keywords
 from rank_rent.services.qualification import DATAFORSEO_ADAPTER_VERSION
+from rank_rent.services.scan_leases import (
+    ScanExecutionLease,
+    ScanLeaseLost,
+    assert_current_scan_lease,
+)
 from rank_rent.services.us_geography import validate_market_against_index
 from rank_rent.settings import Settings, get_settings
 from rank_rent.storage.blobs import build_blob_store
@@ -215,6 +223,7 @@ class DataForSEOLiveProvider:
         self.force_refresh = force_refresh
         self.allow_unplanned_requests = allow_unplanned_requests
         self.current_scan_run_id: int | None = None
+        self.execution_lease: ScanExecutionLease | None = None
 
     async def check_account(self) -> dict[str, Any]:
         payload = await self._get("/v3/appendix/user_data")
@@ -559,6 +568,7 @@ class DataForSEOLiveProvider:
         api_call = self._start_api_call(path, normalized)
         reservation: UsageReservation | None = None
         payload: dict[str, Any] | None = None
+        response: httpx.Response | None = None
         usage_finalized = False
         try:
             if self.session is not None and api_call is not None:
@@ -573,13 +583,22 @@ class DataForSEOLiveProvider:
                     scan_profile="testing" if self.allow_unplanned_requests else self.scan_depth,
                     cache_miss=True,
                     require_current_qualification=not self.allow_unplanned_requests,
+                    api_call_id=api_call.id,
+                    execution_lease=self.execution_lease,
                 )
+                mark_provider_call_submitted(
+                    self.session,
+                    reservation,
+                    execution_lease=self.execution_lease,
+                )
+            self._assert_execution_lease()
             async with self._client() as client:
                 if method == "GET":
                     response = await client.get(path)
                 else:
                     tasks = cast(list[dict[str, Any]], normalized.get("tasks") or [])
                     response = await client.post(path, json=tasks)
+            self._assert_execution_lease()
             payload = self._parse_response(response)
 
             key = self._cache_set(path, normalized, payload, status_code=response.status_code)
@@ -602,10 +621,28 @@ class DataForSEOLiveProvider:
                 )
                 usage_finalized = True
             return payload
+        except asyncio.CancelledError:
+            self._finish_unknown_attempt(api_call, reservation)
+            raise
         except Exception as exc:
+            before_network = api_call is not None and api_call.network_started_at is None
+            ambiguous = (
+                reservation is not None
+                and api_call is not None
+                and api_call.network_started_at is not None
+                and (response is None or isinstance(exc, ScanLeaseLost))
+            )
             self._finish_api_call(
                 api_call,
-                status="blocked" if isinstance(exc, CircuitOpenError) else "failed",
+                status=(
+                    "provider_outcome_unknown"
+                    if ambiguous
+                    else "blocked"
+                    if isinstance(exc, CircuitOpenError)
+                    else "failed_before_network"
+                    if before_network
+                    else "failed"
+                ),
                 error=exc,
                 commit=reservation is None,
             )
@@ -616,8 +653,35 @@ class DataForSEOLiveProvider:
                     actual_cost_usd=self._payload_cost(payload) if payload is not None else 0,
                     failed=not isinstance(exc, CircuitOpenError),
                     schema_drift=isinstance(exc, DataForSEOSchemaError),
+                    provider_outcome_unknown=ambiguous,
                 )
             raise
+
+    def _assert_execution_lease(self) -> None:
+        if self.session is not None and self.execution_lease is not None:
+            assert_current_scan_lease(self.session, self.execution_lease)
+
+    def _finish_unknown_attempt(
+        self,
+        api_call: ApiCallORM | None,
+        reservation: UsageReservation | None,
+    ) -> None:
+        if api_call is None or reservation is None or self.session is None:
+            return
+        ambiguous = api_call.network_started_at is not None
+        self._finish_api_call(
+            api_call,
+            status="provider_outcome_unknown" if ambiguous else "failed_before_network",
+            error=ScanLeaseLost("Provider request interrupted after scan lease loss."),
+            commit=False,
+        )
+        finish_provider_call(
+            self.session,
+            reservation,
+            actual_cost_usd=0,
+            failed=not ambiguous,
+            provider_outcome_unknown=ambiguous,
+        )
 
     def _cache_row(self, path: str, params: dict[str, Any]) -> RawApiResponseORM | None:
         if self.cache is None:
@@ -659,7 +723,7 @@ class DataForSEOLiveProvider:
             params,
             cache_hit=False,
             force_refresh=self.force_refresh,
-            status="running",
+            status="prepared",
         )
 
     def _finish_api_call(
@@ -674,6 +738,8 @@ class DataForSEOLiveProvider:
         commit: bool = True,
     ) -> None:
         if row is None:
+            return
+        if row.status == "provider_outcome_unknown" and status != "provider_outcome_unknown":
             return
         row.status = status
         row.completed_at = datetime.now(UTC)
@@ -695,6 +761,21 @@ class DataForSEOLiveProvider:
         if error is not None:
             row.error_type = type(error).__name__
             row.error_summary = str(error)
+        if status == "completed":
+            row.attempt_state = "completed"
+            row.provider_outcome = "completed"
+        elif status == "cache_hit":
+            row.attempt_state = "cache_hit"
+            row.provider_outcome = "not_sent"
+        elif status == "provider_outcome_unknown":
+            row.attempt_state = "provider_outcome_unknown"
+            row.provider_outcome = "unknown"
+        elif status in {"failed_before_network", "blocked"}:
+            row.attempt_state = status
+            row.provider_outcome = "not_sent"
+        elif status == "failed":
+            row.attempt_state = "failed"
+            row.provider_outcome = "failed"
         if self.session is not None:
             self.session.flush()
             if commit:
@@ -738,7 +819,7 @@ class DataForSEOLiveProvider:
                 select(ApiCallORM.planned_request_id).where(
                     ApiCallORM.scan_run_id == self.current_scan_run_id,
                     ApiCallORM.planned_request_id.is_not(None),
-                    ApiCallORM.status != "failed",
+                    ApiCallORM.status.not_in({"failed", "failed_before_network", "blocked"}),
                 )
             ).all()
         )
@@ -810,12 +891,27 @@ class DataForSEOLiveProvider:
                 .where(
                     ApiCallORM.scan_run_id == self.current_scan_run_id,
                     ApiCallORM.planned_request_id == planned_request_id,
-                    ApiCallORM.status == "failed",
+                    ApiCallORM.status.in_({"failed", "failed_before_network", "blocked"}),
                 )
                 .limit(1)
             ).first()
             if retry_row is not None:
                 retry_row.status = status
+                retry_row.attempt_state = "cache_hit" if status == "cache_hit" else "prepared"
+                retry_row.provider_outcome = "not_sent"
+                retry_row.reservation_state = "none"
+                retry_row.reservation_usage_date = None
+                retry_row.reservation_usage_class = None
+                retry_row.reservation_estimated_cost_usd = 0
+                retry_row.network_started_at = None
+                retry_row.reconciled_at = None
+                retry_row.attempt_token = uuid.uuid4().hex
+                retry_row.execution_worker_id = (
+                    self.execution_lease.worker_id if self.execution_lease else None
+                )
+                retry_row.execution_lease_token = (
+                    self.execution_lease.lease_token if self.execution_lease else None
+                )
                 retry_row.started_at = now
                 retry_row.completed_at = now if status == "cache_hit" else None
                 retry_row.error_type = None
@@ -838,13 +934,25 @@ class DataForSEOLiveProvider:
             cache_key=raw_response.cache_key if raw_response else self._cache_key(path, params),
             cache_hit=cache_hit,
             force_refresh=force_refresh,
-            estimated_cost_usd=float(plan.get("estimated_cost_usd") or 0),
+            estimated_cost_usd=float(
+                plan.get("estimated_cost_usd") or self._unplanned_estimated_cost(path)
+            ),
             actual_cost_usd=0,
             status=status,
             started_at=now,
             completed_at=now if status == "cache_hit" else None,
             provider_task_id=raw_response.provider_task_id if raw_response else None,
             provider_request_id=raw_response.provider_request_id if raw_response else None,
+            attempt_token=uuid.uuid4().hex,
+            attempt_state="cache_hit" if status == "cache_hit" else "prepared",
+            provider_outcome="not_sent",
+            reservation_state="none",
+            execution_worker_id=(
+                self.execution_lease.worker_id if self.execution_lease else None
+            ),
+            execution_lease_token=(
+                self.execution_lease.lease_token if self.execution_lease else None
+            ),
         )
         self.session.add(row)
         try:
@@ -908,6 +1016,18 @@ class DataForSEOLiveProvider:
         if "business_listings" in path:
             return "provider_discovery"
         return "unknown"
+
+    def _unplanned_estimated_cost(self, path: str) -> float:
+        if not self.allow_unplanned_requests or self.api_environment != "production":
+            return 0.0
+        endpoint_costs = {
+            "/v3/dataforseo_labs/google/keyword_suggestions/live": 0.012,
+            "/v3/dataforseo_labs/google/historical_search_volume/live": 0.012,
+            "/v3/serp/google/organic/live/advanced": 0.002,
+            "/v3/backlinks/summary/live": 0.02,
+            "/v3/business_data/business_listings/search/live": 0.01,
+        }
+        return endpoint_costs.get(path, 0.0)
 
     def _client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(

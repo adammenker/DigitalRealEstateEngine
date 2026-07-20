@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -7,12 +8,17 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 
 from rank_rent.db.base import Base, make_engine
-from rank_rent.db.orm import ApiCallORM, BillingReconciliationORM
+from rank_rent.db.orm import (
+    ApiCallORM,
+    BillingReconciliationORM,
+    ImmutableQualificationEvidenceError,
+)
 from rank_rent.services.billing import reconcile_billing_csv
 from rank_rent.services.qualification import (
     DATAFORSEO_ADAPTER_VERSION,
     REQUIRED_QUALIFICATION_CHECKS,
     current_qualification,
+    execute_qualification,
     record_qualification,
 )
 
@@ -93,20 +99,30 @@ def test_billing_csv_reconciliation_surfaces_unmatched_charges(tmp_path: Path) -
     assert report["difference"] == pytest.approx(0.5)
 
 
-def test_qualification_requires_every_check_and_expires() -> None:
+def test_manual_qualification_is_audited_but_never_unlocks_production() -> None:
     Session = make_session()
     now = datetime.now(UTC)
     with Session() as session:
-        failed = record_qualification(
+        imported = record_qualification(
             session,
             provider="dataforseo-live",
             environment="production",
             adapter_version=DATAFORSEO_ADAPTER_VERSION,
-            checks={"account_access": True},
+            checks={name: True for name in REQUIRED_QUALIFICATION_CHECKS},
             ttl_hours=24,
+            executed_by="operator@example.com",
+            override_reason="Historical qualification import",
             now=now,
         )
-        assert failed.status == "failed"
+        assert imported.status == "passed"
+        assert imported.execution_method == "manual_import"
+        assert imported.gate_eligible is False
+        assert imported.executed_by == "operator@example.com"
+        assert imported.override_reason == "Historical qualification import"
+        imported.notes = "attempted rewrite"
+        with pytest.raises(ImmutableQualificationEvidenceError):
+            session.commit()
+        session.rollback()
         assert (
             current_qualification(
                 session,
@@ -117,16 +133,59 @@ def test_qualification_requires_every_check_and_expires() -> None:
             )
             is None
         )
-        passed = record_qualification(
-            session,
-            provider="dataforseo-live",
-            environment="production",
-            adapter_version=DATAFORSEO_ADAPTER_VERSION,
-            checks={name: {"passed": True} for name in REQUIRED_QUALIFICATION_CHECKS},
-            ttl_hours=1,
-            now=now + timedelta(minutes=1),
+
+
+def test_executable_qualification_requires_evidence_and_expires() -> None:
+    Session = make_session()
+    now = datetime.now(UTC)
+
+    class Executor:
+        async def execute_check(self, check_name: str) -> dict[str, object]:
+            return {
+                "passed": check_name != "schema_drift",
+                "source": "executed-test-probe",
+            }
+
+    class PassingExecutor:
+        async def execute_check(self, check_name: str) -> dict[str, object]:
+            return {
+                "passed": True,
+                "source": "executed-test-probe",
+                "check": check_name,
+            }
+
+    with Session() as session:
+        failed = asyncio.run(
+            execute_qualification(
+                session,
+                provider="dataforseo-live",
+                environment="production",
+                adapter_version=DATAFORSEO_ADAPTER_VERSION,
+                executor=Executor(),
+                ttl_hours=1,
+                executed_by="test-suite",
+                now=now,
+            )
+        )
+        assert failed.status == "failed"
+        assert failed.gate_eligible is False
+        passed = asyncio.run(
+            execute_qualification(
+                session,
+                provider="dataforseo-live",
+                environment="production",
+                adapter_version=DATAFORSEO_ADAPTER_VERSION,
+                executor=PassingExecutor(),
+                ttl_hours=1,
+                executed_by="test-suite",
+                now=now + timedelta(minutes=1),
+            )
         )
         assert passed.status == "passed"
+        assert passed.execution_method == "executable_runner"
+        assert passed.gate_eligible is True
+        assert passed.evidence_sha256 is not None
+        assert len(passed.evidence_sha256) == 64
         assert (
             current_qualification(
                 session,
@@ -137,15 +196,19 @@ def test_qualification_requires_every_check_and_expires() -> None:
             )
             is not None
         )
-        record_qualification(
-            session,
-            provider="dataforseo-live",
-            environment="production",
-            adapter_version=DATAFORSEO_ADAPTER_VERSION,
-            checks={"account_access": False},
-            ttl_hours=1,
-            now=now + timedelta(minutes=31),
+        failed_again = asyncio.run(
+            execute_qualification(
+                session,
+                provider="dataforseo-live",
+                environment="production",
+                adapter_version=DATAFORSEO_ADAPTER_VERSION,
+                executor=Executor(),
+                ttl_hours=1,
+                executed_by="test-suite",
+                now=now + timedelta(minutes=31),
+            )
         )
+        assert failed_again.status == "failed"
         assert (
             current_qualification(
                 session,

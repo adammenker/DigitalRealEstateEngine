@@ -73,12 +73,12 @@ bundle export verify the stored checksum before returning evidence.
 
 ## Migration Policy
 
-Revision `c9a4e7d2b6f1` is the Workstream C migration and directly follows the prior head
-`b7d2f4a9c6e1`. Workstream D revision `6f4c2d8a9b17` follows it, and lead-delivery /
-decision-lineage revision `a6e2c9f4d7b1` is the current head. The C revision
-adds nullable blob-location fields so existing prototype rows remain readable, plus required
-retention/encryption classifications for forward writes. SQLite and PostgreSQL both use this
-single linear Alembic chain.
+Revision `c9a4e7d2b6f1` adds blob metadata after the lead/outcome schema. Workstream D
+revision `6f4c2d8a9b17` follows it, then cache versioning `8a7d3f2c1b90`, durable lead
+delivery and decision lineage `a6e2c9f4d7b1`, and worker recovery `1a7d9c4e6b20`.
+The blob revision adds nullable location fields so existing prototype rows remain readable,
+plus required retention/encryption classifications for forward writes. SQLite and
+PostgreSQL both use this single linear Alembic chain.
 
 Disposable prototype databases may still be wiped at the declared production cutover. From
 that cutover onward, upgrades must use forward migrations; production databases must not be

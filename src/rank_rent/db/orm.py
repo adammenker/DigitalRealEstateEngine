@@ -335,6 +335,21 @@ class ApiCallORM(TimestampMixin, Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     provider_task_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     provider_request_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    attempt_token: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, unique=True, index=True
+    )
+    attempt_state: Mapped[str] = mapped_column(String(40), default="prepared", index=True)
+    provider_outcome: Mapped[str] = mapped_column(String(40), default="not_sent", index=True)
+    reservation_state: Mapped[str] = mapped_column(String(40), default="none", index=True)
+    reservation_usage_date: Mapped[date | None] = mapped_column(nullable=True)
+    reservation_usage_class: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    reservation_estimated_cost_usd: Mapped[float] = mapped_column(Float, default=0)
+    network_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    reconciled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    execution_worker_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    execution_lease_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class ProviderDailyUsageORM(TimestampMixin, Base):
@@ -357,6 +372,7 @@ class ProviderDailyUsageORM(TimestampMixin, Base):
     request_count: Mapped[int] = mapped_column(Integer, default=0)
     spend_usd: Mapped[float] = mapped_column(Float, default=0)
     reserved_spend_usd: Mapped[float] = mapped_column(Float, default=0)
+    unreconciled_spend_usd: Mapped[float] = mapped_column(Float, default=0)
     cache_miss_count: Mapped[int] = mapped_column(Integer, default=0)
     unexpected_call_count: Mapped[int] = mapped_column(Integer, default=0)
     abnormal_cost_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -376,6 +392,52 @@ class ProviderQualificationORM(TimestampMixin, Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     checks: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     notes: Mapped[str] = mapped_column(Text, default="")
+    execution_method: Mapped[str] = mapped_column(String(40), default="manual_import", index=True)
+    gate_eligible: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    evidence_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    executed_by: Mapped[str] = mapped_column(String(160), default="")
+    override_reason: Mapped[str] = mapped_column(Text, default="")
+
+
+class ImmutableQualificationEvidenceError(RuntimeError):
+    """Raised when persisted qualification evidence is modified."""
+
+
+_IMMUTABLE_QUALIFICATION_FIELDS = {
+    "provider",
+    "environment",
+    "adapter_version",
+    "status",
+    "qualified_at",
+    "expires_at",
+    "checks",
+    "notes",
+    "execution_method",
+    "gate_eligible",
+    "evidence_sha256",
+    "executed_by",
+    "override_reason",
+}
+
+
+def _reject_qualification_mutation(
+    _mapper: Mapper[ProviderQualificationORM],
+    _connection: Connection,
+    target: ProviderQualificationORM,
+) -> None:
+    state = inspect(target)
+    changed = sorted(
+        field
+        for field in _IMMUTABLE_QUALIFICATION_FIELDS
+        if state.attrs[field].history.has_changes()
+    )
+    if changed:
+        raise ImmutableQualificationEvidenceError(
+            "Qualification evidence is immutable after insert: " + ", ".join(changed)
+        )
+
+
+event.listen(ProviderQualificationORM, "before_update", _reject_qualification_mutation)
 
 
 class BillingReconciliationORM(TimestampMixin, Base):
